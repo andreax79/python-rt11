@@ -2,3 +2,40 @@ python-rt11
 ===========
 
 Utility for reading/writing RT11 filesystems
+
+The file system must be logically mounted and assigned a logical device name before use.
+This is done with the MOUNT command.
+
+Usage example
+-------------
+
+```
+[SY:/Users/andreax/Devel/python-rt11] mount test: test.dsk
+?MOUNT-I-Disk test.dsk mounted to TEST:
+[SY:/Users/andreax/Devel/python-rt11] test:
+[TEST:] dir
+BOS   .SAV    61  21-Nov-95    VCG   .SAV    40  24-Aug-92
+CLI   .SAV    26  24-Aug-92    FRUN  .SAV     4  24-Aug-92
+PRINT .SAV    31  24-Aug-92    WHOIS .SAV    24  24-Aug-92
+NETSPY.SAV    18  24-Aug-92    LOGIN .SAV    14  24-Aug-92
+NETCLK.SAV    17  24-Aug-92    SPQSRV.SAV    22  24-Aug-92
+PRTQ  .SAV    92  24-Aug-92    FINGER.SAV     6  24-Aug-92
+RSOLV .SAV    20  24-Aug-92    TELSRV.SAV    23  24-Aug-92
+TN    .SAV    35  24-Aug-92    LOGOUT.SAV    12  24-Aug-92
+HOSTS .SAV    14  24-Aug-92    FTP   .SAV    29  24-Aug-92
+FTPSRV.SAV    27  24-Aug-92    SMTP  .SAV    39  24-Aug-92
+LOG   .SAV     9  24-Aug-92    SMPSRV.SAV    35  24-Aug-92
+CRMAIL.SAV    14  27-Apr-86    XNET  .SAV    25  24-Aug-92
+PING  .SAV    28  24-Aug-92    MSG   .SAV    59  27-Apr-86
+HELPF .SAV     7  01-Mar-80    UDP   .SAV    69  24-Aug-92
+SNDMSG.SAV    45  27-Apr-86    SYSMGR.SAV    37  05-Jul-83
+HELP  .TXT   382  24-Aug-92    LOG   .TXT   100  21-Nov-95
+UNSENT.MSG   100  21-Nov-95    < UNUSED >    29
+CAT   .MAC    13  31-Dec-88    CAT   .SAV     5  31-Dec-88
+< UNUSED >  8661
+ 35 Files, 1482 Blocks
+  8690 Free blocks
+[TEST:] copy *.txt sy:
+DK:HELP.TXT -> SY:/Users/andreax/Devel/python-rt11/HELP.TXT
+DK:LOG.TXT -> SY:/Users/andreax/Devel/python-rt11/LOG.TXT
+```
