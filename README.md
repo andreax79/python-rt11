@@ -6,6 +6,21 @@ Utility for reading/writing RT11 filesystems
 The file system must be logically mounted and assigned a logical device name before use.
 This is done with the MOUNT command.
 
+The following commands are availables:
+
+* CD              Changes or displays the current working drive and directory
+* COPY            Copies files
+* DEL             Removes files from a volume
+* DIR             Lists file directories
+* DISMOUNT        Disassociates a logical disk assignment from a file
+* EXIT            Exit the shell
+* HELP            Displays commands help
+* MOUNT           Assigns a logical disk unit to a file
+* PWD             Displays the current working drive and directory
+* SHELL           Executes a system shell command
+* SHOW            Displays the volume assignment
+* TYPE            Outputs files to the terminal
+
 Usage example
 -------------
 
