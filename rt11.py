@@ -6,7 +6,7 @@
 # of this software and associated documentation files (the "Software"), to
 # deal in the Software without restriction, including without limitation the
 # rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-# sell copies of the Software, and to permit persons to whom the Software is 
+# sell copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
 # The above copyright notice and this permission notice shall be included in
@@ -14,7 +14,7 @@
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
@@ -28,7 +28,6 @@ import copy
 import fnmatch
 import cmd
 import shlex
-import time
 import glob
 from datetime import date, datetime
 try:
@@ -56,13 +55,13 @@ E_EOS = 8
 E_READ = 64
 E_PROT = 128
 
-#    READ    =    0
+#    READ     =    0
 #    WRITE    =    0
 #    CLOSE    =    1
-#    DELETE    =    2
-#    LOOKUP    =    3
+#    DELETE   =    2
+#    LOOKUP   =    3
 #    ENTER    =    4
-#    RENAME    =    5
+#    RENAME   =    5
 
 RAD50 = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$.%0123456789:"
 
@@ -97,11 +96,11 @@ def rad2asc(val, position=0):
     b = RAD50[(val // 0x28) % 0x28]
     a = RAD50[val // (0x28 * 0x28)]
     result = ""
-    if a != '\0':
+    if a != "\0":
         result += a
-    if b != '\0':
+    if b != "\0":
         result += b
-    if c != '\0':
+    if c != "\0":
         result += c
     return result
 
@@ -109,7 +108,7 @@ def asc2rad(val):
     """
     Convert a string of 3 ASCII to a RAD50 word
     """
-    val = [RAD50.find(c.upper()) for c in val] + [0, 0, 0] 
+    val = [RAD50.find(c.upper()) for c in val] + [0, 0, 0]
     val = [x > 0 and x or 0 for x in val]
     val = (val[0]*0x28+val[1])*0x28+val[2]
     return word_to_str(val)
@@ -123,10 +122,10 @@ def rt11_to_date(val, position=0):
     if val == 0:
         return None
     #                   5432109876543210
-    year = val & int('0000000000011111', 2)
-    day = (val & int('0000001111100000', 2)) >> 5
-    month = (val & int('0011110000000000', 2)) >> 10
-    age = (val & int('1100000000000000', 2)) >> 14
+    year = val & int("0000000000011111", 2)
+    day = (val & int("0000001111100000", 2)) >> 5
+    month = (val & int("0011110000000000", 2)) >> 10
+    age = (val & int("1100000000000000", 2)) >> 14
     year = year + 1972 + age * 32
     if day == 0:
         day = 1
@@ -169,7 +168,7 @@ class NativeFile(object):
 
     def __init__(self, filename):
         self.filename = os.path.abspath(filename)
-        self.f = open(filename, mode='rb+')
+        self.f = open(filename, mode="rb+")
 
     def read_block(self, block_number, number_of_blocks=1):
         if block_number < 0 or number_of_blocks < 0:
@@ -217,7 +216,7 @@ class NativeDirectoryEntry(object):
         self.fullname = fullname
         self.filename = os.path.basename(fullname)
         self.filename, self.filetype = os.path.splitext(self.filename)
-        if self.filetype.startswith('.'):
+        if self.filetype.startswith("."):
             self.filetype = self.filename[1:]
         self.stat = os.stat(fullname)
         self.length = self.stat.st_size # length in bytes
@@ -255,7 +254,7 @@ class RT11DirectoryEntry(object):
         self.creation_date = rt11_to_date(self.raw_creation_date)
         self.extra_bytes = buffer[position + 14:position + 14 + extra_bytes]
         self.file_position = file_position
-    
+
     def to_bytes(self):
         out = []
         out.append(chr(self.type))
@@ -277,11 +276,11 @@ class RT11DirectoryEntry(object):
     @property
     def is_tentative(self):
         return self.clazz & E_TENT == E_TENT
-    
+
     @property
     def is_permanent(self):
         return self.clazz & E_PERM == E_PERM
-        
+
     @property
     def is_end_of_segment(self):
         return self.clazz & E_EOS == E_EOS
@@ -329,7 +328,7 @@ class RT11Segment(object):
     data_block_number = 0
     entries_list = None
     max_entries = 0
-    
+
     def __init__(self, fs, block_number):
         self.fs = fs
         if not block_number:
@@ -342,7 +341,7 @@ class RT11Segment(object):
         self.extra_bytes = str_to_word(t, 6)
         self.data_block_number = str_to_word(t, 8)
         self.entries_list = []
-        
+
         file_position = self.data_block_number
 
         self.max_entries = math.floor((1024.0 - 10.0) // (DIR_ENTRY_SIZE + self.extra_bytes))
@@ -366,7 +365,7 @@ class RT11Segment(object):
         out.append(word_to_str(self.data_block_number))
         out.extend([entry.to_bytes() for entry in self.entries_list])
         out = "".join(out)
-        return out + ('\0' * (BLOCK_SIZE*2-len(out)))
+        return out + ("\0" * (BLOCK_SIZE*2-len(out)))
 
     def write(self):
         self.fs.write_block(self.to_bytes(), self.block_number, 2)
@@ -438,7 +437,7 @@ class NativeFilesystem(object):
                 if v is not None:
                     yield v
         else:
-            if not pattern.startswith('/') and not pattern.startswith('\\'):
+            if not pattern.startswith("/") and not pattern.startswith("\\"):
                 pattern = os.path.join(self.base, self.pwd, pattern)
             if os.path.isdir(pattern):
                 pattern = os.path.join(pattern, "*")
@@ -457,17 +456,17 @@ class NativeFilesystem(object):
             yield NativeDirectoryEntry(os.path.join(dir, filename))
 
     def get_file_entry(self, fullname):
-        if not fullname.startswith('/') and not fullname.startswith('\\'):
+        if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         return NativeDirectoryEntry(fullname)
 
     def open_file(self, fullname):
-        if not fullname.startswith('/') and not fullname.startswith('\\'):
+        if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         return NativeFile(fullname)
 
     def get_file(self, fullname):
-        if not fullname.startswith('/') and not fullname.startswith('\\'):
+        if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         f = None
         try:
@@ -478,7 +477,7 @@ class NativeFilesystem(object):
                 f.close()
 
     def save_file(self, fullname, content):
-        if not fullname.startswith('/') and not fullname.startswith('\\'):
+        if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         f = None
         try:
@@ -490,7 +489,7 @@ class NativeFilesystem(object):
                 f.close()
 
     def chdir(self, fullname):
-        if not fullname.startswith('/') and not fullname.startswith('\\'):
+        if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         fullname = os.path.normpath(fullname)
         if os.path.isdir(os.path.join(self.base, fullname)):
@@ -502,12 +501,12 @@ class NativeFilesystem(object):
             return False
 
     def isdir(self, fullname):
-        if not fullname.startswith('/') and not fullname.startswith('\\'):
+        if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         return os.path.isdir(os.path.join(self.base, fullname))
 
     def exists(self, fullname):
-        if not fullname.startswith('/') and not fullname.startswith('\\'):
+        if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         return os.path.exists(os.path.join(self.base, fullname))
 
@@ -545,7 +544,7 @@ class NativeFilesystem(object):
 
 
 class RT11Filesystem(object):
-    
+
     dir_segment = None
     ver = None
     id = None
@@ -622,7 +621,7 @@ class RT11Filesystem(object):
         entry = self.allocate_space(fullname, length)
         if not entry:
             return False
-        content = content + ('\0' * BLOCK_SIZE)
+        content = content + ("\0" * BLOCK_SIZE)
         self.write_block(content, entry.file_position, entry.length)
         return True
 
@@ -641,7 +640,7 @@ class RT11Filesystem(object):
         if segment_number is None:
             return False
         # create the new segment
-        segment = Segment(self, None)
+        segment = RT11Segment(self, None)
         segment.block_number = segment_number
         segment.num_of_segments = self.segments[0].num_of_segments
         segment.next_logical_dir_segment = old_segment.next_logical_dir_segment
@@ -663,7 +662,7 @@ class RT11Filesystem(object):
         entry.clazz = entry.clazz | E_EOS
         segment.write()
         # Load the new segment
-        segment = Segment(self, segment_number)
+        segment = RT11Segment(self, segment_number)
         self.segments.insert(p, segment) # insert the segment after the old segment
         return True
 
@@ -726,7 +725,7 @@ class RT11Filesystem(object):
                 continue
             i = i + 1
             if x.is_empty or x.is_tentative:
-                fullname = "< UNUSED >"  
+                fullname = "< UNUSED >"
                 date = ""
                 unused = unused + x.length
             else:
@@ -771,11 +770,11 @@ class Volumes(object):
             # windows
             for letter in self._drive_letters():
                 self.volumes[letter] = NativeFilesystem("%s:" % letter)
-            self.volumes['DK'] = os.getcwd().split(":")[0]
+            self.volumes["DK"] = os.getcwd().split(":")[0]
         else:
             # posix
-            self.volumes['SY'] = NativeFilesystem()
-            self.volumes['DK'] = 'SY'
+            self.volumes["SY"] = NativeFilesystem()
+            self.volumes["DK"] = "SY"
 
     def _drive_letters(self):
         try:
@@ -793,9 +792,11 @@ class Volumes(object):
 
     def get(self, volume_id, required=False, cmd="KMON"):
         if volume_id is None:
-            volume_id = 'DK'
+            volume_id = "DK"
         elif volume_id.endswith(":"):
             volume_id = volume_id[:-1]
+        if volume_id.upper() == "LAST":
+            volume_id = self.last()
         v = self.volumes.get(volume_id.upper())
         if isinstance(v, basestring):
             v = self.volumes.get(v.upper())
@@ -805,20 +806,22 @@ class Volumes(object):
 
     def chdir(self, path):
         volume_id, fullname = splitdrive(path)
+        if volume_id.upper() == "LAST":
+            volume_id = self.last()
         fs = self.get(volume_id)
         if fs is None:
             return False
         if fullname and not fs.chdir(fullname):
             return False
-        if volume_id != 'DK':
+        if volume_id != "DK":
             self.set_default_volume(volume_id)
         return True
 
     def pwd(self):
         try:
-            return "%s:%s" % (self.volumes.get('DK'), self.get('DK').pwd)
+            return "%s:%s" % (self.volumes.get("DK"), self.get("DK").pwd)
         except:
-            return "%s:???" % (self.volumes.get('DK'))
+            return "%s:???" % (self.volumes.get("DK"))
 
     def set_default_volume(self, volume_id):
         """ Set the default volume """
@@ -826,9 +829,11 @@ class Volumes(object):
             return False
         if volume_id.endswith(":"):
             volume_id = volume_id[:-1]
+        if volume_id.upper() == "LAST":
+            volume_id = self.last()
         volume_id = volume_id.upper()
-        if volume_id != 'DK' and volume_id in self.volumes:
-            self.volumes['DK'] = volume_id
+        if volume_id != "DK" and volume_id in self.volumes:
+            self.volumes["DK"] = volume_id
         else:
             raise Exception("?KMON-F-Invalid volume")
 
@@ -838,7 +843,7 @@ class Volumes(object):
         volume_id, fullname = splitdrive(path)
         fs = self.get(volume_id, required=True, cmd="MOUNT")
         logical = logical.split(":")[0].upper()
-        if logical == 'DK':
+        if logical == "DK":
             raise Exception("?MOUNT-F-Illegal volume %s:" % volume_id)
         try:
             self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
@@ -848,9 +853,12 @@ class Volumes(object):
 
     def dismount(self, logical):
         logical = logical.split(":")[0].upper()
-        if logical == 'DK' or logical not in self.volumes:
+        if logical == "DK" or logical not in self.volumes:
             raise Exception("?DISMOUNT-F-Illegal volume %s:" % logical)
         del self.volumes[logical]
+
+    def last(self):
+        return list(self.volumes.keys())[-1]
 
 
 class Shell(cmd.Cmd):
@@ -863,7 +871,7 @@ class Shell(cmd.Cmd):
         self.history_file = os.path.expanduser(HISTORY_FILENAME)
         # Init readline and history
         if readline is not None:
-            if sys.platform == 'darwin':
+            if sys.platform == "darwin":
                 readline.parse_and_bind("bind ^I rl_complete")
             else:
                 readline.parse_and_bind("tab: complete")
@@ -877,7 +885,7 @@ class Shell(cmd.Cmd):
                 pass
 
     def completenames(self, text, *ignored):
-        dotext = 'do_'+text.lower()
+        dotext = "do_"+text.lower()
         return ["%s " % a[3:] for a in self.get_names() if a.startswith(dotext)] + \
                ["%s:" % a for a in self.volumes.volumes.keys() if a.startswith(text.upper()) ]
 
@@ -885,7 +893,7 @@ class Shell(cmd.Cmd):
         def add_slash(fs, filename):
             try:
                 if fs.isdir(filename):
-                    filename = filename + '/'
+                    filename = filename + "/"
                 return filename.replace(" ", "\\ ")
             except:
                 pass
@@ -911,12 +919,6 @@ class Shell(cmd.Cmd):
             pass # no problem :-)
         return []
 
-    def cmdloop(self):
-        try:
-            return cmd.Cmd.cmdloop(self, intro)
-        except KeyboardInterrupt:
-            sys.stdout.write("\n")
-
     def postloop(self):
         if readline is not None:
             # Cleanup and write history file
@@ -937,12 +939,6 @@ class Shell(cmd.Cmd):
     def postcmd(self, stop, line):
         self.prompt = "[%s] " % self.volumes.pwd()
         return stop
-
-    def parseline(self, line):
-        ccmd, arg, line = cmd.Cmd.parseline(self, line)
-        if ccmd is not None:
-            ccmd = ccmd.lower()
-        return ccmd, arg, line
 
     def onecmd(self, line):
         try:
@@ -1145,7 +1141,7 @@ DEL             Removes files from a volume
         for x in fs.filter_entries_list(pattern):
             match = True
             if not x.delete():
-                sys.stdout.write("?DEL-F-Error deleting %s\n" % s.fullname)
+                sys.stdout.write("?DEL-F-Error deleting %s\n" % x.fullname)
         if not match:
             raise Exception("?DEL-F-No files")
 
@@ -1266,7 +1262,7 @@ SHOW            Displays the volume assignment
         sys.stdout.write("Volumes\n")
         sys.stdout.write("-------\n")
         for k, v in self.volumes.volumes.items():
-            if k != 'DK':
+            if k != "DK":
                 sys.stdout.write("%-10s %s\n" % ("%s:" % k, v))
 
     def do_exit(self, line):
@@ -1291,7 +1287,7 @@ HELP            Displays commands help
         """
         if arg and arg != "*":
             try:
-                doc = getattr(self, 'do_' + arg).__doc__
+                doc = getattr(self, "do_" + arg).__doc__
                 if doc:
                     self.stdout.write("%s\n"%str(doc))
                     return
@@ -1302,13 +1298,12 @@ HELP            Displays commands help
             names = self.get_names()
             help = {}
             for name in names:
-                if name[:5] == 'help_':
+                if name[:5] == "help_":
                     help[name[5:]]=1
             for name in sorted(set(names)):
-                if name[:3] == 'do_':
+                if name[:3] == "do_":
                     cmd=name[3:]
                     if cmd in help:
-                        cmds_doc.append(cmd)
                         del help[cmd]
                     elif getattr(self, name).__doc__:
                         sys.stdout.write("%s\n" % getattr(self, name).__doc__.split("\n")[1])
@@ -1326,9 +1321,10 @@ SHELL           Executes a system shell command
     def do_EOF(self, line):
         return True
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     shell = Shell()
     for dsk in sys.argv[1:]:
         shell.volumes.mount(dsk)
     shell.cmdloop()
+    # shell.onecmd("DIR LAST:")
 
