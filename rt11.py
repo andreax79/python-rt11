@@ -29,6 +29,7 @@ import fnmatch
 import cmd
 import shlex
 import glob
+import argparse
 from datetime import date, datetime
 try:
     import readline
@@ -1317,10 +1318,19 @@ SHELL           Executes a system shell command
     def do_EOF(self, line):
         return True
 
-if __name__ == "__main__":
+def main():
     shell = Shell()
-    for dsk in sys.argv[1:]:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", action="append", metavar="command", help="command to be executed")
+    parser.add_argument("disk", nargs="*", help="disk to be mounted")
+    options = parser.parse_args()
+    for dsk in options.disk:
         shell.volumes.mount(dsk)
-    shell.cmdloop()
-    # shell.onecmd("DIR LAST:")
+    if options.c:
+        for command in options.c:
+            shell.onecmd(command)
+    else:
+        shell.cmdloop()
 
+if __name__ == "__main__":
+    main()
