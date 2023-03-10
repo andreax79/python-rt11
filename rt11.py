@@ -62,19 +62,11 @@ E_PROT = 128
 
 RAD50 = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$.%0123456789:"
 
-if sys.version_info[0] == 2:
-    def str_to_byte(val, position=0):
-        return ord(val[position])
+def str_to_byte(val, position=0):
+    return val[position]
 
-    def str_to_word(val, position=0):
-        return ord(val[1 + position]) * 256 + ord(val[0 + position])
-
-else:
-    def str_to_byte(val, position=0):
-        return val[position]
-
-    def str_to_word(val, position=0):
-        return val[1 + position] * 256 + val[0 + position]
+def str_to_word(val, position=0):
+    return val[1 + position] * 256 + val[0 + position]
 
 def byte_to_str(val):
     return chr(val)
