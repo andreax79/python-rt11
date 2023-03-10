@@ -35,10 +35,6 @@ try:
 except:
     readline = None
 
-if sys.version_info[0] > 2:
-    basestring = (str, bytes)
-    raw_input = input
-
 BLOCK_SIZE = 512
 
 HOMEBLK = 1
@@ -89,7 +85,7 @@ def rad2asc(val, position=0):
     """
     Convert RAD50 word to 0-3 chars of ASCII
     """
-    if isinstance(val, basestring):
+    if isinstance(val, (str, bytes)):
         val = str_to_word(val, position=position)
     # split out RAD50 digits into three ASCII characters a/b/c
     c = RAD50[val % 0x28]
@@ -117,7 +113,7 @@ def rt11_to_date(val, position=0):
     """
     Translate RT-11 time to python date
     """
-    if isinstance(val, basestring):
+    if isinstance(val, (str, bytes)):
         val = str_to_word(val, position=position)
     if val == 0:
         return None
@@ -798,7 +794,7 @@ class Volumes(object):
         if volume_id.upper() == "LAST":
             volume_id = self.last()
         v = self.volumes.get(volume_id.upper())
-        if isinstance(v, basestring):
+        if isinstance(v, (str, bytes)):
             v = self.volumes.get(v.upper())
         if required and v is None:
             raise Exception("?%s-F-Illegal volume %s:" % (cmd, volume_id))
@@ -980,7 +976,7 @@ DIR             Lists file directories
         DIR SY:
 
         """
-        if isinstance(line, basestring):
+        if isinstance(line, (str, bytes)):
             line = shlex.split(line)
         if len(line) > 1:
             sys.stdout.write("?DIR-F-Too many arguments\n")
@@ -1007,12 +1003,12 @@ TYPE            Outputs files to the terminal
         TYPE A.TXT
 
         """
-        if isinstance(line, basestring):
+        if isinstance(line, (str, bytes)):
             line = shlex.split(line)
         if not line:
             try:
                 while not line:
-                    line = raw_input("Files? ")
+                    line = input("Files? ")
             except KeyboardInterrupt:
                 sys.stdout.write("\n")
                 sys.stdout.write("\n")
@@ -1048,7 +1044,7 @@ COPY            Copies files
         COPY *.TXT DK:
 
         """
-        if isinstance(line, basestring):
+        if isinstance(line, (str, bytes)):
             line = shlex.split(line)
         if len(line) > 2:
             sys.stdout.write("?COPY-F-Too many arguments\n")
@@ -1059,7 +1055,7 @@ COPY            Copies files
             try:
                 cfrom = None
                 while not cfrom:
-                    cfrom = raw_input("From? ")
+                    cfrom = input("From? ")
             except KeyboardInterrupt:
                 sys.stdout.write("\n")
                 sys.stdout.write("\n")
@@ -1070,7 +1066,7 @@ COPY            Copies files
             try:
                 to = None
                 while not to:
-                    to = raw_input("To? ")
+                    to = input("To? ")
             except KeyboardInterrupt:
                 sys.stdout.write("\n")
                 sys.stdout.write("\n")
@@ -1120,12 +1116,12 @@ DEL             Removes files from a volume
         DEL *.OBJ
 
         """
-        if isinstance(line, basestring):
+        if isinstance(line, (str, bytes)):
             line = shlex.split(line)
         if not line:
             try:
                 while not line:
-                    line = raw_input("Files? ")
+                    line = input("Files? ")
             except KeyboardInterrupt:
                 sys.stdout.write("\n")
                 sys.stdout.write("\n")
@@ -1164,7 +1160,7 @@ MOUNT           Assigns a logical disk unit to a file
         MOUNT AB: SY:AB.DSK
 
         """
-        if isinstance(line, basestring):
+        if isinstance(line, (str, bytes)):
             line = shlex.split(line)
         if len(line) > 2:
             sys.stdout.write("?MOUNT-F-Too many arguments\n")
@@ -1175,7 +1171,7 @@ MOUNT           Assigns a logical disk unit to a file
             try:
                 logical = None
                 while not logical:
-                    logical = raw_input("Volume? ")
+                    logical = input("Volume? ")
             except KeyboardInterrupt:
                 sys.stdout.write("\n")
                 sys.stdout.write("\n")
@@ -1184,7 +1180,7 @@ MOUNT           Assigns a logical disk unit to a file
             try:
                 path = None
                 while not path:
-                    path = raw_input("File? ")
+                    path = input("File? ")
             except KeyboardInterrupt:
                 sys.stdout.write("\n")
                 sys.stdout.write("\n")
@@ -1205,7 +1201,7 @@ DISMOUNT        Disassociates a logical disk assignment from a file
         DISMOUNT AB:
 
         """
-        if isinstance(line, basestring):
+        if isinstance(line, (str, bytes)):
             line = shlex.split(line)
         if len(line) > 1:
             sys.stdout.write("?DISMOUNT-F-Too many arguments\n")
@@ -1215,7 +1211,7 @@ DISMOUNT        Disassociates a logical disk assignment from a file
             try:
                 logical = None
                 while not logical:
-                    logical = raw_input("Volume? ")
+                    logical = input("Volume? ")
             except KeyboardInterrupt:
                 sys.stdout.write("\n")
                 sys.stdout.write("\n")
@@ -1230,7 +1226,7 @@ CD              Changes or displays the current working drive and directory.
         CD [[volume:][filespec]]
 
         """
-        if isinstance(line, basestring):
+        if isinstance(line, (str, bytes)):
             line = shlex.split(line)
         if len(line) > 1:
             sys.stdout.write("?CD-F-Too many arguments\n")
