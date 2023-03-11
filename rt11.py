@@ -457,25 +457,16 @@ class NativeFilesystem(object):
     def get_file(self, fullname):
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
-        f = None
-        try:
-            f = open(fullname, "rb")
+        with open(fullname, "rb") as f:
             return f.read()
-        finally:
-            if f is not None:
-                f.close()
 
     def save_file(self, fullname, content):
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         f = None
-        try:
-            f = open(fullname, "wb")
+        with open(fullname, "wb") as f:
             f.write(content)
             return True
-        finally:
-            if f is not None:
-                f.close()
 
     def chdir(self, fullname):
         if not fullname.startswith("/") and not fullname.startswith("\\"):
