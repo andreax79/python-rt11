@@ -916,8 +916,11 @@ class Shell(cmd.Cmd):
         except KeyboardInterrupt:
             sys.stdout.write("\n")
 
-    def postcmd(self, stop, line):
+    def update_prompt(self):
         self.prompt = "[%s] " % self.volumes.pwd()
+
+    def postcmd(self, stop, line):
+        self.update_prompt()
         return stop
 
     def onecmd(self, line):
@@ -1305,10 +1308,14 @@ def main():
     shell = Shell()
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", action="append", metavar="command", help="command to be executed")
+    parser.add_argument("-d", "--dir", metavar="dir", help="working drive and directory")
     parser.add_argument("disk", nargs="*", help="disk to be mounted")
     options = parser.parse_args()
     for dsk in options.disk:
         shell.volumes.mount(dsk)
+    if options.dir:
+        shell.volumes.set_default_volume(options.dir)
+        shell.update_prompt()
     if options.c:
         for command in options.c:
             shell.onecmd(command)
