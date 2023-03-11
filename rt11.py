@@ -30,6 +30,7 @@ import cmd
 import shlex
 import glob
 import argparse
+import io
 from datetime import date, datetime
 try:
     import readline
@@ -45,12 +46,12 @@ DIR_ENTRY_SIZE = 14
 HISTORY_FILENAME = "~/.rt_history"
 HISTORY_LENGTH = 1000
 
-E_TENT = 1
-E_MPTY = 2
-E_PERM = 4
-E_EOS = 8
-E_READ = 64
-E_PROT = 128
+E_TENT = 1    # Tentative file
+E_MPTY = 2    # Empty area
+E_PERM = 4    # Permanent file
+E_EOS = 8     # End-of-segment marker
+E_READ = 64   # Protected from write
+E_PROT = 128  # Protected permanent file
 
 #    READ     =    0
 #    WRITE    =    0
@@ -299,12 +300,12 @@ class RT11DirectoryEntry(object):
     def __str__(self):
         return "%-11s" % self.fullname + \
                " %s" % (self.creation_date or "          ") + \
-               " length: %6s" % self.length + \
-               " type: %3x" % self.type + \
-               " class: %3x" % self.clazz + \
-               " job: %3d" % self.job + \
-               " chn: %3d" % self.channel + \
-               " pos: %3d" % self.file_position
+               " %6s" % self.length + \
+               " %5x" % self.type + \
+               " %5x" % self.clazz + \
+               " %3d" % self.job + \
+               " %3d" % self.channel + \
+               " %6d" % self.file_position
 
 
 class RT11Segment(object):
@@ -398,10 +399,16 @@ class RT11Segment(object):
         entry.segment.write()
 
     def __str__(self):
-        result = "segment - block_number: %d num_of_segments: %d highest_segment: %d max_entries: %d\n" % \
-                (self.block_number, self.num_of_segments, self.highest_segment, self.max_entries)
-        result = result + "\n".join("%02d#  %s" % (i, x) for i,x in enumerate(self.entries_list))
-        return result
+        buf = io.StringIO()
+        buf.write("\n*Segment\n")
+        buf.write("Block number:          %d\n" % self.block_number)
+        buf.write("Number of segments:    %d\n" % self.num_of_segments)
+        buf.write("Highest segment:       %d\n" % self.highest_segment)
+        buf.write("Max entries:           %d\n" % self.max_entries)
+        buf.write("\nNum  File        Date       Length  Type Class Job Chn  Block\n\n")
+        for i,x in enumerate(self.entries_list):
+            buf.write("%02d#  %s\n" % (i, x))
+        return buf.getvalue()
 
 
 class NativeFilesystem(object):
@@ -717,10 +724,11 @@ class RT11Filesystem(object):
             if x.is_protected_permanent:
                 attr = "P"
             elif x.is_protected_by_monitor:
-                attr ="A"
+                attr = "A"
             else:
                 attr = " "
             sys.stdout.write("%10s %5d%1s %9s" % (fullname, x.length, attr, date))
+            # sys.stdout.write(" %8d " % (x.file_position))
             if i % 2 == 1:
                 sys.stdout.write("    ")
             else:
@@ -731,7 +739,11 @@ class RT11Filesystem(object):
         sys.stdout.write(" %d Free blocks\n" % unused)
 
     def examine(self):
-        sys.stdout.write("dir_segment: %s ver: %s id: %d owner: %s sys_id: %s\n" % (self.dir_segment, self.ver, self.id, self.owner, self.sys_id))
+        sys.stdout.write("Directory segment:     %s\n" % self.dir_segment)
+        sys.stdout.write("System version:        %s\n" % self.ver)
+        sys.stdout.write("Volume identification: %s\n" % self.id.decode("ascii"))
+        sys.stdout.write("Owner name:            %s\n" % self.owner.decode("ascii"))
+        sys.stdout.write("System identification: %s\n" % self.sys_id.decode("ascii"))
         for s in self.segments:
             sys.stdout.write("%s\n" % s)
 
@@ -1129,6 +1141,13 @@ DEL             Removes files from a volume
             raise Exception("?DEL-F-No files")
 
     def do_examine(self, line):
+        """
+EXAMINE         Examine disk structure
+
+  SYNTAX
+        EXAMINE [volume:]
+
+        """
         volume_id, pattern = splitdrive(line or "")
         fs = self.volumes.get(volume_id, required=True)
         fs.examine()
