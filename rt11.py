@@ -20,18 +20,19 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
-import sys
-import stat
-import math
+import argparse
+import cmd
 import copy
 import fnmatch
-import cmd
-import shlex
 import glob
-import argparse
 import io
+import math
+import os
+import shlex
+import stat
+import sys
 from datetime import date, datetime
+
 try:
     import readline
 except:
