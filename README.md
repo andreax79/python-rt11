@@ -10,11 +10,14 @@ The following commands are availables:
 
 * CD              Changes or displays the current working drive and directory
 * COPY            Copies files
+* CREATE          Creates a file with a specific name and size
 * DEL             Removes files from a volume
 * DIR             Lists file directories
 * DISMOUNT        Disassociates a logical disk assignment from a file
+* EXAMINE         Examines disk/block/file structure
 * EXIT            Exit the shell
 * HELP            Displays commands help
+* INITIALIZE      Writes an RT–11 empty device directory on the specified volume
 * MOUNT           Assigns a logical disk unit to a file
 * PWD             Displays the current working drive and directory
 * SHELL           Executes a system shell command
@@ -54,3 +57,7 @@ CAT   .MAC    13  31-Dec-88    CAT   .SAV     5  31-Dec-88
 DK:HELP.TXT -> SY:/Users/andreax/Devel/python-rt11/HELP.TXT
 DK:LOG.TXT -> SY:/Users/andreax/Devel/python-rt11/LOG.TXT
 ```
+
+
+http://www.bitsavers.org/www.computer.museum.uq.edu.au/RT-11/DEC-11-ORPGA-A-D%20RT-11%20Software%20Support%20Manual.pdf
+http://bitsavers.trailing-edge.com/pdf/dec/pdp11/rt11/v5.6_Aug91/AA-PD6PA-TC_RT-11_Volume_and_File_Formats_Manual_Aug91.pdf
