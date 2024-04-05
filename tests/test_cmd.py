@@ -1,0 +1,60 @@
+import pytest
+
+from rt11 import NativeFilesystem, RT11Filesystem, Shell
+
+
+def test_cmds():
+    shell = Shell(verbose=True)
+    sys_fs = shell.volumes.get('DK')
+    license = sys_fs.read_bytes("LICENSE")
+    with pytest.raises(FileNotFoundError):
+        sys_fs.read_bytes("not found")
+    assert license
+    assert isinstance(sys_fs, NativeFilesystem)
+    assert len(list(sys_fs.entries_list)) > 0
+    shell.onecmd("HELP", batch=True)
+    shell.onecmd("HELP HELP", batch=True)
+    shell.onecmd("PWD", batch=True)
+    # Create ad initialize the RT-11 filesystem
+    shell.onecmd("CREATE test0.dsk 500", batch=True)
+    shell.onecmd("MOUNT T: test0.dsk", batch=True)
+    shell.onecmd("INITIALIZE T:", batch=True)
+    fs = shell.volumes.get('T')
+    assert isinstance(fs, RT11Filesystem)
+    with pytest.raises(FileNotFoundError):
+        fs.read_bytes("not found")
+    l0 = len(list(fs.entries_list))
+    # Copy a file
+    shell.onecmd("COPY LICENSE T:", batch=True)
+    assert len(list(fs.entries_list)) == l0 + 1
+    license_rt11 = fs.read_bytes("LICENSE").rstrip(b'\0')
+    assert license == license_rt11
+    # Create a disk in the RT11 fs
+    shell.onecmd("T:", batch=True)
+    shell.onecmd("EXAMINE", batch=True)
+    with pytest.raises(OSError):
+        shell.onecmd("CREATE test1.dsk 1000", batch=True)
+    shell.onecmd("CREATE test1.dsk 100", batch=True)
+    shell.onecmd("EXAMINE", batch=True)
+    shell.onecmd("MOUNT T1: test1.dsk", batch=True)
+    shell.onecmd("INITIALIZE T1:", batch=True)
+    shell.onecmd("DIR T1:*.*", batch=True)
+    shell.onecmd("COPY T:L*.* T1:", batch=True)
+    shell.onecmd("DISMOUNT T1:", batch=True)
+    shell.onecmd("T:", batch=True)
+    shell.onecmd("DEL test1.dsk", batch=True)
+    # Misc commands
+    shell.onecmd("PWD", batch=True)
+    shell.onecmd("SHOW", batch=True)
+    shell.onecmd("DIR", batch=True)
+    shell.onecmd("EXAMINE T:", batch=True)
+    shell.onecmd("EXAMINE T:LICENSE", batch=True)
+    shell.onecmd("EXAMINE T:6", batch=True)
+    shell.onecmd("TYPE T:LICENSE", batch=True)
+    # Delete the file
+    shell.onecmd("DEL LICENSE", batch=True)
+    assert len(list(fs.entries_list)) == l0
+    shell.onecmd("SY:", batch=True)
+    # Delete the test disk
+    shell.onecmd("DISMOUNT T:", batch=True)
+    shell.onecmd("DEL test0.dsk", batch=True)

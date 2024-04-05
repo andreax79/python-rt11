@@ -58,6 +58,8 @@ DK:HELP.TXT -> SY:/Users/andreax/Devel/python-rt11/HELP.TXT
 DK:LOG.TXT -> SY:/Users/andreax/Devel/python-rt11/LOG.TXT
 ```
 
+Links
+-----
 
-http://www.bitsavers.org/www.computer.museum.uq.edu.au/RT-11/DEC-11-ORPGA-A-D%20RT-11%20Software%20Support%20Manual.pdf
-http://bitsavers.trailing-edge.com/pdf/dec/pdp11/rt11/v5.6_Aug91/AA-PD6PA-TC_RT-11_Volume_and_File_Formats_Manual_Aug91.pdf
+[RT-11 Software Support Manual](http://www.bitsavers.org/www.computer.museum.uq.edu.au/RT-11/DEC-11-ORPGA-A-D%20RT-11%20Software%20Support%20Manual.pdf)
+[RT–11 Volume and File Formats Manual](http://bitsavers.trailing-edge.com/pdf/dec/pdp11/rt11/v5.6_Aug91/AA-PD6PA-TC_RT-11_Volume_and_File_Formats_Manual_Aug91.pdf)
