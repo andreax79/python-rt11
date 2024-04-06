@@ -253,6 +253,8 @@ class AbstractFile(ABC):
 
 class NativeFile(AbstractFile):
 
+    f: Union[io.BufferedReader, io.BufferedRandom]
+
     def __init__(self, filename: str):
         self.filename = os.path.abspath(filename)
         try:
@@ -686,7 +688,9 @@ class AbstractFilesystem(object):
     """Abstract base class for filesystem implementations"""
 
     @abstractmethod
-    def filter_entries_list(self, pattern: str, include_all: bool = False) -> Iterator["AbstractDirectoryEntry"]:
+    def filter_entries_list(
+        self, pattern: Optional[str], include_all: bool = False
+    ) -> Iterator["AbstractDirectoryEntry"]:
         """Filter directory entries based on a pattern"""
         pass
 
@@ -747,7 +751,7 @@ class AbstractFilesystem(object):
         pass
 
     @abstractmethod
-    def dir(self, pattern: str) -> None:
+    def dir(self, pattern: Optional[str]) -> None:
         """List directory contents."""
         pass
 
@@ -783,7 +787,9 @@ class NativeFilesystem(AbstractFilesystem):
         else:
             self.pwd = os.path.sep
 
-    def filter_entries_list(self, pattern: str, include_all: bool = False) -> Iterator["NativeDirectoryEntry"]:
+    def filter_entries_list(
+        self, pattern: Optional[str], include_all: bool = False
+    ) -> Iterator["NativeDirectoryEntry"]:
         if not pattern:
             for filename in os.listdir(os.path.join(self.base, self.pwd)):
                 try:
@@ -881,7 +887,7 @@ class NativeFilesystem(AbstractFilesystem):
             fullname = os.path.join(self.pwd, fullname)
         return os.path.exists(os.path.join(self.base, fullname))
 
-    def dir(self, pattern: str) -> None:
+    def dir(self, pattern: Optional[str]) -> None:
         for x in self.filter_entries_list(pattern):
             mode = x.stat.st_mode
             if stat.S_ISREG(mode):
@@ -997,7 +1003,7 @@ class RT11Filesystem(AbstractFilesystem):
             next_block_number = segment.next_block_number
             yield segment
 
-    def filter_entries_list(self, pattern: str, include_all: bool = False) -> Iterator["RT11DirectoryEntry"]:
+    def filter_entries_list(self, pattern: Optional[str], include_all: bool = False) -> Iterator["RT11DirectoryEntry"]:
         if pattern:
             pattern = rt11_canonical_filename(pattern, wildcard=True)
         for segment in self.read_dir_segments():
@@ -1156,7 +1162,7 @@ class RT11Filesystem(AbstractFilesystem):
         entry = self.get_file_entry(fullname)
         return entry is not None
 
-    def dir(self, pattern: str) -> None:
+    def dir(self, pattern: Optional[str]) -> None:
         i = 0
         files = 0
         blocks = 0
@@ -1378,14 +1384,12 @@ class Volumes(object):
         else:
             raise Exception("?KMON-F-Invalid volume")
 
-    def mount(self, path: str, logical: Optional[str] = None, verbose: bool = False) -> None:
-        if not logical:
-            logical = os.path.basename(path).split(".")[0]
+    def mount(self, path: str, logical: str, verbose: bool = False) -> None:
+        logical = logical.split(":")[0].upper()
+        if logical in ("SY", "DK") or not logical:
+            raise Exception(f"?MOUNT-F-Illegal volume {logical}:")
         volume_id, fullname = splitdrive(path)
         fs = self.get(volume_id, cmd="MOUNT")
-        logical = logical.split(":")[0].upper()
-        if logical in ("SY", "DK"):
-            raise Exception(f"?MOUNT-F-Illegal volume {logical}:")
         try:
             self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
             sys.stdout.write(f"?MOUNT-I-Disk {path} mounted to {logical}:\n")
@@ -1994,10 +1998,13 @@ def main() -> None:
     )
     options = parser.parse_args()
     shell = Shell(verbose=options.verbose)
-    for dsk in options.disk:
-        shell.volumes.mount(dsk, verbose=shell.verbose)
+    # Mount disks
+    for i, dsk in enumerate(options.disk):
+        shell.volumes.mount(dsk, f"DL{i}:", verbose=shell.verbose)
+    # Change dir
     if options.dir:
         shell.volumes.set_default_volume(options.dir)
+    # Execute the commands
     if options.c:
         try:
             for command in options.c:
