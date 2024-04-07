@@ -721,7 +721,7 @@ class AbstractFilesystem(object):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-    ) -> bool:
+    ) -> None:
         """Write content to a file"""
         pass
 
@@ -838,7 +838,7 @@ class NativeFilesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-    ) -> bool:
+    ) -> None:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         with open(fullname, "wb") as f:
@@ -847,7 +847,6 @@ class NativeFilesystem(AbstractFilesystem):
             # Set the creation and modification date of the file
             ts = datetime.combine(creation_date, datetime.min.time()).timestamp()
             os.utime(fullname, (ts, ts))
-        return True
 
     def create_file(
         self,
@@ -1009,7 +1008,7 @@ class RT11Filesystem(AbstractFilesystem):
         for segment in self.read_dir_segments():
             for entry in segment.entries_list:
                 if (not pattern) or fnmatch.fnmatch(entry.fullname, pattern):
-                    if not include_all and (entry.is_empty or entry.is_tentative):
+                    if not include_all and (entry.is_empty or entry.is_tentative or entry.is_end_of_segment):
                         continue
                     yield entry
 
@@ -1043,14 +1042,13 @@ class RT11Filesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-    ) -> bool:
+    ) -> None:
         length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
         entry = self.create_file(fullname, length, creation_date)
         if not entry:
             return False
         content = content + (b"\0" * BLOCK_SIZE)
         self.write_block(content, entry.file_position, entry.length)
-        return True
 
     def create_file(
         self,
@@ -1393,7 +1391,7 @@ class Volumes(object):
         try:
             self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
             sys.stdout.write(f"?MOUNT-I-Disk {path} mounted to {logical}:\n")
-        except:
+        except Exception:
             if verbose:
                 traceback.print_exc()
             sys.stdout.write(f"?MOUNT-F-Error mounting {path} to {logical}:\n")
@@ -1646,14 +1644,17 @@ COPY            Copies files
                 to = os.path.join(self.volumes.get(to_volume_id).get_pwd(), source.fullname)
             elif to and to_fs.isdir(to):
                 to = os.path.join(to, source.basename)
-            content = from_fs.read_bytes(source.fullname)
             entry = from_fs.get_file_entry(source.fullname)
             if not entry:
-                sys.stdout.write(f"?COPY-F-Error copying {source.fullname}\n")
-                return
+                raise Exception(f"?COPY-F-Error copying {source.fullname}")
             sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, source.fullname, to_volume_id, to))
-            if not to_fs.write_bytes(to, content, entry.creation_date):
-                sys.stdout.write(f"?COPY-F-Error copying {source.fullname}\n")
+            try:
+                content = from_fs.read_bytes(source.fullname)
+                to_fs.write_bytes(to, content, entry.creation_date)
+            except Exception:
+                if self.verbose:
+                    traceback.print_exc()
+                raise Exception(f"?COPY-F-Error copying {source.fullname}")
         else:
             if not to:
                 to = self.volumes.get(to_volume_id).get_pwd()
@@ -1664,10 +1665,14 @@ COPY            Copies files
                     target = os.path.join(to, entry.basename)
                 else:
                     target = entry.basename
-                content = from_fs.read_bytes(entry.fullname)
                 sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, entry.fullname, to_volume_id, target))
-                if not to_fs.write_bytes(target, content, entry.creation_date):
-                    sys.stdout.write(f"?COPY-F-Error copying {entry.fullname}\n")
+                try:
+                    content = from_fs.read_bytes(entry.fullname)
+                    to_fs.write_bytes(target, content, entry.creation_date)
+                except Exception:
+                    if self.verbose:
+                        traceback.print_exc()
+                    raise Exception(f"?COPY-F-Error copying {entry.fullname}")
 
     def do_del(self, line: str) -> None:
         # fmt: off
