@@ -968,9 +968,9 @@ class RT11Filesystem(AbstractFilesystem):
         t = self.read_block(HOMEBLK)
         self.dir_segment = bytes_to_word(t[468:470]) or DEFAULT_DIR_SEGMENT
         self.ver = rad2asc(t[470:472])
-        self.id = t[472:484].decode("ascii")
-        self.owner = t[484:496].decode("ascii")
-        self.sys_id = t[496:508].decode("ascii")
+        self.id = t[472:484].decode("ascii", "replace").replace("�", "?")
+        self.owner = t[484:496].decode("ascii", "replace").replace("�", "?")
+        self.sys_id = t[496:508].decode("ascii", "replace").replace("�", "?")
         self.checksum = bytes_to_word(t[510:512])
 
     def write_home(self) -> None:
