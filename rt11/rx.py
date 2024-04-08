@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Copyright (C) 2014 Andrea Bonomi <andrea.bonomi@gmail.com>
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,7 +18,39 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from rt11.shell import main
+from .commons import BLOCK_SIZE
 
-if __name__ == "__main__":
-    main()
+__all__ = [
+    "RX_SECTOR_TRACK",
+    "RX_TRACK_DISK",
+    "RX01_SECTOR_SIZE",
+    "RX02_SECTOR_SIZE",
+    "RX01_SIZE",
+    "RX02_SIZE",
+    "rxfactr",
+]
+
+RX_SECTOR_TRACK = 26  # sectors/track
+RX_TRACK_DISK = 77  # track/disk
+RX01_SECTOR_SIZE = 128  # RX01 bytes/sector
+RX02_SECTOR_SIZE = 256  # RX02 bytes/sector
+RX01_SIZE = RX_TRACK_DISK * RX_SECTOR_TRACK * RX01_SECTOR_SIZE  # RX01 Capacity
+RX02_SIZE = RX_TRACK_DISK * RX_SECTOR_TRACK * RX02_SECTOR_SIZE  # RX02 Capacity
+
+
+def rxfactr(blkno: int, sector_size: int) -> int:
+    """
+    Calculates the physical position on the disk for a given logical sector
+    """
+    if sector_size == RX01_SECTOR_SIZE or sector_size == RX02_SECTOR_SIZE:
+        track = blkno // RX_SECTOR_TRACK + 1
+        i = (blkno % RX_SECTOR_TRACK) << 1
+        if i >= RX_SECTOR_TRACK:
+            i += 1
+        sector = ((i + (6 * (track - 1))) % RX_SECTOR_TRACK) + 1
+        if track >= RX_TRACK_DISK:
+            track = 0
+        position = track * 3328 + (sector - 1) * sector_size
+    else:
+        position = blkno * BLOCK_SIZE
+    return position

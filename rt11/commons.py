@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Copyright (C) 2014 Andrea Bonomi <andrea.bonomi@gmail.com>
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,7 +18,38 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from rt11.shell import main
+__all__ = [
+    "BLOCK_SIZE",
+    "bytes_to_word",
+    "word_to_bytes",
+    "splitdrive",
+]
 
-if __name__ == "__main__":
-    main()
+from typing import Tuple
+
+BLOCK_SIZE = 512
+
+
+def bytes_to_word(val: bytes, position: int = 0) -> int:
+    """
+    Converts two bytes to a single integer (word)
+    """
+    return val[1 + position] << 8 | val[0 + position]
+
+
+def word_to_bytes(val: int) -> bytes:
+    """
+    Converts an integer (word) to two bytes
+    """
+    return bytes([val % 256, val // 256])
+
+
+def splitdrive(path: str) -> Tuple[str, str]:
+    """
+    Split a pathname into drive and path.
+    """
+    result = path.split(":", 1)
+    if len(result) < 2:
+        return ("DK", path)
+    else:
+        return (result[0].upper(), result[1])

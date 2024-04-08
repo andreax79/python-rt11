@@ -1,6 +1,8 @@
 import pytest
 
-from rt11 import NativeFilesystem, RT11Filesystem, Shell
+from rt11.native import NativeFilesystem
+from rt11.rt11fs import RT11Filesystem
+from rt11.shell import Shell
 
 
 def test_cmds():

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Copyright (C) 2014 Andrea Bonomi <andrea.bonomi@gmail.com>
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,7 +18,41 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from rt11.shell import main
+__all__ = [
+    "RAD50",
+    "rad2asc",
+    "asc2rad",
+]
 
-if __name__ == "__main__":
-    main()
+from .commons import bytes_to_word, word_to_bytes
+
+RAD50 = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$.%0123456789:"
+
+
+def rad2asc(buffer: bytes, position: int = 0) -> str:
+    """
+    Convert RAD50 2 bytes to 0-3 chars of ASCII
+    """
+    val = bytes_to_word(buffer, position=position)
+    # split out RAD50 digits into three ASCII characters a/b/c
+    c = RAD50[val % 0x28]
+    b = RAD50[(val // 0x28) % 0x28]
+    a = RAD50[val // (0x28 * 0x28)]
+    result = ""
+    if a != "\0":
+        result += a
+    if b != "\0":
+        result += b
+    if c != "\0":
+        result += c
+    return result
+
+
+def asc2rad(val: str) -> bytes:
+    """
+    Convert a string of 3 ASCII to a RAD50 2 bytes
+    """
+    val1 = [RAD50.find(c.upper()) for c in val] + [0, 0, 0]
+    val2 = [x > 0 and x or 0 for x in val1]
+    val3 = (val2[0] * 0x28 + val2[1]) * 0x28 + val2[2]
+    return word_to_bytes(val3)
