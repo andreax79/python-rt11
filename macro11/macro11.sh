@@ -1,20 +1,22 @@
 #!/bin/bash
 set -e
-# Set the current working directory to the directory of this script
-cd "$(dirname "$0")"
 
 if [ $# -lt 1 ]; then
   echo 1>&1 "$0: usage $0 SOURCE.MAC"
   exit 2
 fi
 
-SOURCE=$1
+SOURCE="$(cd "$(dirname -- "$1")" >/dev/null; pwd -P)/$(basename -- "$1")"
 BASENAME=$(basename $1)
+OUT="$PWD/out"
 NAME="${BASENAME%.*}"
 WORK_DISK="work.dsk"
 WORK_DISK_SIZE=256256
 BOOT_DISK="Disks/rtv53_rl.dsk"
 CONSOLE_PORT=5000
+
+# Set the current working directory to the directory of this script
+cd "$(dirname "$0")"
 
 # Download and configure the boot disk
 if [ ! -f "${BOOT_DISK}" ]; then
@@ -58,8 +60,7 @@ sleep 0.1
 ) | nc localhost ${CONSOLE_PORT}
 
 # Copy the output files
-rm -rf out
-mkdir -p out
+mkdir -p ${OUT}
 ../rt11.py -v \
     -c "mount vol: ${WORK_DISK}" \
-    -c "copy vol:*.* out"
+    -c "copy vol:*.* ${OUT}"
