@@ -297,6 +297,13 @@ class NativeFilesystem(AbstractFilesystem):
     def examine(self, block: Optional[str]) -> None:
         pass
 
+    def get_size(self) -> int:
+        """
+        Get filesystem size in bytes
+        """
+        stat = os.statvfs(self.base)
+        return stat.f_frsize * stat.f_blocks
+
     def initialize(self) -> None:
         pass
 

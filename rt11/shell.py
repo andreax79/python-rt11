@@ -24,7 +24,7 @@ import os
 import shlex
 import sys
 import traceback
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .abstract import AbstractFilesystem
 from .commons import splitdrive
@@ -60,6 +60,18 @@ def ask(prompt: str) -> str:
     while not result:
         result = input(prompt).strip()
     return result
+
+
+def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, bool]]:
+    args = shlex.split(line)
+    result: List[str] = []
+    options_result: Dict[str, bool] = {}
+    for arg in args:
+        if arg.lower() in options:
+            options_result[arg.lower()[1:]] = True
+        else:
+            result.append(arg)
+    return result, options_result
 
 
 class Shell(cmd.Cmd):
@@ -418,17 +430,22 @@ CREATE          Creates a file with a specific name and size
 MOUNT           Assigns a logical disk unit to a file
 
   SYNTAX
-        MOUNT volume: [volume:]filespec
+        MOUNT [/option] volume: [volume:]filespec
 
   SEMANTICS
         Associates a logical disk unit with a file.
 
+  OPTIONS
+   DOS
+        Mount DOS-11 filesystem
+
   EXAMPLES
         MOUNT AB: SY:AB.DSK
+        MOUNT /DOS AB: SY:DOS.DSK
 
         """
         # fmt: on
-        args = shlex.split(line)
+        args, options = extract_options(line, "/dos")
         if len(args) > 2:
             sys.stdout.write("?MOUNT-F-Too many arguments\n")
             return
@@ -438,7 +455,8 @@ MOUNT           Assigns a logical disk unit to a file
             logical = ask("Volume? ")
         if not path:
             path = ask("File? ")
-        self.volumes.mount(path, logical, verbose=self.verbose)
+        fstype = "dos11" if options.get("dos") else None
+        self.volumes.mount(path, logical, fstype=fstype, verbose=self.verbose)
 
     def do_dismount(self, line: str) -> None:
         # fmt: off
@@ -557,7 +575,8 @@ SHOW            Displays the volume assignment
         sys.stdout.write("-------\n")
         for k, v in self.volumes.volumes.items():
             if k != "DK":
-                sys.stdout.write("%-10s %s\n" % ("%s:" % k, v))
+                label = f"{k}:"
+                sys.stdout.write(f"{label:<10} {v}\n")
 
     def do_exit(self, line: str) -> None:
         # fmt: off

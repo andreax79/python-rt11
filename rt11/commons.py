@@ -23,9 +23,13 @@ __all__ = [
     "bytes_to_word",
     "word_to_bytes",
     "splitdrive",
+    "date_to_rt11",
+    "getch",
 ]
 
-from typing import Tuple
+import sys
+from datetime import date
+from typing import Optional, Tuple
 
 BLOCK_SIZE = 512
 
@@ -53,3 +57,39 @@ def splitdrive(path: str) -> Tuple[str, str]:
         return ("DK", path)
     else:
         return (result[0].upper(), result[1])
+
+
+def date_to_rt11(val: Optional[date]) -> int:
+    """
+    Translate Python date to RT-11 date
+    """
+    if val is None:
+        return 0
+    age = (val.year - 1972) // 32
+    if age < 0:
+        age = 0
+    elif age > 3:
+        age = 3
+    year = (val.year - 1972) % 32
+    return year + (val.day << 5) + (val.month << 10) + (age << 14)
+
+
+try:
+    import termios
+    import tty
+
+    def getch() -> str:
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
+except Exception:
+    import msvcrt
+
+    def getch() -> str:
+        return msvcrt.getch()

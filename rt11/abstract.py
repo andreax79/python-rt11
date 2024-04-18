@@ -142,7 +142,11 @@ class AbstractFilesystem(object):
 
     @abstractmethod
     def examine(self, block: Optional[str]) -> None:
-        """Examine the filesytem"""
+        """Examine the filesystem"""
+
+    @abstractmethod
+    def get_size(self) -> int:
+        """Get filesystem size in bytes"""
 
     @abstractmethod
     def initialize(self) -> None:

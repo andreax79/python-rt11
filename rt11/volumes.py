@@ -25,6 +25,7 @@ from typing import Dict, Optional, Union
 
 from .abstract import AbstractFilesystem
 from .commons import splitdrive
+from .dos11fs import DOS11Filesystem
 from .native import NativeFilesystem
 from .rt11fs import RT11Filesystem
 
@@ -119,14 +120,17 @@ class Volumes(object):
         else:
             raise Exception("?KMON-F-Invalid volume")
 
-    def mount(self, path: str, logical: str, verbose: bool = False) -> None:
+    def mount(self, path: str, logical: str, fstype: Optional[str] = None, verbose: bool = False) -> None:
         logical = logical.split(":")[0].upper()
         if logical in ("SY", "DK") or not logical:
             raise Exception(f"?MOUNT-F-Illegal volume {logical}:")
         volume_id, fullname = splitdrive(path)
         fs = self.get(volume_id, cmd="MOUNT")
         try:
-            self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
+            if fstype == "dos11":
+                self.volumes[logical] = DOS11Filesystem(fs.open_file(fullname))
+            else:
+                self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
             sys.stdout.write(f"?MOUNT-I-Disk {path} mounted to {logical}:\n")
         except Exception:
             if verbose:

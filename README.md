@@ -1,7 +1,7 @@
 python-rt11
 ===========
 
-Utility for reading/writing RT11 filesystems
+Utility for reading/writing RT-11 filesystems and reading DOS-11 filesystems
 
 The file system must be logically mounted and assigned a logical device name before use.
 This is done with the MOUNT command.
@@ -28,10 +28,10 @@ Usage example
 -------------
 
 ```
-[SY:/Users/andreax/Devel/python-rt11] mount test: test.dsk
-?MOUNT-I-Disk test.dsk mounted to TEST:
-[SY:/Users/andreax/Devel/python-rt11] test:
-[TEST:] dir
+[SY:/home/andreax/devel/python-rt11] mount DL0: test.dsk
+?MOUNT-I-Disk test.dsk mounted to DL0:
+[SY:/home/andreax/devel/python-rt11] DL0:
+[DL0:] dir
 BOS   .SAV    61  21-Nov-95    VCG   .SAV    40  24-Aug-92
 CLI   .SAV    26  24-Aug-92    FRUN  .SAV     4  24-Aug-92
 PRINT .SAV    31  24-Aug-92    WHOIS .SAV    24  24-Aug-92
@@ -53,13 +53,42 @@ CAT   .MAC    13  31-Dec-88    CAT   .SAV     5  31-Dec-88
 < UNUSED >  8661
  35 Files, 1482 Blocks
   8690 Free blocks
-[TEST:] copy *.txt sy:
-DK:HELP.TXT -> SY:/Users/andreax/Devel/python-rt11/HELP.TXT
-DK:LOG.TXT -> SY:/Users/andreax/Devel/python-rt11/LOG.TXT
+[DL0:] copy *.txt sy:
+DK:HELP.TXT -> SY:/home/andreax/devel/python-rt11/HELP.TXT
+DK:LOG.TXT -> SY:/home/andreax/devel/python-rt11/LOG.TXT
+[DL0:] mount /dos DL1: SY:BA-F019F-MC_CZZMAF0_DYDP+1_XXDP_UTILITY_1980.DSK
+?MOUNT-I-Disk BA-F019F-MC_CZZMAF0_DYDP+1_XXDP_UTILITY_1980.DSK mounted to DL0:
+[DL0:] dir DL1:
+HSAAA0.SYS    24  22-Mar-80    HUDIA0.SYS     6  22-Mar-80
+HELP  .TXT    26  22-Mar-80    HDDYA0.SYS     3  22-Mar-80
+HDCTA0.SYS     2  22-Mar-80    HDDBA0.SYS     2  22-Mar-80
+HDDDA1.SYS     3  22-Mar-80    HDDKA0.SYS     2  22-Mar-80
+HDDLB0.SYS     4  22-Mar-80    HDDMA0.SYS     3  22-Mar-80
+HDDPA0.SYS     2  22-Mar-80    HDDRA1.SYS     3  22-Mar-80
+HDDSA0.SYS     2  22-Mar-80    HDDTA0.SYS     2  22-Mar-80
+HDDXA0.SYS     3  22-Mar-80    HDKBA0.SYS     1  22-Mar-80
+HDMMA0.SYS     2  22-Mar-80    HDMSA0.SYS     3  22-Mar-80
+HDMTA0.SYS     2  22-Mar-80    HDPDA0.SYS     3  22-Mar-80
+HDPPA0.SYS     1  22-Mar-80    HDPRA0.SYS     1  22-Mar-80
+HDPTA0.SYS     1  22-Mar-80    HMCTA0.SYS    17  22-Mar-80
+HMDBA0.SYS    16  22-Mar-80    HMDDA1.SYS    17  22-Mar-80
+HMDKA0.SYS    16  22-Mar-80    HMDLB0.SYS    11  22-Mar-80
+HMDMA0.SYS    17  22-Mar-80    HMDPA0.SYS    16  22-Mar-80
+HMDRA2.SYS    17  22-Mar-80    HMDSA0.SYS    16  22-Mar-80
+HMDTA0.SYS    16  22-Mar-80    HMDXA0.SYS    17  22-Mar-80
+HMMSA0.SYS    17  22-Mar-80    HMDYA0.SYS    17  22-Mar-80
+HMMMA0.SYS    17  22-Mar-80    HMMTA0.SYS    17  22-Mar-80
+HMPDA0.SYS    17  22-Mar-80    UPD1  .BIN    12  22-Mar-80
+UPD2  .BIN    16  22-Mar-80    XTECO .BIN    16  22-Mar-80
+DXCL  .BIN    32  22-Mar-80    SETUP .BIN    26  22-Mar-80
+ZFLAB0.BIN     8  22-Mar-80
+
+TOTL BLKS:   472
+TOTL FILES:   45
 ```
 
 Links
 -----
 
-[RT-11 Software Support Manual](http://www.bitsavers.org/www.computer.museum.uq.edu.au/RT-11/DEC-11-ORPGA-A-D%20RT-11%20Software%20Support%20Manual.pdf)
-[RT–11 Volume and File Formats Manual](http://bitsavers.trailing-edge.com/pdf/dec/pdp11/rt11/v5.6_Aug91/AA-PD6PA-TC_RT-11_Volume_and_File_Formats_Manual_Aug91.pdf)
+* [RT-11 Software Support Manual](http://www.bitsavers.org/www.computer.museum.uq.edu.au/RT-11/DEC-11-ORPGA-A-D%20RT-11%20Software%20Support%20Manual.pdf)
+* [RT–11 Volume and File Formats Manual](http://bitsavers.trailing-edge.com/pdf/dec/pdp11/rt11/v5.6_Aug91/AA-PD6PA-TC_RT-11_Volume_and_File_Formats_Manual_Aug91.pdf)

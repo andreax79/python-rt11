@@ -29,7 +29,7 @@ from datetime import date
 from typing import Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word, word_to_bytes
+from .commons import BLOCK_SIZE, bytes_to_word, date_to_rt11, word_to_bytes
 from .rad50 import asc2rad, rad2asc
 from .rx import (
     RX01_SECTOR_SIZE,
@@ -78,21 +78,6 @@ def rt11_to_date(val: int) -> Optional[date]:
         return date(year, month, day)
     except:
         return None
-
-
-def date_to_rt11(val: Optional[date]) -> int:
-    """
-    Translate Python date to RT-11 date
-    """
-    if val is None:
-        return 0
-    age = (val.year - 1972) // 32
-    if age < 0:
-        age = 0
-    elif age > 3:
-        age = 3
-    year = (val.year - 1972) % 32
-    return year + (val.day << 5) + (val.month << 10) + (age << 14)
 
 
 def rt11_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> str:
@@ -410,6 +395,9 @@ class RT11Segment(object):
 
 
 class RT11Filesystem(AbstractFilesystem):
+    """
+    RT-11 Filesystem
+    """
 
     # First directory segment block
     dir_segment: int = DEFAULT_DIR_SEGMENT
@@ -525,7 +513,7 @@ class RT11Filesystem(AbstractFilesystem):
         length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
         entry = self.create_file(fullname, length, creation_date)
         if not entry:
-            return False
+            return
         content = content + (b"\0" * BLOCK_SIZE)
         self.write_block(content, entry.file_position, entry.length)
 
@@ -707,6 +695,12 @@ class RT11Filesystem(AbstractFilesystem):
             sys.stdout.write(f"System identification: {self.sys_id}\n")
             for segment in self.read_dir_segments():
                 sys.stdout.write(f"{segment}\n")
+
+    def get_size(self) -> int:
+        """
+        Get filesystem size in bytes
+        """
+        return self.f.get_size() // BLOCK_SIZE
 
     def initialize(self) -> None:
         """Write an RT–11 empty device directory"""

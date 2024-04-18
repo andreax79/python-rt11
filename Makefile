@@ -19,7 +19,7 @@ black: isort
 
 .PHONY: typecheck
 typecheck:
-	mypy --strict --no-warn-unused-ignores rt11.py rt11
+	mypy --strict --no-warn-unused-ignores rt11
 
 .PHONY: clean
 clean:
