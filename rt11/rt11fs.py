@@ -700,7 +700,7 @@ class RT11Filesystem(AbstractFilesystem):
         """
         Get filesystem size in bytes
         """
-        return self.f.get_size() // BLOCK_SIZE
+        return self.f.get_size()
 
     def initialize(self) -> None:
         """Write an RT–11 empty device directory"""
