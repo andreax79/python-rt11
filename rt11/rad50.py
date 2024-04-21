@@ -28,7 +28,8 @@ __all__ = [
 
 from .commons import bytes_to_word, word_to_bytes
 
-RAD50 = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$.%0123456789:"
+RAD50_ALT = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$.%0123456789:"
+RAD50 = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$%*0123456789:"
 
 
 def rad50_word_to_asc(val: int) -> str:

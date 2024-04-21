@@ -51,7 +51,7 @@ def test_asc2rad():
     assert asc2rad("") == b'\x00\x00'
     # Test with lowercase characters
     assert asc2rad("zia") == b'\xe9\xa3'
-    assert asc2rad(":$.") == b'\x54\xfe'
+    assert asc2rad(":$%") == b'\x54\xfe'
 
 
 def test_rt11_to_date():

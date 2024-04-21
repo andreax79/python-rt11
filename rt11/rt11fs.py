@@ -90,14 +90,8 @@ def rt11_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> 
     except Exception:
         filename = fullname
         filetype = "*" if wildcard else ""
-    if wildcard:
-        filename = filename.replace("*", ".")
-        filetype = filetype.replace("*", ".")
     filename = rad2asc(asc2rad(filename[0:3])) + rad2asc(asc2rad(filename[3:6]))
     filetype = rad2asc(asc2rad(filetype))
-    if wildcard:
-        filename = filename.replace(".", "*")
-        filetype = filetype.replace(".", "*")
     return f"{filename}.{filetype}"
 
 
