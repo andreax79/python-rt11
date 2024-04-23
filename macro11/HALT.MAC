@@ -1,0 +1,5 @@
+        .TITLE  HALT
+
+START:  .WORD   0                       ; HALT
+
+        .END    START

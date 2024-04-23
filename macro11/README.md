@@ -19,54 +19,42 @@ The script will assemble and link the source file, producing an output SAV file.
 ### Usage example
 
 ```bash
-$ ./macro11/macro11.sh mac/PIP2.MAC
+$ ./macro11/macro11.sh mac/hello.mac
 
+?MOUNT-I-Disk Disks/rtv53_rl.dsk mounted to DL0:
+DK:/home/andreax/devel/python-rt11/macro11/STARTA.COM -> DL0:/home/andreax/devel/python-rt11/macro11/STARTA.COM
 Creating work disk work.dsk
 1+0 records in
 1+0 records out
-256256 bytes (256 kB, 250 KiB) copied, 0.000458269 s, 559 MB/s
+2494464 bytes (2.5 MB, 2.4 MiB) copied, 0.00595551 s, 419 MB/s
 ?MOUNT-I-Disk work.dsk mounted to VOL:
-DK:/home/andreax/devel/python-rt11/mac/PIP2.MAC -> VOL:PIP2.MAC
+DK:/home/andreax/devel/python-rt11/mac/hello.mac -> VOL:hello.mac
+?MOUNT-I-Disk Disks/rtv53_rl.dsk mounted to DL0:
+DK:/home/andreax/devel/python-rt11/macro11/HALT.SAV -> DL0:/home/andreax/devel/python-rt11/macro11/HALT.SAV
 Starting pdp11
-pdp11 PID: 5243
+.MACRO hello/LIST
+.LINK hello/MAP
+.DIR hello.*
+
+HELLO .MAC     2    -BAD-        HELLO .OBJ     1
+HELLO .SAV     2                 HELLO .LST     4
+HELLO .MAP     1
+ 5 Files, 10 Blocks
+ 4824 Free blocks
+.HALT
 
 PDP-11 simulator V3.8-1
 Disabling CR
 Disabling XQ
-RX: buffering file in memory
-Listening on port 5000 (socket 6)
-Waiting for console Telnet connection
-Running
-"
 
-Connected to the PDP-11 simulator
-
-@ <EOF>
-
-.MACRO PIP2
-
-.LINK PIP2/MAP
-
-.DIR PIP2.*
-
-PIP2  .MAC   242    -BAD-        PIP2  .OBJ    15
-PIP2  .MAP     1                 PIP2  .SAV    13
- 4 Files, 271 Blocks
- 215 Free blocks
-
-.D 1000=0
-
-.START 1000
-HALT instruction, PC: 001002 (RTI)
+HALT instruction, PC: 001002 (HALT)
 Goodbye
-RX: writing buffer to file
-
-
-Disconnected from the PDP-11 simulator
-
 ?MOUNT-I-Disk work.dsk mounted to VOL:
-VOL:PIP2.MAC -> DK:/home/andreax/devel/python-rt11/out/PIP2.MAC
-VOL:PIP2.OBJ -> DK:/home/andreax/devel/python-rt11/out/PIP2.OBJ
-VOL:PIP2.MAP -> DK:/home/andreax/devel/python-rt11/out/PIP2.MAP
-VOL:PIP2.SAV -> DK:/home/andreax/devel/python-rt11/out/PIP2.SAV
+VOL:HELLO.MAC -> DK:/home/andreax/devel/python-rt11/out/HELLO.MAC
+VOL:HELLO.OBJ -> DK:/home/andreax/devel/python-rt11/out/HELLO.OBJ
+VOL:HELLO.SAV -> DK:/home/andreax/devel/python-rt11/out/HELLO.SAV
+VOL:HELLO.LST -> DK:/home/andreax/devel/python-rt11/out/HELLO.LST
+VOL:HELLO.MAP -> DK:/home/andreax/devel/python-rt11/out/HELLO.MAP
+?MOUNT-I-Disk Disks/rtv53_rl.dsk mounted to DL0:
+DK:/home/andreax/devel/python-rt11/macro11/STARTA.COM -> DL0:/home/andreax/devel/python-rt11/macro11/STARTA.COM
 ```
