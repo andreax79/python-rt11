@@ -14,6 +14,14 @@ def test_cmds():
     assert license
     assert isinstance(sys_fs, NativeFilesystem)
     assert len(list(sys_fs.entries_list)) > 0
+    # Open file
+    with pytest.raises(FileNotFoundError):
+        sys_fs.open_file("LI")
+    f = sys_fs.open_file("LICENSE")
+    t = f.read_block(block_number=0, number_of_blocks=1000)
+    assert f.size == len(t)
+    f.close()
+    # Help
     shell.onecmd("HELP", batch=True)
     shell.onecmd("HELP HELP", batch=True)
     shell.onecmd("PWD", batch=True)
@@ -31,6 +39,13 @@ def test_cmds():
     assert len(list(fs.entries_list)) == l0 + 1
     license_rt11 = fs.read_bytes("LICENSE").rstrip(b'\0')
     assert license == license_rt11
+    # Open file
+    with pytest.raises(FileNotFoundError):
+        fs.open_file("LI")
+    f = fs.open_file("LICENSE")
+    t = f.read_block(block_number=0, number_of_blocks=1000)
+    assert f.size == len(t)
+    f.close()
     # Create a disk in the RT11 fs
     shell.onecmd("T:", batch=True)
     shell.onecmd("EXAMINE", batch=True)

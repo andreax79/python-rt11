@@ -113,13 +113,10 @@ class RT11File(AbstractFile):
         """
         Read block(s) of data from the file
         """
-        if (
-            self.closed
-            or block_number < 0
-            or number_of_blocks < 0
-            or block_number + number_of_blocks > self.entry.length
-        ):
+        if self.closed or block_number < 0 or number_of_blocks < 0:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
+        if block_number + number_of_blocks > self.entry.length:
+            number_of_blocks = self.entry.length - block_number
         return self.entry.segment.fs.read_block(
             self.entry.file_position + block_number,
             number_of_blocks,
