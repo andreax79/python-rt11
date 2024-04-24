@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from rt11.commons import bytes_to_word, word_to_bytes
+from rt11.commons import PartialMatching, bytes_to_word, word_to_bytes
 from rt11.rad50 import asc2rad, rad2asc
 from rt11.rt11fs import date_to_rt11, rt11_canonical_filename, rt11_to_date
 
@@ -87,3 +87,36 @@ def test_rt1_canonical_filename():
     assert rt11_canonical_filename("read.*", wildcard=True) == "READ.*"
     assert rt11_canonical_filename("r*", wildcard=True) == "R*.*"
     assert rt11_canonical_filename("*.*", wildcard=True) == "*.*"
+
+
+def test_partial_matching():
+    x = PartialMatching()
+    x.add("APP_LE")
+    x.add("PE_AR")
+    x.add("O_RANGE")
+    x.add("D")
+    x.add("DA_TE")
+
+    # Test partial matching keys
+    assert x.get("APP") == "APPLE"
+    assert x.get("PE") == "PEAR"
+    assert x.get("PEA") == "PEAR"
+    assert x.get("O") == "ORANGE"
+    assert x.get("OR") == "ORANGE"
+    assert x.get("ORA") == "ORANGE"
+    assert x.get("ORAN") == "ORANGE"
+    assert x.get("D") == "D"
+    assert x.get("DA") == "DATE"
+    assert x.get("DAT") == "DATE"
+    assert x.get("DATE") == "DATE"
+
+    # Test non-partial matching keys
+    assert x.get("XXX") is None
+    assert x.get("XX") is None
+    assert x.get("A") is None
+    assert x.get("P") is None
+    assert x.get("PE_X") is None
+    assert x.get("O_") is None
+    assert x.get("ORANGO") is None
+    assert x.get("TD") is None
+    assert x.get("") is None

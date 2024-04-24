@@ -24,10 +24,10 @@ import os
 import shlex
 import sys
 import traceback
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .abstract import AbstractFilesystem
-from .commons import splitdrive
+from .commons import PartialMatching, splitdrive
 from .volumes import Volumes
 
 try:
@@ -74,8 +74,18 @@ def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, bool
     return result, options_result
 
 
+def flgtxt(arg: str) -> Callable[[Callable], Callable]:
+    def decorator(func: Callable) -> Callable:
+        setattr(func, "flgtxt", arg)
+        return func
+
+    return decorator
+
+
 class Shell(cmd.Cmd):
-    verbose = False
+    verbose: bool = False
+    volumes: Volumes
+    cmd_matching: PartialMatching
 
     def __init__(self, verbose: bool = False):
         cmd.Cmd.__init__(self)
@@ -98,8 +108,16 @@ class Shell(cmd.Cmd):
                     readline.read_history_file(self.history_file)
             except IOError:
                 pass
+        # Process cmd names
+        self.cmd_matching = PartialMatching()
+        for name in self.get_names():
+            if name[:3] == "do_":
+                f = getattr(self, name)
+                flgtxt = getattr(f, "flgtxt", None)
+                if flgtxt:
+                    self.cmd_matching.add(flgtxt.lower())
 
-    def completenames(self, text, *ignored):
+    def completenames(self, text: str, *ignored: Any) -> List[str]:
         dotext = "do_" + text.lower()
         return ["%s " % a[3:] for a in self.get_names() if a.startswith(dotext)] + [
             "%s:" % a for a in self.volumes.volumes.keys() if a.startswith(text.upper())
@@ -162,7 +180,27 @@ class Shell(cmd.Cmd):
 
     def onecmd(self, line: str, catch_exceptions: bool = True, batch: bool = False) -> bool:
         try:
-            return cmd.Cmd.onecmd(self, line)
+            cmd, arg, line = self.parseline(line)
+            if not line:
+                sys.stdout.write("\n")
+                return self.emptyline()
+            if cmd is None:
+                self.default(line)
+                return False
+            self.lastcmd = line
+            if line == "EOF":
+                self.lastcmd = ""
+            if cmd == "":
+                self.default(line)
+                return False
+            else:
+                cmd = self.cmd_matching.get(cmd) or cmd
+                try:
+                    func = getattr(self, "do_" + cmd)
+                except AttributeError:
+                    self.default(line)
+                    return False
+                return bool(func(arg))
         except KeyboardInterrupt:
             sys.stdout.write("\n")
             sys.stdout.write("\n")
@@ -211,7 +249,8 @@ class Shell(cmd.Cmd):
         sys.stdout.write("\n")
         return False
 
-    def do_dir(self, line: str) -> None:
+    @flgtxt("DIR_ECTORY")
+    def do_directory(self, line: str) -> None:
         # fmt: off
         """
 DIR             Lists file directories
@@ -241,8 +280,9 @@ DIR             Lists file directories
         fs.dir(pattern)
 
     def do_ls(self, line: str) -> None:
-        self.do_dir(line)
+        self.do_directory(line)
 
+    @flgtxt("TY_PE")
     def do_type(self, line: str) -> None:
         # fmt: off
         """
@@ -275,6 +315,7 @@ TYPE            Outputs files to the terminal
         if not match:
             raise Exception("?TYPE-F-No files")
 
+    @flgtxt("COP_Y")
     def do_copy(self, line: str) -> None:
         # fmt: off
         """
@@ -342,19 +383,20 @@ COPY            Copies files
                         traceback.print_exc()
                     raise Exception(f"?COPY-F-Error copying {entry.fullname}")
 
-    def do_del(self, line: str) -> None:
+    @flgtxt("DEL_ETE")
+    def do_delete(self, line: str) -> None:
         # fmt: off
         """
-DEL             Removes files from a volume
+DELETE          Removes files from a volume
 
   SYNTAX
-        DEL [volume:]filespec
+        DELETE [volume:]filespec
 
   SEMANTICS
         This command deletes the files you specify from the volume.
 
   EXAMPLES
-        DEL *.OBJ
+        DELETE *.OBJ
 
         """
         # fmt: on
@@ -372,6 +414,7 @@ DEL             Removes files from a volume
         if not match:
             raise Exception("?DEL-F-No files")
 
+    @flgtxt("E_XAMINE")
     def do_examine(self, line: str) -> None:
         # fmt: off
         """
@@ -386,6 +429,7 @@ EXAMINE         Examines disk/block/file structure
         fs = self.volumes.get(volume_id)
         fs.examine(block)
 
+    @flgtxt("CR_EATE")
     def do_create(self, line: str) -> None:
         # fmt: off
         """
@@ -424,6 +468,7 @@ CREATE          Creates a file with a specific name and size
         fs = self.volumes.get(volume_id, cmd="CREATE")
         fs.create_file(fullname, length)
 
+    @flgtxt("MO_UNT")
     def do_mount(self, line: str) -> None:
         # fmt: off
         """
@@ -458,6 +503,7 @@ MOUNT           Assigns a logical disk unit to a file
         fstype = "dos11" if options.get("dos") else None
         self.volumes.mount(path, logical, fstype=fstype, verbose=self.verbose)
 
+    @flgtxt("DIS_MOUNT")
     def do_dismount(self, line: str) -> None:
         # fmt: off
         """
@@ -485,6 +531,7 @@ DISMOUNT        Disassociates a logical disk assignment from a file
             logical = ask("Volume? ")
         self.volumes.dismount(logical)
 
+    @flgtxt("INI_TIALIZE")
     def do_initialize(self, line: str) -> None:
         # fmt: off
         """
@@ -561,6 +608,7 @@ PWD             Displays the current working drive and directory
         """
         sys.stdout.write("%s\n" % self.volumes.get_pwd())
 
+    @flgtxt("SH_OW")
     def do_show(self, line: str) -> None:
         # fmt: off
         """
@@ -592,6 +640,7 @@ EXIT            Exit the shell
     def do_quit(self, line: str) -> None:
         raise SystemExit
 
+    @flgtxt("H_ELP")
     def do_help(self, arg) -> None:
         # fmt: off
         """
@@ -606,6 +655,7 @@ HELP            Displays commands help
             if arg == "@":
                 arg = "batch"
             try:
+                arg = self.cmd_matching.get(arg) or arg
                 doc = getattr(self, "do_" + arg).__doc__
                 if doc:
                     self.stdout.write("%s\n" % str(doc))

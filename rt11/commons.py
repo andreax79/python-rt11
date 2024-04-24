@@ -25,11 +25,12 @@ __all__ = [
     "splitdrive",
     "date_to_rt11",
     "getch",
+    "PartialMatching",
 ]
 
 import sys
 from datetime import date
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 BLOCK_SIZE = 512
 
@@ -93,3 +94,30 @@ except Exception:
 
     def getch() -> str:
         return msvcrt.getch()
+
+
+class PartialMatching:
+
+    def __init__(self) -> None:
+        self.short: Dict[str, str] = {}  # short key => full key
+        self.full: Dict[str, str] = {}  # full key => short key
+
+    def add(self, key: str) -> None:
+        try:
+            prefix, tail = key.split("_", 1)
+        except:
+            prefix = key
+            tail = ""
+        full = prefix + tail
+        self.full[full] = prefix
+        self.short[prefix] = full
+
+    def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        try:
+            return self.short[key]
+        except KeyError:
+            pass
+        matching_keys = [(k, v) for k, v in self.full.items() if k.startswith(key) and len(key) >= len(v)]
+        if not matching_keys:
+            return default
+        return matching_keys[0][0]
