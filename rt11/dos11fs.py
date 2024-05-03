@@ -362,6 +362,7 @@ class DOS11Filesystem(AbstractFilesystem):
     """
 
     uic: UIC  # current User Identification Code
+    xxdp: bool = False  # MFD Variety #2 (XXDP+)
 
     def __init__(self, file: "AbstractFile"):
         self.f = file
@@ -393,6 +394,7 @@ class DOS11Filesystem(AbstractFilesystem):
         if mfd2 != 0:  # MFD Variety #1 (DOS-11)
             # DOS Course Handouts, Pag 13
             # http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DOS_CourseHandouts.pdf
+            self.xxdp = False
             next_mfd = mfd2
             while next_mfd:
                 t = self.read_block(next_mfd)
@@ -406,6 +408,7 @@ class DOS11Filesystem(AbstractFilesystem):
                             yield entry
 
         else:  # MFD Variery #2 (XXDP+)
+            self.xxdp = True
             entry = MasterFileDirectoryEntry(self)
             entry.ufd_block = bytes_to_word(t[2:4])
             entry.uic = self.uic
@@ -508,6 +511,8 @@ class DOS11Filesystem(AbstractFilesystem):
         files = 0
         blocks = 0
         for x in self.filter_entries_list(pattern, include_all=True):
+            if i == 0 and self.xxdp and not options.get("brief"):
+                sys.stdout.write("ENTRY# FILNAM.EXT        DATE          LENGTH  START\n")
             if x.is_empty:
                 continue
             i = i + 1
@@ -520,13 +525,14 @@ class DOS11Filesystem(AbstractFilesystem):
                 continue
             date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
             attr = "C" if x.contiguous else ""
-            sys.stdout.write(f"{fullname:>10s} {x.length:>5d}{attr:1} {date:>9s} <{x.protection_code:03o}>\n")
+            if self.xxdp:
+                sys.stdout.write(f"{i:6} {fullname:>10s} {date:>14s} {x.length:>10d}    {x.file_position:06o}\n")
+            else:
+                sys.stdout.write(f"{fullname:>10s} {x.length:>5d}{attr:1} {date:>9s} <{x.protection_code:03o}>\n")
             blocks += x.length
             files += 1
-        if options.get("brief"):
+        if options.get("brief") or self.xxdp:
             return
-        if i % 2 == 1:
-            sys.stdout.write("\n")
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
