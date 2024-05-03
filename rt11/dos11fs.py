@@ -215,6 +215,9 @@ class UserFileDirectoryBlock(object):
     |.             |
     |.          28 |
     +--------------+
+
+    Disk Operating System Monitor - System Programmers Manual, Pag 136
+    http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
     """
 
     # Block number of this user file directory block
@@ -314,12 +317,15 @@ class MasterFileDirectoryEntry:
     |.             |
     |.             |
     +--------------+
+
+    Disk Operating System Monitor - System Programmers Manual, Pag 135
+    http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
     """
 
     fs: "DOS11Filesystem"
     uic: Optional["UIC"] = None  # User Identification Code
     ufd_block: int = 0  # UFD start block
-    num_words: int = 0  # num of words in UFD entry
+    num_words: int = 0  # num of words in UFD entry, always 9
     zero: int = 0  # always 0
 
     def __init__(self, fs: "DOS11Filesystem"):
@@ -382,13 +388,13 @@ class DOS11Filesystem(AbstractFilesystem):
             # DOS Course Handouts, Pag 13
             # http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DOS_CourseHandouts.pdf
             next_mfd = mfd2
-            if next_mfd:
+            while next_mfd:
                 t = self.read_block(next_mfd)
                 next_mfd = bytes_to_word(t[0:2])  # link to next MFD
                 for i in range(0, BLOCK_SIZE - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
                     entry = MasterFileDirectoryEntry(self)
                     entry.read(t, i)
-                    if entry.ufd_block:
+                    if entry.num_words:
                         # Filter by UIC
                         if uic is None or uic == entry.uic:
                             yield entry
@@ -489,6 +495,8 @@ class DOS11Filesystem(AbstractFilesystem):
     def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
+            for mfd in self.read_mfd_entries(uic=None):
+                sys.stdout.write(f"[{mfd.uic.group:>3o},{mfd.uic.user:<3o}]\n")
             return
         i = 0
         files = 0

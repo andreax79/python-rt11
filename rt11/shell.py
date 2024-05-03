@@ -264,6 +264,8 @@ DIR             Lists file directories
   OPTIONS
    BRIEF
         Lists only file names and file types
+   UIC
+        Lists all UIC on a device (only for DOS-11)
 
   EXAMPLES
         DIR A:*.SAV
@@ -271,7 +273,7 @@ DIR             Lists file directories
 
         """
         # fmt: on
-        args, options = extract_options(line, "/brief")
+        args, options = extract_options(line, "/brief", "/uic")
         if len(args) > 1:
             sys.stdout.write("?DIR-F-Too many arguments\n")
             return
