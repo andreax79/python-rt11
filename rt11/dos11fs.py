@@ -140,6 +140,12 @@ class DOS11File(AbstractFile):
 
 
 class DOS11DirectoryEntry(AbstractDirectoryEntry):
+    """
+    User File Directory Entry
+
+    Disk Operating System Monitor - System Programmers Manual, Pag 136
+    http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
+    """
 
     ufd_block: "UserFileDirectoryBlock"
     uic: Optional["UIC"] = None
@@ -148,8 +154,8 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     raw_creation_date: int = 0
     file_position: int = 0
     length: int = 0
-    contiguous: bool = False
-    protection_code: int = 0
+    contiguous: bool = False  # linked/contiguous file
+    protection_code: int = 0  # System Programmers Manual, Pag 140
 
     def __init__(self, ufd_block: "UserFileDirectoryBlock"):
         self.ufd_block = ufd_block
@@ -512,15 +518,11 @@ class DOS11Filesystem(AbstractFilesystem):
                 # Lists only file names and file types
                 sys.stdout.write(f"{fullname}\n")
                 continue
-            date = x.creation_date and x.creation_date.strftime("%d-%b-%y") or ""
+            date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
             attr = "C" if x.contiguous else ""
-            sys.stdout.write("%10s %5d%1s %9s" % (fullname, x.length, attr, date))
+            sys.stdout.write(f"{fullname:>10s} {x.length:>5d}{attr:1} {date:>9s} <{x.protection_code:03o}>\n")
             blocks += x.length
             files += 1
-            if i % 2 == 1:
-                sys.stdout.write("    ")
-            else:
-                sys.stdout.write("\n")
         if options.get("brief"):
             return
         if i % 2 == 1:
