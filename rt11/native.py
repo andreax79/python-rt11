@@ -25,7 +25,7 @@ import os
 import stat
 import sys
 from datetime import date, datetime
-from typing import Iterator, Optional, Union
+from typing import Dict, Iterator, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE
@@ -266,7 +266,12 @@ class NativeFilesystem(AbstractFilesystem):
             fullname = os.path.join(self.pwd, fullname)
         return os.path.exists(os.path.join(self.base, fullname))
 
-    def dir(self, pattern: Optional[str]) -> None:
+    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
+        if options.get("brief"):
+            # Lists only file names and file types
+            for x in self.filter_entries_list(pattern):
+                sys.stdout.write(f"{x.basename}\n")
+            return
         for x in self.filter_entries_list(pattern):
             mode = x.stat.st_mode
             if stat.S_ISREG(mode):

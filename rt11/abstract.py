@@ -20,7 +20,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import date
-from typing import Iterator, Optional
+from typing import Dict, Iterator, Optional
 
 __all__ = [
     "AbstractFile",
@@ -137,7 +137,7 @@ class AbstractFilesystem(object):
         """Check if the given path exists"""
 
     @abstractmethod
-    def dir(self, pattern: Optional[str]) -> None:
+    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
         """List directory contents"""
 
     @abstractmethod

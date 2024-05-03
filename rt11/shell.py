@@ -256,10 +256,14 @@ class Shell(cmd.Cmd):
 DIR             Lists file directories
 
   SYNTAX
-        DIR [[volume:][filespec]]
+        DIR [/options] [[volume:][filespec]]
 
   SEMANTICS
         This command generates a listing of the directory you specify.
+
+  OPTIONS
+   BRIEF
+        Lists only file names and file types
 
   EXAMPLES
         DIR A:*.SAV
@@ -267,7 +271,7 @@ DIR             Lists file directories
 
         """
         # fmt: on
-        args = shlex.split(line)
+        args, options = extract_options(line, "/brief")
         if len(args) > 1:
             sys.stdout.write("?DIR-F-Too many arguments\n")
             return
@@ -277,7 +281,7 @@ DIR             Lists file directories
             volume_id = None
             pattern = None
         fs = self.volumes.get(volume_id, cmd="DIR")
-        fs.dir(pattern)
+        fs.dir(pattern, options)
 
     def do_ls(self, line: str) -> None:
         self.do_directory(line)
@@ -475,7 +479,7 @@ CREATE          Creates a file with a specific name and size
 MOUNT           Assigns a logical disk unit to a file
 
   SYNTAX
-        MOUNT [/option] volume: [volume:]filespec
+        MOUNT [/options] volume: [volume:]filespec
 
   SEMANTICS
         Associates a logical disk unit with a file.

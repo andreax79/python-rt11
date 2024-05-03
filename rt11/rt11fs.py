@@ -26,7 +26,7 @@ import math
 import os
 import sys
 from datetime import date
-from typing import Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, bytes_to_word, date_to_rt11, word_to_bytes
@@ -618,7 +618,7 @@ class RT11Filesystem(AbstractFilesystem):
         entry = self.get_file_entry(fullname)
         return entry is not None
 
-    def dir(self, pattern: Optional[str]) -> None:
+    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
         i = 0
         files = 0
         blocks = 0
@@ -634,11 +634,17 @@ class RT11Filesystem(AbstractFilesystem):
                 continue
             i = i + 1
             if x.is_empty or x.is_tentative:
+                if options.get("brief"):
+                    continue
                 fullname = "< UNUSED >"
                 date = ""
                 unused = unused + x.length
             else:
                 fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.filetype)
+                if options.get("brief"):
+                    # Lists only file names and file types
+                    sys.stdout.write(f"{fullname}\n")
+                    continue
                 date = x.creation_date and x.creation_date.strftime("%d-%b-%y") or ""
             if x.is_permanent:
                 files = files + 1
@@ -655,6 +661,8 @@ class RT11Filesystem(AbstractFilesystem):
                 sys.stdout.write("    ")
             else:
                 sys.stdout.write("\n")
+        if options.get("brief"):
+            return
         if i % 2 == 1:
             sys.stdout.write("\n")
         sys.stdout.write(" %d Files, %d Blocks\n" % (files, blocks))

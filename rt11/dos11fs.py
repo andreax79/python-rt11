@@ -24,7 +24,7 @@ import io
 import os
 import sys
 from datetime import date, timedelta
-from typing import Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, bytes_to_word
@@ -486,7 +486,10 @@ class DOS11Filesystem(AbstractFilesystem):
         entry = self.get_file_entry(fullname)
         return entry is not None
 
-    def dir(self, pattern: Optional[str]) -> None:
+    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
+        if options.get("uic"):
+            # Listing of all UIC
+            return
         i = 0
         files = 0
         blocks = 0
@@ -497,6 +500,10 @@ class DOS11Filesystem(AbstractFilesystem):
             if x.is_empty:
                 continue
             fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.filetype)
+            if options.get("brief"):
+                # Lists only file names and file types
+                sys.stdout.write(f"{fullname}\n")
+                continue
             date = x.creation_date and x.creation_date.strftime("%d-%b-%y") or ""
             attr = "C" if x.contiguous else ""
             sys.stdout.write("%10s %5d%1s %9s" % (fullname, x.length, attr, date))
@@ -506,6 +513,8 @@ class DOS11Filesystem(AbstractFilesystem):
                 sys.stdout.write("    ")
             else:
                 sys.stdout.write("\n")
+        if options.get("brief"):
+            return
         if i % 2 == 1:
             sys.stdout.write("\n")
         sys.stdout.write("\n")
