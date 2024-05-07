@@ -21,7 +21,7 @@
 import os
 import sys
 import traceback
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 from .abstract import AbstractFilesystem
 from .commons import splitdrive
@@ -31,31 +31,40 @@ from .rt11fs import RT11Filesystem
 
 __all__ = [
     "Volumes",
+    "DEFAULT_VOLUME",
 ]
+
+DEFAULT_VOLUME = "DK"
+SYSTEM_VOLUME = "SY"
 
 
 class Volumes(object):
     """
     Logical Device Names
 
-    SY: System device, the device from which this program was started
-    DK: Default storage device (initially the same as SY:)
+    SY: System volume, the device from which this program was started
+    DK: Default storage volume (initially the same as SY:)
     """
 
-    volumes: Dict[str, Union[AbstractFilesystem, str]]
+    volumes: Dict[str, AbstractFilesystem]  # volume id -> fs
+    logical: Dict[str, str]  # local id -> volume id
+    defdev: str  # Default device, DK
 
     def __init__(self) -> None:
-        self.volumes: Dict[str, Union[AbstractFilesystem, str]] = {}
+        self.volumes: Dict[str, AbstractFilesystem] = {}
+        self.logical: Dict[str, str] = {}
         if self._drive_letters():
             # windows
             for letter in self._drive_letters():
-                self.volumes[letter] = NativeFilesystem("%s:" % letter)
-            current_drive = os.getcwd().split(":")[0]
-            self.volumes["SY"] = self.volumes[current_drive]
+                self.volumes[letter] = NativeFilesystem(f"{letter.upper()}:")
+            current_drive = os.getcwd().split(":")[0].upper()
+            self.defdev = current_drive
+            self.logical["SY"] = current_drive
         else:
             # posix
-            self.volumes["SY"] = NativeFilesystem()
-        self.volumes["DK"] = "SY"
+            self.volumes["N"] = NativeFilesystem()
+            self.logical[SYSTEM_VOLUME] = "N"
+            self.defdev = SYSTEM_VOLUME
 
     def _drive_letters(self) -> list[str]:
         try:
@@ -72,76 +81,124 @@ class Volumes(object):
         except Exception:
             return []
 
-    def get(self, volume_id: Optional[str], cmd: str = "KMON") -> AbstractFilesystem:
-        if volume_id is None:
-            volume_id = "DK"
-        elif volume_id.endswith(":"):
-            volume_id = volume_id[:-1]
-        if volume_id.upper() == "LAST":
-            volume_id = self.last()
-        v = self.volumes.get(volume_id.upper())
-        if isinstance(v, str):
-            v = self.volumes.get(v.upper())
-        if v is None:
-            raise Exception("?%s-F-Illegal volume %s:" % (cmd, volume_id))
-        return v
+    def canonical_volume(self, volume_id: str, cmd: str = "KMON") -> str:
+        """
+        Convert a volume id into canonical form
+        """
+        if not volume_id:
+            volume_id = DEFAULT_VOLUME
+        else:
+            volume_id = volume_id.upper()
+            if volume_id.endswith(":"):
+                volume_id = volume_id[:-1]
+        return volume_id
+
+    def get(self, volume_id: str, cmd: str = "KMON") -> AbstractFilesystem:
+        """
+        Get a filesystem by volume id
+        """
+        volume_id = self.canonical_volume(volume_id, cmd=cmd)
+        if volume_id == DEFAULT_VOLUME:
+            volume_id = self.defdev
+        volume_id = self.logical.get(volume_id, volume_id)
+        try:
+            return self.volumes[volume_id]
+        except KeyError:
+            raise Exception(f"?{cmd}-F-Illegal volume {volume_id}:")
 
     def chdir(self, path: str) -> bool:
+        """
+        Change current directory
+        """
         volume_id, fullname = splitdrive(path)
-        if volume_id.upper() == "LAST":
-            volume_id = self.last()
+        volume_id = self.canonical_volume(volume_id)
         try:
             fs = self.get(volume_id)
         except Exception:
             return False
         if fullname and not fs.chdir(fullname):
             return False
-        if volume_id != "DK":
+        if volume_id != DEFAULT_VOLUME:
             self.set_default_volume(volume_id)
         return True
 
     def get_pwd(self) -> str:
+        """
+        Get current volume and directory
+        """
         try:
-            return "%s:%s" % (self.volumes.get("DK"), self.get("DK").get_pwd())
-        except:
-            return "%s:???" % (self.volumes.get("DK"))
+            pwd = self.get(self.defdev).get_pwd()
+            return f"{self.defdev}:{pwd}"
+        except Exception:
+            return f"{self.defdev}:???"
 
-    def set_default_volume(self, volume_id: str) -> None:
-        """Set the default volume"""
-        if not volume_id:
-            return
-        if volume_id.endswith(":"):
-            volume_id = volume_id[:-1]
-        if volume_id.upper() == "LAST":
-            volume_id = self.last()
-        volume_id = volume_id.upper()
-        if volume_id != "DK" and volume_id in self.volumes:
-            self.volumes["DK"] = volume_id
+    def set_default_volume(self, volume_id: str, cmd: str = "KMON") -> None:
+        """
+        Set the default volume
+        """
+        volume_id = self.canonical_volume(volume_id, cmd=cmd)
+        if volume_id != DEFAULT_VOLUME:
+            self.get(volume_id, cmd=cmd)
+            self.defdev = volume_id
+
+    def assign(self, volume_id: str, logical: str, verbose: bool = False, cmd: str = "KMON") -> None:
+        """
+        Associate a logical device name with a device
+        """
+        volume_id = self.canonical_volume(volume_id)
+        volume_id = self.logical.get(volume_id, volume_id)
+        logical = self.canonical_volume(logical)
+        if logical == DEFAULT_VOLUME:
+            self.set_default_volume(volume_id, cmd=cmd)
         else:
-            raise Exception("?KMON-F-Invalid volume")
+            self.get(volume_id, cmd=cmd)
+            self.logical[logical] = volume_id
 
-    def mount(self, path: str, logical: str, fstype: Optional[str] = None, verbose: bool = False) -> None:
-        logical = logical.split(":")[0].upper()
-        if logical in ("SY", "DK") or not logical:
-            raise Exception(f"?MOUNT-F-Illegal volume {logical}:")
+    def deassign(self, volume_id: str, verbose: bool = False, cmd: str = "KMON") -> None:
+        """
+        Removes logical device name assignments
+        """
+        volume_id = self.canonical_volume(volume_id)
+        if volume_id == DEFAULT_VOLUME or not volume_id in self.logical:
+            raise Exception(f"?{cmd}-W-Logical name not found {volume_id}:")
+        del self.logical[volume_id]
+
+    def mount(
+        self,
+        path: str,
+        logical: str,
+        fstype: Optional[str] = None,
+        verbose: bool = False,
+        cmd: str = "MOUNT",
+    ) -> None:
+        """
+        Mount a file to a logical disk unit
+        """
+        logical = self.canonical_volume(logical)
+        if logical == DEFAULT_VOLUME or not logical:
+            raise Exception(f"?{cmd}-F-Illegal volume {logical}:")
         volume_id, fullname = splitdrive(path)
-        fs = self.get(volume_id, cmd="MOUNT")
+        fs = self.get(volume_id, cmd=cmd)
         try:
             if fstype == "dos11":
                 self.volumes[logical] = DOS11Filesystem(fs.open_file(fullname))
             else:
                 self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
-            sys.stdout.write(f"?MOUNT-I-Disk {path} mounted to {logical}:\n")
+            sys.stdout.write(f"?{cmd}-I-Disk {path} mounted to {logical}:\n")
         except Exception:
             if verbose:
                 traceback.print_exc()
-            sys.stdout.write(f"?MOUNT-F-Error mounting {path} to {logical}:\n")
+            sys.stdout.write(f"?{cmd}-F-Error mounting {path} to {logical}:\n")
 
-    def dismount(self, logical: str) -> None:
-        logical = logical.split(":")[0].upper()
-        if logical in ("SY", "DK") or logical not in self.volumes:
-            raise Exception(f"?DISMOUNT-F-Illegal volume {logical}:")
-        del self.volumes[logical]
-
-    def last(self) -> str:
-        return list(self.volumes.keys())[-1]
+    def dismount(self, volume_id: str, cmd: str = "DISMOUNT") -> None:
+        """
+        Disassociates a logical disk assignment from a file
+        """
+        volume_id = self.canonical_volume(volume_id)
+        if volume_id == DEFAULT_VOLUME:
+            raise Exception(f"?{cmd}-F-Illegal volume {volume_id}:")
+        try:
+            fs = self.get(volume_id, cmd=cmd)
+        except Exception:
+            raise Exception(f"?{cmd}-F-Illegal volume {volume_id}:")
+        self.volumes = {k: v for k, v in self.volumes.items() if v != fs}

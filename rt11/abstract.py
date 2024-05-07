@@ -54,6 +54,10 @@ class AbstractFile(ABC):
         """Get file size in bytes."""
 
     @abstractmethod
+    def get_block_size(self) -> int:
+        """Get file block size in bytes"""
+
+    @abstractmethod
     def close(self) -> None:
         """Close the file"""
 

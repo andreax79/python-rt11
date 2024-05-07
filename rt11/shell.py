@@ -26,9 +26,9 @@ import sys
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .abstract import AbstractFilesystem
+from .abstract import AbstractDirectoryEntry, AbstractFilesystem
 from .commons import PartialMatching, splitdrive
-from .volumes import Volumes
+from .volumes import DEFAULT_VOLUME, Volumes
 
 try:
     import readline
@@ -80,6 +80,23 @@ def flgtxt(arg: str) -> Callable[[Callable], Callable]:
         return func
 
     return decorator
+
+
+def copy_file(
+    from_fs: AbstractFilesystem,
+    from_entry: AbstractDirectoryEntry,
+    to_fs: AbstractFilesystem,
+    to_path: str,
+    verbose: int,
+    cmd: str = "COPY",
+) -> None:
+    try:
+        content = from_fs.read_bytes(from_entry.fullname)
+        to_fs.write_bytes(to_path, content, from_entry.creation_date)
+    except Exception:
+        if verbose:
+            traceback.print_exc()
+        raise Exception(f"?{cmd}-F-Error copying {from_entry.fullname}")
 
 
 class Shell(cmd.Cmd):
@@ -138,7 +155,7 @@ class Shell(cmd.Cmd):
             if text:
                 volume_id, path = splitdrive(text)
             else:
-                volume_id = None
+                volume_id = DEFAULT_VOLUME
                 path = ""
             pattern = path + "*"
             fs = self.volumes.get(volume_id)
@@ -239,9 +256,10 @@ class Shell(cmd.Cmd):
         cmd, arg = line[:i], line[i:].strip()
         return cmd.lower(), arg, line
 
-    def default(self, line: str) -> None:
+    def default(self, line: str) -> bool:
         if line.endswith(":"):
             self.volumes.set_default_volume(line)
+            return False
         else:
             raise Exception("?KMON-F-Illegal command")
 
@@ -280,7 +298,7 @@ DIR             Lists file directories
         if args:
             volume_id, pattern = splitdrive(args[0])
         else:
-            volume_id = None
+            volume_id = DEFAULT_VOLUME
             pattern = None
         fs = self.volumes.get(volume_id, cmd="DIR")
         fs.dir(pattern, options)
@@ -356,38 +374,28 @@ COPY            Copies files
         elif from_len == 1:  # One file to be copied
             source = list(from_list)[0]
             if not to:
-                to = os.path.join(self.volumes.get(to_volume_id).get_pwd(), source.fullname)
+                to_path = os.path.join(self.volumes.get(to_volume_id).get_pwd(), source.fullname)
             elif to and to_fs.isdir(to):
-                to = os.path.join(to, source.basename)
-            entry = from_fs.get_file_entry(source.fullname)
-            if not entry:
+                to_path = os.path.join(to, source.basename)
+            else:
+                to_path = to
+            from_entry = from_fs.get_file_entry(source.fullname)
+            if not from_entry:
                 raise Exception(f"?COPY-F-Error copying {source.fullname}")
             sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, source.fullname, to_volume_id, to))
-            try:
-                content = from_fs.read_bytes(source.fullname)
-                to_fs.write_bytes(to, content, entry.creation_date)
-            except Exception:
-                if self.verbose:
-                    traceback.print_exc()
-                raise Exception(f"?COPY-F-Error copying {source.fullname}")
+            copy_file(from_fs, from_entry, to_fs, to_path, self.verbose, cmd="COPY")
         else:
             if not to:
                 to = self.volumes.get(to_volume_id).get_pwd()
             elif not to_fs.isdir(to):
                 raise Exception("?COPY-F-Target must be a volume or a directory")
-            for entry in from_fs.filter_entries_list(cfrom):
+            for from_entry in from_fs.filter_entries_list(cfrom):
                 if to:
-                    target = os.path.join(to, entry.basename)
+                    to_path = os.path.join(to, from_entry.basename)
                 else:
-                    target = entry.basename
-                sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, entry.fullname, to_volume_id, target))
-                try:
-                    content = from_fs.read_bytes(entry.fullname)
-                    to_fs.write_bytes(target, content, entry.creation_date)
-                except Exception:
-                    if self.verbose:
-                        traceback.print_exc()
-                    raise Exception(f"?COPY-F-Error copying {entry.fullname}")
+                    to_path = from_entry.basename
+                sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, from_entry.fullname, to_volume_id, to_path))
+                copy_file(from_fs, from_entry, to_fs, to_path, self.verbose, cmd="COPY")
 
     @flgtxt("DEL_ETE")
     def do_delete(self, line: str) -> None:
@@ -537,6 +545,63 @@ DISMOUNT        Disassociates a logical disk assignment from a file
             logical = ask("Volume? ")
         self.volumes.dismount(logical)
 
+    @flgtxt("AS_SIGN")
+    def do_assign(self, line: str) -> None:
+        # fmt: off
+        """
+ASSIGN          Associates a logical device name with a device
+
+  SYNTAX
+        ASSIGN device-name logical-device-name
+
+  SEMANTICS
+        Associates a logical device name with a device.
+        Logical-device-name is one to three alphanumeric characters long.
+
+  EXAMPLES
+        ASSIGN DL0: INP:
+
+        """
+        # fmt: on
+        args, options = extract_options(line)
+        if len(args) > 2:
+            sys.stdout.write("?ASSIGN-F-Too many arguments\n")
+            return
+        volume_id = len(args) > 0 and args[0]
+        logical = len(args) > 1 and args[1]
+        if not volume_id:
+            volume_id = ask("Device name? ")
+        if not logical:
+            logical = ask("Logical name? ")
+        self.volumes.assign(volume_id, logical, verbose=self.verbose)
+
+    @flgtxt("DEA_SSIGN")
+    def do_deassign(self, line: str) -> None:
+        # fmt: off
+        """
+DEASSIGN        Removes logical device name assignments
+
+  SYNTAX
+        DEASSIGN logical-device-name
+
+  SEMANTICS
+        The DEASSIGN command disassociates a logical name.
+
+  EXAMPLES
+        DEASSIGN INP:
+
+        """
+        # fmt: on
+        args = shlex.split(line)
+        if len(args) > 1:
+            sys.stdout.write("?DEASSIGN-F-Too many arguments\n")
+            return
+        if args:
+            logical = args[0]
+        else:
+            logical = ask("Volume? ")
+        self.volumes.deassign(logical, cmd="DEASSIGN")
+
     @flgtxt("INI_TIALIZE")
     def do_initialize(self, line: str) -> None:
         # fmt: off
@@ -628,9 +693,11 @@ SHOW            Displays the volume assignment
         sys.stdout.write("Volumes\n")
         sys.stdout.write("-------\n")
         for k, v in self.volumes.volumes.items():
-            if k != "DK":
-                label = f"{k}:"
-                sys.stdout.write(f"{label:<10} {v}\n")
+            label = f"{k}:"
+            sys.stdout.write(f"{label:<6} {v}\n")
+        for k, v in self.volumes.logical.items():
+            label = f"{k}:"
+            sys.stdout.write(f"{label:<4} = {v}:\n")
 
     def do_exit(self, line: str) -> None:
         # fmt: off
@@ -647,7 +714,7 @@ EXIT            Exit the shell
         raise SystemExit
 
     @flgtxt("H_ELP")
-    def do_help(self, arg) -> None:
+    def do_help(self, arg: str) -> None:
         # fmt: off
         """
 HELP            Displays commands help
@@ -662,28 +729,21 @@ HELP            Displays commands help
                 arg = "batch"
             try:
                 arg = self.cmd_matching.get(arg) or arg
-                doc = getattr(self, "do_" + arg).__doc__
+                doc = getattr(self, f"do_{arg}").__doc__
                 if doc:
-                    self.stdout.write("%s\n" % str(doc))
+                    self.stdout.write(f"{str(doc)}\n")
                     return
             except AttributeError:
                 pass
             self.stdout.write("%s\n" % str(self.nohelp % (arg,)))
         else:
-            names = self.get_names()
-            help = {}
+            names = ["do_batch"] + sorted([x for x in self.get_names() if x.startswith("do_") and x != "do_batch"])
             for name in names:
-                if name[:5] == "help_":
-                    help[name[5:]] = 1
-            for name in sorted(set(names)):
-                if name[:3] == "do_":
-                    cmd = name[3:]
-                    if cmd in help:
-                        del help[cmd]
-                    elif getattr(self, name).__doc__:
-                        sys.stdout.write("%s\n" % getattr(self, name).__doc__.split("\n")[1])
+                if getattr(self, name).__doc__:
+                    sys.stdout.write(getattr(self, name).__doc__.split("\n")[1])
+                    sys.stdout.write("\n")
 
-    def do_shell(self, arg) -> None:
+    def do_shell(self, arg: str) -> None:
         # fmt: off
         """
 SHELL           Executes a system shell command

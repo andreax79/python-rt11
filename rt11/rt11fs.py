@@ -150,6 +150,12 @@ class RT11File(AbstractFile):
         """
         return self.size
 
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
     def close(self) -> None:
         """
         Close the file

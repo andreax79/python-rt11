@@ -5,6 +5,30 @@ from rt11.rt11fs import RT11Filesystem
 from rt11.shell import Shell
 
 
+def test_help():
+    shell = Shell(verbose=True)
+    # Help
+    shell.onecmd("HELP", batch=True)
+    shell.onecmd("HELP HELP", batch=True)
+    shell.onecmd("HELP *", batch=True)
+
+
+def test_assign():
+    shell = Shell(verbose=True)
+    # Assign/Deassign
+    with pytest.raises(Exception):
+        shell.onecmd("ASSIGN XX: T1:", batch=True)
+    shell.onecmd("ASSIGN SY: T1:", batch=True)
+    shell.onecmd("ASSIGN SY: T2:", batch=True)
+    shell.onecmd("ASSIGN T2: T3:", batch=True)
+    shell.onecmd("DIR /BRIEF T3:", batch=True)
+    shell.onecmd("DEASSIGN T3:", batch=True)
+    with pytest.raises(Exception):
+        shell.onecmd("DIR /BRIEF T3:", batch=True)
+    with pytest.raises(Exception):
+        shell.onecmd("DEASSIGN T3:", batch=True)
+
+
 def test_cmds():
     shell = Shell(verbose=True)
     sys_fs = shell.volumes.get('DK')
@@ -21,10 +45,6 @@ def test_cmds():
     t = f.read_block(block_number=0, number_of_blocks=1000)
     assert f.size == len(t)
     f.close()
-    # Help
-    shell.onecmd("HELP", batch=True)
-    shell.onecmd("HELP HELP", batch=True)
-    shell.onecmd("PWD", batch=True)
     # Create ad initialize the RT-11 filesystem
     shell.onecmd("CREATE test0.dsk 500", batch=True)
     shell.onecmd("MOUNT T: test0.dsk", batch=True)
@@ -72,6 +92,9 @@ def test_cmds():
     shell.onecmd("DEL LICENSE", batch=True)
     assert len(list(fs.entries_list)) == l0
     shell.onecmd("SY:", batch=True)
+    # Copy/delete multiple files
+    shell.onecmd("COPY py* T:", batch=True)
+    shell.onecmd("DELETE T:py*", batch=True)
     # Delete the test disk
     shell.onecmd("DISMOUNT T:", batch=True)
     shell.onecmd("DEL test0.dsk", batch=True)

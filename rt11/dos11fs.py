@@ -65,13 +65,15 @@ class DOS11File(AbstractFile):
     entry: "DOS11DirectoryEntry"
     closed: bool
     size: int
+    block_size: int
     contiguous: bool
 
     def __init__(self, entry: "DOS11DirectoryEntry"):
         self.entry = entry
         self.closed = False
-        self.size = entry.length * BLOCK_SIZE
         self.contiguous = entry.contiguous
+        self.block_size = BLOCK_SIZE if self.contiguous else LINKED_FILE_BLOCK_SIZE
+        self.size = entry.length * self.block_size
 
     def read_block(
         self,
@@ -128,6 +130,12 @@ class DOS11File(AbstractFile):
         Get file size in bytes
         """
         return self.size
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return self.block_size
 
     def close(self) -> None:
         """
