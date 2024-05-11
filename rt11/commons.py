@@ -25,6 +25,8 @@ __all__ = [
     "splitdrive",
     "date_to_rt11",
     "getch",
+    "swap_words",
+    "hex_dump",
     "PartialMatching",
 ]
 
@@ -33,6 +35,7 @@ from datetime import date
 from typing import Dict, Optional, Tuple
 
 BLOCK_SIZE = 512
+BYTES_PER_LINE = 16
 
 
 def bytes_to_word(val: bytes, position: int = 0) -> int:
@@ -73,6 +76,21 @@ def date_to_rt11(val: Optional[date]) -> int:
         age = 3
     year = (val.year - 1972) % 32
     return year + (val.day << 5) + (val.month << 10) + (age << 14)
+
+
+def swap_words(val: int) -> int:
+    """
+    Swap high order and low order word in a 32-bit integer
+    """
+    return (val >> 16) + ((val & 0xFFFF) << 16)
+
+
+def hex_dump(data: bytes, bytes_per_line: int = BYTES_PER_LINE) -> None:
+    for i in range(0, len(data), bytes_per_line):
+        line = data[i : i + bytes_per_line]
+        hex_str = " ".join([f"{x:02x}" for x in line])
+        ascii_str = "".join([chr(x) if 32 <= x <= 126 else "." for x in line])
+        sys.stdout.write(f"{i:08x}   {hex_str.ljust(3 * bytes_per_line)}  {ascii_str}\n")
 
 
 try:

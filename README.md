@@ -1,7 +1,7 @@
 python-rt11
 ===========
 
-Utility for reading/writing RT-11 filesystems and reading DOS-11 filesystems
+Utility for reading/writing RT-11 filesystems and reading DOS-11 and Files-11 filesystems.
 
 The file system must be logically mounted and assigned a logical device name before use.
 This is done with the MOUNT command.
@@ -88,6 +88,31 @@ ZFLAB0.BIN     8  22-Mar-80
 
 TOTL BLKS:   472
 TOTL FILES:   45
+
+[DL0:] mount dl2: /dos dos_rk.dsk
+?MOUNT-I-Disk dos_rk.dsk mounted to DL0:
+[DL0:] dir DL2:
+DIRECTORY DL2: [1,1]
+
+24-MAY-11
+
+BADB  .SYS     1  05-NOV-98 <377>
+MONLIB.CIL   180C 05-NOV-98 <377>
+VERIFY.LDA    65C 05-NOV-98 <233>
+FOO   .BAR     3  06-NOV-98 <233>
+OVRLAY.LIB     5  05-NOV-98 <233>
+LINK  .LDA    67C 05-NOV-98 <233>
+CILUS .LDA    33C 05-NOV-98 <233>
+PIP   .LDA    36C 05-NOV-98 <233>
+MACRO .LDA    39C 05-NOV-98 <233>
+EDIT  .LDA    13C 05-NOV-98 <233>
+FILDMP.LDA     9C 05-NOV-98 <233>
+LIBR  .LDA    10C 05-NOV-98 <233>
+FILCOM.LDA    12C 05-NOV-98 <233>
+CREF  .LDA     9C 05-NOV-98 <233>
+
+TOTL BLKS:   482
+TOTL FILES:   14
 ```
 
 Links

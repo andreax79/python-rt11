@@ -272,7 +272,7 @@ class NativeFilesystem(AbstractFilesystem):
             fullname = os.path.join(self.pwd, fullname)
         return os.path.exists(os.path.join(self.base, fullname))
 
-    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("brief"):
             # Lists only file names and file types
             for x in self.filter_entries_list(pattern):

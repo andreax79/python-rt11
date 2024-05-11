@@ -27,9 +27,10 @@ from datetime import date, timedelta
 from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word
+from .commons import BLOCK_SIZE, bytes_to_word, hex_dump
 from .rad50 import rad2asc
 from .rt11fs import rt11_canonical_filename
+from .uic import UIC
 
 __all__ = [
     "DOS11File",
@@ -151,12 +152,31 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     """
     User File Directory Entry
 
+        +-------------------------------------+
+     0  |               File                  |
+     2  |               name                  |
+        +-------------------------------------+
+     4  |            Extension                |
+        +-------------------------------------+
+     6  |Type| Reserved |    Creation Date    |
+        +-------------------------------------+
+     8  |          Next free byte             |
+        +-------------------------------------+
+    10  |           Start block #             |
+        +-------------------------------------+
+    12  |        Length (# of blocks)         |
+        +-------------------------------------+
+    14  |         Last block written          |
+        +-------------------------------------+
+    16  |Lock | Usage count | Protection code |
+        +-------------------------------------+
+
     Disk Operating System Monitor - System Programmers Manual, Pag 136
     http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
     """
 
     ufd_block: "UserFileDirectoryBlock"
-    uic: Optional["UIC"] = None
+    uic: Optional[UIC] = None
     filename: str = ""
     filetype: str = ""
     raw_creation_date: int = 0
@@ -222,13 +242,25 @@ class UserFileDirectoryBlock(object):
     """
     User File Directory Block
 
-    +--------------+
-    |Next block    |
-    +--------------+
-    |Entries     1 |
-    |.             |
-    |.          28 |
-    +--------------+
+          +-------------------------------------+
+       0  |          Link to next MFD           |
+          +-------------------------------------+
+       2  | UDF Entries                       1 |
+          | .                                   |
+          | .                                28 |
+          +-------------------------------------+
+
+    UDF Entry
+
+          +-------------------------------------+
+       0  |     Group code  |     User code     |
+          +-------------------------------------+
+       2  |          UFD start block #          |
+          +-------------------------------------+
+       4  |         # of words in UFD entry     |
+          +-------------------------------------+
+       6  |                 0                   |
+          +-------------------------------------+
 
     Disk Operating System Monitor - System Programmers Manual, Pag 136
     http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
@@ -239,11 +271,11 @@ class UserFileDirectoryBlock(object):
     # Block number of the next user file directory block
     next_block_number = 0
     # User Identification Code
-    uic: Optional["UIC"] = None
+    uic: Optional[UIC] = None
     # User File Directory Block entries
     entries_list: List["DOS11DirectoryEntry"] = []
 
-    def __init__(self, fs: "DOS11Filesystem", uic: Optional["UIC"]):
+    def __init__(self, fs: "DOS11Filesystem", uic: Optional[UIC]):
         self.fs = fs
         self.uic = uic
 
@@ -275,69 +307,42 @@ class UserFileDirectoryBlock(object):
         return buf.getvalue()
 
 
-class UIC:
-    """
-    User Identification Code
-    The format of UIC if [ggg,uuu] there ggg and uuu are octal digits
-    The value on the left of the comma is represents the group number,
-    the value on the right represents the user's number within the group.
-    """
-
-    group: int
-    user: int
-
-    def __init__(self, group: int, user: int):
-        self.group = group & 0xFF
-        self.user = user & 0xFF
-
-    @classmethod
-    def from_str(cls, code_str: str) -> "UIC":
-        code_str = code_str.split("[")[1].split("]")[0]
-        group_str, user_str = code_str.split(",")
-        group = int(group_str, 8) & 0xFF
-        user = int(user_str, 8) & 0xFF
-        return cls(group, user)
-
-    @classmethod
-    def from_word(cls, code_int: int) -> "UIC":
-        group = code_int >> 8
-        user = code_int & 0xFF
-        return cls(group, user)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, UIC):
-            return self.group == other.group and self.user == other.user
-        elif isinstance(other, str):
-            other_uic = UIC.from_str(other)
-            return self.group == other_uic.group and self.user == other_uic.user
-        elif isinstance(other, int):
-            other_uic = UIC.from_word(other)
-            return self.group == other_uic.group and self.user == other_uic.user
-        else:
-            raise ValueError("Invalid type for comparison")
-
-    def __str__(self) -> str:
-        return f"[{self.group:o},{self.user:o}]"
-
-
 class MasterFileDirectoryEntry:
     """
     Master File Directory Block
 
-    +--------------+
-    |Next block    |
-    +--------------+
-    |Entries       |
-    |.             |
-    |.             |
-    +--------------+
+    MFD Block 1:
+
+          +-------------------------------------+
+          |        Block # of MFD Block 2       |
+          +-------------------------------------+
+          |           Interleave factor         |
+          +-------------------------------------+
+          |         Bitmap start block #        |
+          +-------------------------------------+
+          | Bitmap block                      1 |
+          | .                                   |
+          | .                                 n |
+          +-------------------------------------+
+          |                    0                |
+          +-------------------------------------+
+          |                                     |
+
+    MFD Block 2 - N:
+          +-------------------------------------+
+       0  |          Link to next MFD           |
+          +-------------------------------------+
+       2  | UDF Entries                       1 |
+          | .                                   |
+          | .                                28 |
+          +-------------------------------------+
 
     Disk Operating System Monitor - System Programmers Manual, Pag 135
     http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
     """
 
     fs: "DOS11Filesystem"
-    uic: Optional["UIC"] = None  # User Identification Code
+    uic: Optional[UIC] = None  # User Identification Code
     ufd_block: int = 0  # UFD start block
     num_words: int = 0  # num of words in UFD entry, always 9
     zero: int = 0  # always 0
@@ -367,6 +372,28 @@ class MasterFileDirectoryEntry:
 class DOS11Filesystem(AbstractFilesystem):
     """
     DOS-11/XXDP+ Filesystem
+
+    General disk layout:
+
+    Block
+          +-------------------------------------+
+    0     |            Bootstrap block          |
+          +-------------------------------------+
+    1     |             MFD Block #1            |
+          +-------------------------------------+
+    2     |             UFD Block #1            |
+          +-------------------------------------+
+          |           User linked files         |
+          |           other UFD blocks          |
+          |        User contiguous files        |
+          +-------------------------------------+
+    l-n   |             MFD Block #2            |
+          +-------------------------------------+
+    l-n-1 | Bitmap Block                      1 |
+          | .                                   |
+    l     | .                                 n |
+          +--------------------------------------
+
     """
 
     uic: UIC  # current User Identification Code
@@ -509,7 +536,7 @@ class DOS11Filesystem(AbstractFilesystem):
         entry = self.get_file_entry(fullname)
         return entry is not None
 
-    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
             for mfd in self.read_mfd_entries(uic=None):
@@ -519,8 +546,12 @@ class DOS11Filesystem(AbstractFilesystem):
         files = 0
         blocks = 0
         for x in self.filter_entries_list(pattern, include_all=True):
-            if i == 0 and self.xxdp and not options.get("brief"):
-                sys.stdout.write("ENTRY# FILNAM.EXT        DATE          LENGTH  START\n")
+            if i == 0 and not options.get("brief"):
+                if self.xxdp:
+                    sys.stdout.write("ENTRY# FILNAM.EXT        DATE          LENGTH  START\n")
+                else:
+                    dt = date.today().strftime('%y-%b-%d').upper()
+                    sys.stdout.write(f"DIRECTORY {volume_id}: {x.uic}\n\n{dt}\n\n")
             if x.is_empty:
                 continue
             i = i + 1
@@ -531,12 +562,16 @@ class DOS11Filesystem(AbstractFilesystem):
                 # Lists only file names and file types
                 sys.stdout.write(f"{fullname}\n")
                 continue
-            date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
+            creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
             attr = "C" if x.contiguous else ""
             if self.xxdp:
-                sys.stdout.write(f"{i:6} {fullname:>10s} {date:>14s} {x.length:>10d}    {x.file_position:06o}\n")
+                sys.stdout.write(
+                    f"{i:6} {fullname:>10s} {creation_date:>14s} {x.length:>10d}    {x.file_position:06o}\n"
+                )
             else:
-                sys.stdout.write(f"{fullname:>10s} {x.length:>5d}{attr:1} {date:>9s} <{x.protection_code:03o}>\n")
+                sys.stdout.write(
+                    f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}>\n"
+                )
             blocks += x.length
             files += 1
         if options.get("brief") or self.xxdp:
@@ -546,20 +581,11 @@ class DOS11Filesystem(AbstractFilesystem):
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
 
     def dump(self, name_or_block: str) -> None:
-        bytes_per_line = 16
-
-        def hex_dump(i: int, data: bytes) -> str:
-            hex_str = " ".join([f"{x:02x}" for x in data])
-            ascii_str = "".join([chr(x) if 32 <= x <= 126 else "." for x in data])
-            return f"{i:08x}   {hex_str.ljust(3 * bytes_per_line)}  {ascii_str}\n"
-
         if name_or_block.isnumeric():
             data = self.read_block(int(name_or_block))
         else:
-            print(name_or_block)
             data = self.read_bytes(name_or_block)
-        for i in range(0, len(data), bytes_per_line):
-            sys.stdout.write(hex_dump(i, data[i : i + bytes_per_line]))
+        hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
         if name_or_block:
@@ -573,7 +599,7 @@ class DOS11Filesystem(AbstractFilesystem):
         """
         Get filesystem size in bytes
         """
-        return self.f.get_size() // BLOCK_SIZE
+        return self.f.get_size()
 
     def initialize(self) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))

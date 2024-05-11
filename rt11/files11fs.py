@@ -1,0 +1,757 @@
+# Copyright (C) 2414 Andrea Bonomi <andrea.bonomi@gmail.com>
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+import errno
+import fnmatch
+import os
+import struct
+import sys
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Dict, Iterator, List, Optional
+
+from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .commons import BLOCK_SIZE, bytes_to_word, hex_dump, swap_words
+from .rad50 import asc2rad, rad2asc, rad50_word_to_asc
+from .uic import UIC
+
+__all__ = [
+    "Files11File",
+    "Files11DirectoryEntry",
+    "Files11Filesystem",
+]
+
+HOME_BLOCK = 1  # Home block
+INDEXF_SYS = 1  # The index file is the root of the Files-11
+BITMAP_SYS = 2  # Storage bitmap file
+BADBLK_SYS = 3  # Bad block file
+MFD_DIR = 4  # Volume master file directory (000000.DIR)
+READ_FILE_FULL = -1
+UC_CNB = 128  # Contiguous as possible flag
+
+MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+DIRECTORY_FILE_ENTRY_FORMAT = "<HHHHHHHH"
+DIRECTORY_FILE_ENTRY_LEN = 16
+HOME_BLOCK_FORMAT = '<HHHHHHH12s4sHHHH6sbbb7sH2sH14s382sI12s12s12s12s2sH'
+FILE_HEADER_FORMAT = '<BBHHHHHH32s'
+IDENT_AREA_FORMAT = '<HHHHHH7s6s7s6s7sB'
+MAP_AREA_FORMAT = '<BBHHBBBB'
+
+
+def files11_to_date(val: bytes, tim: Optional[bytes] = None) -> Optional[date]:
+    """
+    Translate Files-11 date to Python date
+    """
+    date_str = val.decode("ascii", errors="ignore")
+    year = int(date_str[5:7]) + 1900
+    month = MONTHS.index(date_str[2:5]) + 1
+    day = int(date_str[0:2])
+    if tim is not None:
+        tim_str = tim.decode("ascii", errors="ignore")
+        hour = int(tim_str[0:2])
+        minute = int(tim_str[2:4])
+        second = int(tim_str[4:6])
+    else:
+        hour = 0
+        minute = 0
+    return datetime(year, month, day, hour, minute, second)
+
+
+def files11_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> str:
+    """
+    Generate the canonical Files-11 name
+    """
+    fullname = (fullname or "").upper()
+    try:
+        filename, filetype = fullname.split(".", 1)
+    except Exception:
+        filename = fullname
+        filetype = "*" if wildcard else ""
+    filename = rad2asc(asc2rad(filename[0:3])) + rad2asc(asc2rad(filename[3:6])) + rad2asc(asc2rad(filename[6:9]))
+    filetype = rad2asc(asc2rad(filetype))
+    return f"{filename}.{filetype}"
+
+
+@dataclass
+class RetrievalPointer:
+    """
+    The retrieval pointers map the file blocks to volume blocks.
+    Each retrieval pointer describes a consecutively numbered
+    group of logical blocks which is part of the file.
+
+    Each retrieval pointer maps virtual blocks through (j + count)
+    into logical blocks k through (lbn + count), where
+    - count - represent a group of (count + 1) logical blocks
+    - lbn - logical block number of the first logical block in the group
+    - j - is the total number plus one of virtual blocks represented by
+      all preceding retrieval points in this and all preceding
+      headers of the file.
+    """
+
+    j: int
+    count: int
+    lbn: int
+
+    def __str__(self) -> str:
+        return f"[{self.j}:{self.j+self.count}] => [{self.lbn}:{self.lbn + self.count}]"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+class Files11File(AbstractFile):
+    header: "Files11FileHeader"
+    closed: bool
+
+    def __init__(self, header: "Files11FileHeader"):
+        self.header = header
+        self.closed = False
+
+    def read_block(
+        self,
+        block_number: int,
+        number_of_blocks: int = 1,
+    ) -> bytes:
+        """
+        Read block(s) of data from the file
+        """
+        if number_of_blocks == READ_FILE_FULL:
+            number_of_blocks = self.header.length
+        if (
+            self.closed
+            or block_number < 0
+            or number_of_blocks < 0
+            or block_number + number_of_blocks > self.header.length
+        ):
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        data = bytearray()
+        for i in range(block_number, block_number + number_of_blocks):
+            lbn = self.header.map_block(i)
+            t = self.header.fs.read_block(lbn)
+            data.extend(t)
+        return bytes(data)
+
+    def write_block(
+        self,
+        buffer: bytes,
+        block_number: int,
+        number_of_blocks: int = 1,
+    ) -> None:
+        """
+        Write block(s) of data to the file
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.header.length * BLOCK_SIZE
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
+    def close(self) -> None:
+        """
+        Close the file
+        """
+        self.closed = True
+
+    def __str__(self) -> str:
+        return self.header.fullname
+
+
+class Files11FileHeader:
+    """
+    Each file on a Files-11 volume is described by a file header.
+    The file header is a block that contains all the information
+    necessary to access the file.
+    """
+
+    fs: "Files11Filesystem"
+
+    idof: int  # Ident Area Offset
+    mpof: int  # Map Area Offset
+    fnum: int  # File Number
+    fseq: int  # File Sequence Number
+    flev: int  # File Structure Level
+    fown: int  # File Owner UIC
+    fpro: int  # File Protection Code
+    fcha: int  # File Characteristics
+    ufat: bytes  # User Attribute Area
+    # Ident Area
+    filename: str  # File Name
+    filetype: str  # File Type
+    fver: int  # Version Number
+    rvno: int  # Revision Number
+    rvdt: bytes  # Revision Date
+    rvti: bytes  # Revision Time
+    crdt: bytes  # Creation Date
+    crti: bytes  # Creation Time
+    exdt: bytes  # Expiration Date
+    # Map Area
+    esqn: int  # Extension Segment Number
+    ervn: int  # Extension Relative Volume Number
+    efnu: int  #  Extension File Number
+    efsq: int  #  Extension File Sequence Number
+    ctsz: int  # Block Count Field Size
+    lbsz: int  # LBN Field Size
+    use: int  # Map Words in Use
+    max: int  # Map Words Available
+    retrieval_pointers: List[RetrievalPointer]  # Retrieval Pointers
+    # FCS File Attribute Block Layout
+    rtyp: int  # Record Type
+    ratt: int  # Record Attributes
+    rsiz: int  # Record Size
+    hibk: int  # Highest VBN Allocated
+    efbk: int  # End of File Block
+    ffby: int  # First Free Byte
+
+    def __init__(self, fs: "Files11Filesystem"):
+        self.fs = fs
+
+    def read(self, buffer: bytes, position: int = 0) -> None:
+        (
+            self.idof,  # 1 byte Ident Area Offset
+            self.mpof,  # 1 byte Map Area Offset
+            self.fnum,  # 1 word File Number
+            self.fseq,  # 1 word File Sequence Number
+            self.flev,  # 1 word File Structure Level
+            self.fown,  # 1 word File Owner UIC
+            self.fpro,  # 1 word File Protection Code
+            self.fcha,  # 1 word File Characteristics
+            self.ufat,  # 32 bytes User Attribute Area
+        ) = struct.unpack_from(FILE_HEADER_FORMAT, buffer, position)
+        if self.mpof == 0:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), "")
+        # print(f"{self.idof=} {self.mpof=} {self.fnum=}")
+        # Ident Area
+        # It contains identification and accounting data about the file
+        (
+            fnam0,  #     1 word  File Name
+            fnam1,  #     1 word
+            fnam2,  #     1 word
+            ftyp,  #      1 word  File Type
+            self.fver,  # 1 word  Version Number
+            self.rvno,  # 1 word  Revision Number
+            self.rvdt,  # 7 bytes Revision Date
+            self.rvti,  # 6 bytes Revision Time
+            self.crdt,  # 7 bytes Creation Date
+            self.crti,  # 6 bytes Creation Time
+            self.exdt,  # 7 bytes Expiration Date
+            _,
+        ) = struct.unpack_from(IDENT_AREA_FORMAT, buffer, position + self.idof * 2)
+        self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
+        self.filetype = rad50_word_to_asc(ftyp)
+        # Map Area
+        # It describes the mapping of virtual blocks of the file to the logical blocks of the volume
+        (
+            self.esqn,  # 1 byte Extension Segment Number
+            self.ervn,  # 1 byte Extension Relative Volume Number
+            self.efnu,  # 1 word Extension File Number
+            self.efsq,  # 1 word Extension File Sequence Number
+            self.ctsz,  # 1 byte Block Count Field Size
+            self.lbsz,  # 1 byte LBN Field Size
+            self.use,  #  1 byte Map Words in Use
+            self.max,  #  1 byte Map Words Available
+        ) = struct.unpack_from(MAP_AREA_FORMAT, buffer, position + self.mpof * 2)
+        # FCS File Attribute Block
+        FCS_FORMAT = "<BBHIIH"
+        (
+            self.rtyp,  #  1 byte Record Type
+            self.ratt,  #  1 byte Record Attributes
+            self.rsiz,  #  1 word Record Size
+            self.hibk,  #  1 long Highest VBN Allocated
+            self.efbk,  #  1 long End of File Block
+            self.ffby,  #  1 word First Free Byte
+        ) = struct.unpack_from(FCS_FORMAT, self.ufat, 0)
+        self.hibk = swap_words(self.hibk)
+        self.efbk = swap_words(self.efbk)
+        self.parse_map(buffer, position)
+
+    def parse_map(self, buffer: bytes, position: int = 0) -> None:
+        """
+        Load the retrieval pointers into self.map
+        """
+        rtrv = position + self.mpof * 2 + 10
+        j = 0
+        self.map_length = 0
+        self.retrieval_pointers = []
+        for i in range(rtrv, rtrv + self.use * 2, 4):
+            if self.ctsz == 1 and self.lbsz == 3:  # Format 1
+                # Byte 1 contains the high order bits of LBN
+                high_lbn = buffer[i]
+                # Byte 2 contains the count field
+                count = buffer[i + 1] + 1
+                # Bytes 3 and 4 contain the low 16 bits of the LBN
+                low_lbn = bytes_to_word(buffer[i + 2 : i + 4])
+                lbn = (high_lbn << 16) + low_lbn
+                self.retrieval_pointers.append(RetrievalPointer(j, count, lbn))
+                j = j + count
+            else:
+                print(self)
+                print(self.ctsz, self.lbsz)
+                assert False
+        self.map_length = j
+
+    def map_block(self, block_number: int) -> int:
+        block_number = block_number
+        for rp in self.retrieval_pointers:
+            if block_number < rp.j + rp.count:
+                return rp.lbn - rp.j + block_number
+        raise OSError(errno.EIO, os.strerror(errno.EIO))
+
+    @property
+    def basename(self) -> str:
+        return f"{self.filename}.{self.filetype}"
+
+    @property
+    def length(self) -> int:
+        return self.map_length
+
+    @property
+    def uic(self) -> UIC:
+        return UIC.from_word(self.fown)
+
+    def __str__(self) -> str:
+        return f"{self.fnum:>5},{self.fseq:<5} {str(self.uic):9s} {self.basename:>14};{self.fver}  FCHA: {self.fcha:04x}  RTYP: {self.rtyp:1}  Length: {self.length:9}"
+
+    def __repr__(self) -> str:
+        return str(self.__dict__)
+
+
+class Files11DirectoryEntry(AbstractDirectoryEntry):
+    """
+    Each directory entry contains the following:
+
+    File ID  The File ID of the file that this directory entry represents.
+    Name     The name of the file, up to 9 characters.
+    Type     The type of the file, up to 3 characters.
+    Version  The version number of the file
+    """
+
+    fs: "Files11Filesystem"
+    _header: Optional["Files11FileHeader"]
+
+    fnum: int  # File Number
+    fseq: int  # File Sequence Number
+    fvol: int  # Relative Volume Number
+    filename: str  # File Name
+    filetype: str  # File Type
+    fver: int  # Version Number
+    uic: Optional[UIC] = None
+
+    def __init__(self, fs: "Files11Filesystem"):
+        self.fs = fs
+        self._header = None
+
+    def read(self, buffer: bytes, position: int = 0) -> None:
+        (
+            self.fnum,  # 1 word File Number
+            self.fseq,  # 1 word File Sequence Number
+            self.fvol,  # 1 word Relative Volume Number
+            fnam0,  #     1 word File Name
+            fnam1,  #     1 word
+            fnam2,  #     1 word
+            ftyp,  #      1 word File Type
+            self.fver,  # 1 word File Version
+        ) = struct.unpack_from(DIRECTORY_FILE_ENTRY_FORMAT, buffer, position)
+        self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
+        self.filetype = rad50_word_to_asc(ftyp)
+
+    @property
+    def header(self) -> "Files11FileHeader":
+        if self._header is None:
+            self._header = self.fs.read_file_header(self.fnum)
+        return self._header
+
+    @property
+    def file_id(self) -> str:
+        """Each file in a volume set is uniquely identified by a File ID"""
+        return f"{self.fnum},{self.fseq},{self.fvol}"
+
+    @property
+    def is_empty(self) -> bool:
+        """
+        If the file number portiontion of the File ID field is zero,
+        then this record is empty.
+        """
+        return self.fnum == 0
+
+    @property
+    def fullname(self) -> str:
+        return f"{self.uic or ''}{self.filename}.{self.filetype}"
+
+    @property
+    def basename(self) -> str:
+        return f"{self.filename}.{self.filetype}"
+
+    @property
+    def creation_date(self) -> Optional[date]:
+        return files11_to_date(self.header.crdt, self.header.crti)
+
+    @property
+    def length(self) -> int:
+        return self.header.length
+
+    def delete(self) -> bool:
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def __str__(self) -> str:
+        return f"File ID {'(' + self.file_id + ')':16} UIC: {str(self.uic):9} Name: {self.basename:12} Ver: {self.fver} FCHA: {self.header.fcha:04x} RTYP: {self.header.rtyp:1} Length: {self.header.length:9}"
+
+
+class Files11Filesystem(AbstractFilesystem):
+    """
+    Files-11 Filesystem
+    """
+
+    uic: UIC  # current User Identification Code
+
+    ibsz: int  #     2 bytes  Index File Bitmap Size
+    iblb: int  #     4 bytes  Index File Bitmap LBN
+    fmax: int  #     2 bytes  Maximum Number of Files
+    sbcl: int  #     2 bytes  Storage Bitmap Cluster Factor
+    dvty: int  #     2 bytes  Disk Device Type
+    vlev: int  #     2 bytes  Volume Structure Level
+    vnam: bytes  #  12 bytes  Volume Name
+    vown: int  #     2 bytes  Volume Owner UIC
+    vpro: int  #     2 bytes  Volume Protection Code
+    vcha: int  #     2 bytes  Volume Characteristics
+    dfpr: int  #     2 bytes  Default File Protection
+    wisz: int  #     1 byte   Default Window Size
+    fiex: int  #     1 byte   Default File Extend
+    lruc: int  #     1 byte   Directory Pre-Access Limit
+    revd: int  #     7 bytes  Date of Last Home Block Revision
+    revc: int  #     2 bytes  Count of Home Block Revisions
+    chk1: int  #     2 bytes  First Checksum
+    vdat: bytes  #  14 bytes  Volume Creation Date
+    pksr: int  #     4 bytes  Pack Serial Number
+    indn: bytes  #  12 bytes  Volume Name
+    indo: bytes  #  12 bytes  Volume Owner
+    indf: bytes  #  12 bytes  Format Type  - DECFILE11A
+    chk2: int  #     2 bytes  Second Checksum
+
+    def __init__(self, file: "AbstractFile"):
+        self.f = file
+        self.read_home()
+        self.uic = UIC(0o1, 0o1)
+        self.read_home()
+
+    def read_home(self) -> None:
+        """Read home block"""
+        t = self.read_block(HOME_BLOCK)
+        (
+            self.ibsz,  #   2 bytes  Index File Bitmap Size
+            iblb_h,  #      2 bytes  Index File Bitmap LBN (high order)
+            iblb_l,  #      2 bytes  Index File Bitmap LBN (low order)
+            self.fmax,  #   2 bytes  Maximum Number of Files
+            self.sbcl,  #   2 bytes  Storage Bitmap Cluster Factor
+            self.dvty,  #   2 bytes  Disk Device Type
+            self.vlev,  #   2 bytes  Volume Structure Level
+            self.vnam,  #  12 bytes  Volume Name
+            _,  #           4 bytes  Unused
+            self.vown,  #   2 bytes  Volume Owner UIC
+            self.vpro,  #   2 bytes  Volume Protection Code
+            self.vcha,  #   2 bytes  Volume Characteristics
+            self.dfpr,  #   2 bytes  Default File Protection
+            _,  #           6 bytes  Unused
+            self.wisz,  #   1 byte   Default Window Size
+            self.fiex,  #   1 byte   Default File Extend
+            self.lruc,  #   1 byte   Directory Pre-Access Limit
+            self.revd,  #   7 bytes  Date of Last Home Block Revision
+            self.revc,  #   2 bytes  Count of Home Block Revisions
+            _,  #           2 bytes  Unused
+            self.chk1,  #   2 bytes  First Checksum
+            self.vdat,  #  14 bytes  Volume Creation Date
+            _,  #         382 bytes  Unused
+            self.pksr,  #   4 bytes  Pack Serial Number
+            _,  #          12 bytes  Unused
+            self.indn,  #  12 bytes  Volume Name
+            self.indo,  #  12 bytes  Volume Owner
+            self.indf,  #  12 bytes  Format Type  - DECFILE11A
+            _,  #           2 bytes  Unused
+            self.chk2,  #   2 bytes  Second Checksum
+        ) = struct.unpack(HOME_BLOCK_FORMAT, t)
+        assert self.vlev == 0o401 or self.vlev == 0o402
+        assert self.ibsz
+        self.uic = UIC.from_word(self.vown)
+        self.iblb = (iblb_h << 16) + iblb_l
+        # print(f"{self.ibsz=} {self.iblb=}")
+
+    def read_block(
+        self,
+        block_number: int,
+        number_of_blocks: int = 1,
+    ) -> bytes:
+        return self.f.read_block(block_number, number_of_blocks)
+
+    def write_block(
+        self,
+        buffer: bytes,
+        block_number: int,
+        number_of_blocks: int = 1,
+    ) -> None:
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def read_file_header(self, file_number: int) -> Files11FileHeader:
+        """
+        Read file header by file number
+        """
+        if file_number <= 16:
+            # The first 16 file headers are logically contiguous
+            # with the index file bitmap
+            block_number = self.iblb + file_number
+        else:
+            # The other files must be located through the mapping
+            # data in the index file header
+            indexfs = self.read_file_header(INDEXF_SYS)
+            block_number = indexfs.map_block(file_number)
+        buffer = self.read_block(block_number)
+        file_header = Files11FileHeader(self)
+        file_header.read(buffer)
+        assert file_header.flev == 0o401
+        return file_header
+
+    def read_directory(self, file_number: int, uic: Optional[UIC] = None) -> Iterator["Files11DirectoryEntry"]:
+        """
+        Read directory by file number
+        """
+        header = self.read_file_header(file_number)
+        try:
+            f = Files11File(header)
+            buffer = f.read_block(0, READ_FILE_FULL)
+            for pos in range(0, len(buffer), DIRECTORY_FILE_ENTRY_LEN):
+                entry = Files11DirectoryEntry(self)
+                entry.read(buffer, position=pos)
+                entry.uic = uic
+                if not entry.is_empty:
+                    yield entry
+        finally:
+            f.close()
+
+    def read_dir_entries(self, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
+        if uic.group == 0 and uic.user == 0:
+            # Master File Directory
+            dir_file_number = MFD_DIR
+        else:
+            # Get UIC directory file number
+            uic_dir = f"{uic.group:03o}{uic.user:03o}.DIR"
+            uic_dir_entry = None
+            for entry in self.read_directory(MFD_DIR):
+                if entry.fullname == uic_dir:
+                    uic_dir_entry = entry
+            if uic_dir_entry is None:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
+            dir_file_number = uic_dir_entry.fnum
+        return self.read_directory(dir_file_number, uic=uic)
+
+    def files11_canonical_filename(self, fullname: str, wildcard: bool = False) -> str:
+        try:
+            if "[" in fullname:
+                uic: Optional[UIC] = UIC.from_str(fullname)
+                fullname = fullname.split("]", 1)[1]
+            else:
+                uic = None
+        except Exception:
+            uic = None
+        if fullname:
+            fullname = files11_canonical_filename(fullname, wildcard=wildcard)
+        return f"{uic or ''}{fullname}"
+
+    def filter_entries_list(
+        self, pattern: Optional[str], include_all: bool = False, wildcard: bool = True
+    ) -> Iterator["Files11DirectoryEntry"]:
+        uic = self.uic
+        if pattern:
+            if "[" in pattern:
+                try:
+                    uic = UIC.from_str(pattern)
+                    pattern = pattern.split("]", 1)[1]
+                except Exception:
+                    return
+            if pattern:
+                pattern = files11_canonical_filename(pattern, wildcard=wildcard)
+        for entry in self.read_dir_entries(uic=uic):
+            if entry.is_empty:
+                continue
+            if (
+                (not pattern)
+                or (wildcard and fnmatch.fnmatch(entry.basename, pattern))
+                or (not wildcard and entry.basename == pattern)
+            ):
+                yield entry
+
+    @property
+    def entries_list(self) -> Iterator["Files11DirectoryEntry"]:
+        for entry in self.read_dir_entries(uic=self.uic):
+            yield entry
+
+    def get_file_entry(self, fullname: str) -> Optional[Files11DirectoryEntry]:
+        fullname = self.files11_canonical_filename(fullname)
+        if not fullname:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+        return next(self.filter_entries_list(fullname, wildcard=False), None)
+
+    def open_file(self, fullname: str) -> Files11File:
+        entry = self.get_file_entry(fullname)
+        if not entry:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+        return Files11File(entry.header)
+
+    def read_bytes(self, fullname: str) -> bytes:
+        f = self.open_file(fullname)
+        try:
+            return f.read_block(0, READ_FILE_FULL)
+        finally:
+            f.close()
+
+    def write_bytes(
+        self,
+        fullname: str,
+        content: bytes,
+        creation_date: Optional[date] = None,
+    ) -> None:
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def create_file(
+        self,
+        fullname: str,
+        length: int,  # length in blocks
+        creation_date: Optional[date] = None,  # optional creation date
+    ) -> Optional[Files11DirectoryEntry]:
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def isdir(self, fullname: str) -> bool:
+        return False
+
+    def exists(self, fullname: str) -> bool:
+        entry = self.get_file_entry(fullname)
+        return entry is not None
+
+    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+        if options.get("uic"):
+            # Listing of all UIC
+            pattern = "[0,0]*.DIR"
+        i = 0
+        files = 0
+        blocks = 0
+        allocated = 0
+        for x in self.filter_entries_list(pattern, include_all=True):
+            if x.is_empty:
+                continue
+            if i == 0 and not options.get("brief"):
+                dt = datetime.today().strftime('%y-%b-%d %H:%M').upper()
+                sys.stdout.write(f"DIRECTORY {volume_id}:{x.uic}\n{dt}\n\n")
+            i = i + 1
+            if x.is_empty:
+                continue
+            fullname = f"{x.filename}.{x.filetype};{x.fver}"
+            if options.get("brief"):
+                # Lists only file names and file types
+                sys.stdout.write(f"{fullname}\n")
+                continue
+            date = x.creation_date and x.creation_date.strftime("%d-%b-%y %H:%M").upper() or ""
+            attr = "C" if UC_CNB & x.header.fcha else ""
+            length = f"{x.length}."
+            sys.stdout.write(f"{fullname:<19s} {length:<7s} {attr:1}  {date:>9s}\n")
+            blocks += x.length
+            allocated += x.length
+            files += 1
+        if options.get("brief"):
+            return
+        sys.stdout.write("\n")
+        sys.stdout.write(f"TOTAL OF {blocks}./{allocated}. BLOCKS IN {files}. FILES\n")
+
+    def dump(self, name_or_block: str) -> None:
+        if name_or_block.isnumeric():
+            data = self.read_block(int(name_or_block))
+        else:
+            data = self.read_bytes(name_or_block)
+        hex_dump(data)
+
+    def examine(self, name_or_block: Optional[str]) -> None:
+        def dump_struct(d: Dict[str, Any]) -> str:
+            result: List[str] = []
+            for k, v in d.items():
+                if type(v) in (int, str, bytes, UIC, list):
+                    if len(k) < 6:
+                        label = k.upper() + ":"
+                    else:
+                        label = k.replace('_', ' ').title() + ":"
+                    result.append(f"{label:20s}{v}")
+            return "\n".join(result)
+
+        uic = None
+        if name_or_block and "[" in name_or_block:
+            try:
+                uic = UIC.from_str(name_or_block)
+                name_or_block = name_or_block.split("]", 1)[1]
+            except Exception:
+                return
+        if name_or_block:
+            self.dump(name_or_block)
+        elif uic is not None:
+            for entry in self.read_dir_entries(uic):
+                sys.stdout.write(f"{entry}\n")
+        else:
+            sys.stdout.write("Home Block\n\n")
+            sys.stdout.write(dump_struct(self.__dict__))
+            indexfs = self.read_file_header(INDEXF_SYS)
+            sys.stdout.write("\n\nINDEXF.SYS Header\n\n")
+            sys.stdout.write(dump_struct(indexfs.__dict__))
+            f = Files11File(indexfs)
+            sys.stdout.write(f"\n\nINDEXF.SYS {f.header.length}\n\n")
+            for i in range(1, f.header.length):
+                try:
+                    h = self.read_file_header(i)
+                    sys.stdout.write(f"{h}\n")
+                except FileNotFoundError:
+                    pass
+            f.close()
+
+    def get_size(self) -> int:
+        """
+        Get filesystem size in bytes
+        """
+        return self.f.get_size()
+
+    def initialize(self) -> None:
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def close(self) -> None:
+        self.f.close()
+
+    def chdir(self, fullname: str) -> bool:
+        """
+        Change the current User Identification Code
+        """
+        try:
+            self.uic = UIC.from_str(fullname)
+            return True
+        except Exception:
+            return False
+
+    def get_pwd(self) -> str:
+        return str(self.uic)

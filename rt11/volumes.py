@@ -26,6 +26,7 @@ from typing import Dict, Optional
 from .abstract import AbstractFilesystem
 from .commons import splitdrive
 from .dos11fs import DOS11Filesystem
+from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
 from .rt11fs import RT11Filesystem
 
@@ -182,6 +183,8 @@ class Volumes(object):
         try:
             if fstype == "dos11":
                 self.volumes[logical] = DOS11Filesystem(fs.open_file(fullname))
+            elif fstype == "files11":
+                self.volumes[logical] = Files11Filesystem(fs.open_file(fullname))
             else:
                 self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
             sys.stdout.write(f"?{cmd}-I-Disk {path} mounted to {logical}:\n")

@@ -29,7 +29,7 @@ from datetime import date
 from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word, date_to_rt11, word_to_bytes
+from .commons import BLOCK_SIZE, bytes_to_word, date_to_rt11, hex_dump, word_to_bytes
 from .rad50 import asc2rad, rad2asc
 from .rx import (
     RX01_SECTOR_SIZE,
@@ -624,7 +624,7 @@ class RT11Filesystem(AbstractFilesystem):
         entry = self.get_file_entry(fullname)
         return entry is not None
 
-    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         i = 0
         files = 0
         blocks = 0
@@ -675,19 +675,11 @@ class RT11Filesystem(AbstractFilesystem):
         sys.stdout.write(" %d Free blocks\n" % unused)
 
     def dump(self, name_or_block: str) -> None:
-        bytes_per_line = 16
-
-        def hex_dump(i: int, data: bytes) -> str:
-            hex_str = ' '.join([f"{x:02x}" for x in data])
-            ascii_str = ''.join([chr(x) if 32 <= x <= 126 else "." for x in data])
-            return f"{i:08x}   {hex_str.ljust(3 * bytes_per_line)}  {ascii_str}\n"
-
         if name_or_block.isnumeric():
             data = self.read_block(int(name_or_block))
         else:
             data = self.read_bytes(name_or_block)
-        for i in range(0, len(data), bytes_per_line):
-            sys.stdout.write(hex_dump(i, data[i : i + bytes_per_line]))
+        hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
         if name_or_block:

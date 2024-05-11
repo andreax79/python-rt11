@@ -141,7 +141,7 @@ class AbstractFilesystem(object):
         """Check if the given path exists"""
 
     @abstractmethod
-    def dir(self, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         """List directory contents"""
 
     @abstractmethod

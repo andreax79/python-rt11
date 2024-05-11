@@ -301,7 +301,7 @@ DIR             Lists file directories
             volume_id = DEFAULT_VOLUME
             pattern = None
         fs = self.volumes.get(volume_id, cmd="DIR")
-        fs.dir(pattern, options)
+        fs.dir(volume_id, pattern, options)
 
     def do_ls(self, line: str) -> None:
         self.do_directory(line)
@@ -497,6 +497,8 @@ MOUNT           Assigns a logical disk unit to a file
   OPTIONS
    DOS
         Mount DOS-11 filesystem
+   FILES11
+        Mount Files-11 filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
@@ -504,7 +506,7 @@ MOUNT           Assigns a logical disk unit to a file
 
         """
         # fmt: on
-        args, options = extract_options(line, "/dos")
+        args, options = extract_options(line, "/dos", "/files11")
         if len(args) > 2:
             sys.stdout.write("?MOUNT-F-Too many arguments\n")
             return
@@ -514,7 +516,12 @@ MOUNT           Assigns a logical disk unit to a file
             logical = ask("Volume? ")
         if not path:
             path = ask("File? ")
-        fstype = "dos11" if options.get("dos") else None
+        if options.get("dos"):
+            fstype = "dos11"
+        elif options.get("files11"):
+            fstype = "files11"
+        else:
+            fstype = None
         self.volumes.mount(path, logical, fstype=fstype, verbose=self.verbose)
 
     @flgtxt("DIS_MOUNT")
