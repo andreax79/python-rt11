@@ -44,6 +44,10 @@ MFD_ENTRY_SIZE = 8
 UFD_ENTRY_SIZE = 18
 CONTIGUOUS_FILE_TYPE = 32768
 LINKED_FILE_BLOCK_SIZE = 510
+DECTAPE_MFD1_BLOCK = 0o100
+DECTAPE_MFD2_BLOCK = 0o101
+DECTAPE_UFD1_BLOCK = 0o102
+DECTAPE_UFD2_BLOCK = 0o103
 READ_FILE_FULL = -1
 
 
@@ -394,10 +398,17 @@ class DOS11Filesystem(AbstractFilesystem):
     l     | .                                 n |
           +--------------------------------------
 
+
+    DOS-11 format - Pag 204
+    http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
+
+    DECtape format - Pag 206
+    http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
     """
 
     uic: UIC  # current User Identification Code
     xxdp: bool = False  # MFD Variety #2 (XXDP+)
+    dectape: bool = False  # DECtape format
 
     def __init__(self, file: "AbstractFile"):
         self.f = file
@@ -424,8 +435,22 @@ class DOS11Filesystem(AbstractFilesystem):
         uic: Optional[UIC] = None,
     ) -> Iterator["MasterFileDirectoryEntry"]:
         """Read master file directory"""
-        t = self.read_block(mfd_block)
+
+        # Check DECtape format
+        t = self.read_block(DECTAPE_MFD1_BLOCK)
         mfd2 = bytes_to_word(t[0:2])
+        if mfd2 == DECTAPE_MFD2_BLOCK:
+            tmp = self.read_block(mfd2)
+            mfd3 = bytes_to_word(tmp[0:2])  # 0, DECtape has only 2 MFD
+            ufd1 = bytes_to_word(tmp[4:6])  # 0o102, First UFD
+            self.dectape = (mfd3 == 0) and (ufd1 == DECTAPE_UFD1_BLOCK)
+        else:
+            self.dectape = False
+
+        if not self.dectape:
+            t = self.read_block(mfd_block)
+            mfd2 = bytes_to_word(t[0:2])
+
         if mfd2 != 0:  # MFD Variety #1 (DOS-11)
             # DOS Course Handouts, Pag 13
             # http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DOS_CourseHandouts.pdf
@@ -492,7 +517,8 @@ class DOS11Filesystem(AbstractFilesystem):
         for mfd in self.read_mfd_entries(uic=self.uic):
             for ufd_block in mfd.read_ufd_blocks():
                 for entry in ufd_block.entries_list:
-                    yield entry
+                    if not entry.is_empty:
+                        yield entry
 
     def get_file_entry(self, fullname: str) -> Optional[DOS11DirectoryEntry]:
         fullname = self.dos11_canonical_filename(fullname)
