@@ -46,6 +46,7 @@ MFD_DIR = 4  # Volume master file directory (000000.DIR)
 READ_FILE_FULL = -1
 UC_CNB = 128  # Contiguous as possible flag
 
+DEFAULT_UIC = UIC(0o1, 0o1)
 MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 DIRECTORY_FILE_ENTRY_FORMAT = "<HHHHHHHH"
@@ -456,7 +457,7 @@ class Files11Filesystem(AbstractFilesystem):
     def __init__(self, file: "AbstractFile"):
         self.f = file
         self.read_home()
-        self.uic = UIC(0o1, 0o1)
+        self.uic = DEFAULT_UIC
         self.read_home()
 
     def read_home(self) -> None:

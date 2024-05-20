@@ -49,6 +49,7 @@ DECTAPE_MFD2_BLOCK = 0o101
 DECTAPE_UFD1_BLOCK = 0o102
 DECTAPE_UFD2_BLOCK = 0o103
 READ_FILE_FULL = -1
+DEFAULT_UIC = UIC(0o1, 0o1)
 
 
 def dos11_to_date(val: int) -> Optional[date]:
@@ -412,7 +413,7 @@ class DOS11Filesystem(AbstractFilesystem):
 
     def __init__(self, file: "AbstractFile"):
         self.f = file
-        self.uic = UIC(0o1, 0o1)
+        self.uic = DEFAULT_UIC
 
     def read_block(
         self,
@@ -566,7 +567,7 @@ class DOS11Filesystem(AbstractFilesystem):
         if options.get("uic"):
             # Listing of all UIC
             for mfd in self.read_mfd_entries(uic=None):
-                sys.stdout.write(f"[{mfd.uic.group:>3o},{mfd.uic.user:<3o}]\n")
+                sys.stdout.write(f"{mfd.uic.to_wide_str()}\n")
             return
         i = 0
         files = 0

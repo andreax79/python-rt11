@@ -50,6 +50,12 @@ class UIC:
         user = code_int & 0xFF
         return cls(group, user)
 
+    def to_word(self) -> int:
+        return (self.group << 8) + self.user
+
+    def to_wide_str(self) -> str:
+        return f"[{self.group:>3o},{self.user:<3o}]"
+
     def __eq__(self, other: object) -> bool:
         if isinstance(other, UIC):
             return self.group == other.group and self.user == other.user
@@ -62,5 +68,17 @@ class UIC:
         else:
             raise ValueError("Invalid type for comparison")
 
+    def __lt__(self, other: "UIC") -> bool:
+        return self.to_word() < other.to_word()
+
+    def __gt__(self, other: "UIC") -> bool:
+        return self.to_word() > other.to_word()
+
+    def __hash__(self) -> int:
+        return hash(self.to_word())
+
     def __str__(self) -> str:
+        return f"[{self.group:o},{self.user:o}]"
+
+    def __repr__(self) -> str:
         return f"[{self.group:o},{self.user:o}]"

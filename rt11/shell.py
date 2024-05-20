@@ -497,6 +497,8 @@ MOUNT           Assigns a logical disk unit to a file
   OPTIONS
    DOS
         Mount DOS-11 filesystem
+   MAGTAPE
+        Mount DOS-11 MagTape filesystem
    FILES11
         Mount Files-11 filesystem
 
@@ -506,7 +508,7 @@ MOUNT           Assigns a logical disk unit to a file
 
         """
         # fmt: on
-        args, options = extract_options(line, "/dos", "/files11")
+        args, options = extract_options(line, "/dos", "/dos11", "/dos11mt", "/magtape", "/files11")
         if len(args) > 2:
             sys.stdout.write("?MOUNT-F-Too many arguments\n")
             return
@@ -516,8 +518,10 @@ MOUNT           Assigns a logical disk unit to a file
             logical = ask("Volume? ")
         if not path:
             path = ask("File? ")
-        if options.get("dos"):
+        if options.get("dos") or options.get("dos11"):
             fstype = "dos11"
+        elif options.get("dos11mt") or options.get("magtape"):
+            fstype = "dos11mt"
         elif options.get("files11"):
             fstype = "files11"
         else:

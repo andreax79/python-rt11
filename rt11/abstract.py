@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import Dict, Iterator, Optional
@@ -31,6 +32,8 @@ __all__ = [
 
 class AbstractFile(ABC):
     """Abstract base class for file operations"""
+
+    current_position: int = 0
 
     @abstractmethod
     def read_block(
@@ -60,6 +63,50 @@ class AbstractFile(ABC):
     @abstractmethod
     def close(self) -> None:
         """Close the file"""
+
+    def read(self, size: Optional[int] = None) -> bytes:
+        """Read bytes from the file"""
+        data = bytearray()
+        while size is None or len(data) < size:
+            # Calculate current block and offset within the block
+            block_number = self.current_position // self.get_block_size()
+            block_offset = self.current_position % self.get_block_size()
+            # print(f"{block_number=} {block_offset=}")
+            # Read the next block
+            block_data = self.read_block(block_number)
+            # No more data
+            if not block_data:
+                break
+            # Calculate the data to append
+            if size is None:
+                data_to_append = block_data[block_offset:]
+            else:
+                remaining_size = size - len(data)
+                data_to_append = block_data[block_offset : block_offset + remaining_size]
+            data.extend(data_to_append)
+            self.current_position += len(data_to_append)
+            # If size is specified and we have read enough data, break the loop
+            if (size is not None and len(data) >= size) or (len(data_to_append) == 0):
+                break
+        return bytes(data)
+
+    def seek(self, offset: int, whence: int = 0):
+        """Move the current position in the file to a new location"""
+        if whence == os.SEEK_SET:  # Absolute file positioning
+            self.current_position = offset
+        elif whence == os.SEEK_CUR:  # Seek relative to the current position
+            self.current_position += offset
+        elif whence == os.SEEK_END:  # Seek relative to the file's end
+            self.current_position = self.get_size() + offset
+        else:
+            raise ValueError
+        # Ensure the current position is not negative
+        if self.current_position < 0:
+            self.current_position = 0
+
+    def tell(self) -> int:
+        """Get current file position"""
+        return self.current_position
 
 
 class AbstractDirectoryEntry(ABC):

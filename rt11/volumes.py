@@ -26,6 +26,7 @@ from typing import Dict, Optional
 from .abstract import AbstractFilesystem
 from .commons import splitdrive
 from .dos11fs import DOS11Filesystem
+from .dos11magtapefs import DOS11MagTapeFilesystem
 from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
 from .rt11fs import RT11Filesystem
@@ -183,6 +184,8 @@ class Volumes(object):
         try:
             if fstype == "dos11":
                 self.volumes[logical] = DOS11Filesystem(fs.open_file(fullname))
+            elif fstype == "dos11mt" or fstype == "magtape":
+                self.volumes[logical] = DOS11MagTapeFilesystem(fs.open_file(fullname))
             elif fstype == "files11":
                 self.volumes[logical] = Files11Filesystem(fs.open_file(fullname))
             else:

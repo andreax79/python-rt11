@@ -1,7 +1,7 @@
 python-rt11
 ===========
 
-Utility for reading/writing RT-11 filesystems and reading DOS-11 and Files-11 filesystems.
+Utility for reading/writing RT-11 filesystems and reading DOS-11, DOS-11 MagTape and Files-11 filesystems.
 
 The file system must be logically mounted and assigned a logical device name before use.
 This is done with the MOUNT command.
