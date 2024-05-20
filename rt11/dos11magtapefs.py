@@ -188,7 +188,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
             f"{self.file_number:<4} "
             f"{self.filename:<9}."
             f"{self.filetype:<3} "
-            f"{str(self.uic.to_wide_str()) or '':<9}  "
+            f"{self.uic.to_wide_str() if self.uic else '':<9}  "
             f"<{self.protection_code:o}> "
             f"{self.creation_date or '          '} "
             f"{self.size:>6} "

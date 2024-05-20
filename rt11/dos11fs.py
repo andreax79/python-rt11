@@ -232,9 +232,9 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         return (
             f"{self.filename:<6}."
             f"{self.filetype:<3}  "
-            f"{str(self.uic) or '':<9}  "
+            f"{self.uic.to_wide_str() if self.uic else '':<9}  "
             f"{self.creation_date or '          '} "
-            f"{self.length:>6} "
+            f"{self.length:>6}{'C' if self.contiguous else ' '} "
             f"{self.file_position:6d} "
             f"{self.protection_code:>6o} "
         )
@@ -306,7 +306,7 @@ class UserFileDirectoryBlock(object):
         buf.write(f"UIC:                   {self.uic or ''}\n")
         buf.write(f"Block number:          {self.block_number}\n")
         buf.write(f"Next dir block:        {self.next_block_number}\n")
-        buf.write("\nNum  File        UIC        Date       Length  Block   Code\n\n")
+        buf.write("\nNum  File        UIC        Date       Length   Block   Code\n\n")
         for i, x in enumerate(self.entries_list):
             buf.write(f"{i:02d}#  {x}\n")
         return buf.getvalue()
