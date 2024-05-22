@@ -24,18 +24,21 @@ import io
 import os
 import sys
 from datetime import date, timedelta
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, bytes_to_word, hex_dump
 from .rad50 import rad2asc
 from .rt11fs import rt11_canonical_filename
-from .uic import UIC
+from .uic import ANY_UIC, DEFAULT_UIC, UIC
 
 __all__ = [
     "DOS11File",
     "DOS11DirectoryEntry",
     "DOS11Filesystem",
+    "dos11_to_date",
+    "dos11_canonical_filename",
+    "dos11_split_fullname",
 ]
 
 MFD_BLOCK = 1
@@ -49,7 +52,6 @@ DECTAPE_MFD2_BLOCK = 0o101
 DECTAPE_UFD1_BLOCK = 0o102
 DECTAPE_UFD2_BLOCK = 0o103
 READ_FILE_FULL = -1
-DEFAULT_UIC = UIC(0o1, 0o1)
 
 
 def dos11_to_date(val: int) -> Optional[date]:
@@ -65,6 +67,33 @@ def dos11_to_date(val: int) -> Optional[date]:
         return date(year, 1, 1) + timedelta(days=doy - 1)
     except:
         return None
+
+
+def dos11_canonical_filename(fullname: str, wildcard: bool = False) -> str:
+    try:
+        if "[" in fullname:
+            uic: Optional[UIC] = UIC.from_str(fullname)
+            fullname = fullname.split("]", 1)[1]
+        else:
+            uic = None
+    except Exception:
+        uic = None
+    if fullname:
+        fullname = rt11_canonical_filename(fullname, wildcard=wildcard)
+    return f"{uic or ''}{fullname}"
+
+
+def dos11_split_fullname(uic: UIC, fullname: Optional[str], wildcard: bool = True) -> Tuple[UIC, Optional[str]]:
+    if fullname:
+        if "[" in fullname:
+            try:
+                uic = UIC.from_str(fullname)
+                fullname = fullname.split("]", 1)[1]
+            except Exception:
+                return uic, fullname
+        if fullname:
+            fullname = rt11_canonical_filename(fullname, wildcard=wildcard)
+    return uic, fullname
 
 
 class DOS11File(AbstractFile):
@@ -181,7 +210,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     """
 
     ufd_block: "UserFileDirectoryBlock"
-    uic: Optional[UIC] = None
+    uic: UIC = DEFAULT_UIC
     filename: str = ""
     filetype: str = ""
     raw_creation_date: int = 0
@@ -276,11 +305,11 @@ class UserFileDirectoryBlock(object):
     # Block number of the next user file directory block
     next_block_number = 0
     # User Identification Code
-    uic: Optional[UIC] = None
+    uic: UIC = DEFAULT_UIC
     # User File Directory Block entries
     entries_list: List["DOS11DirectoryEntry"] = []
 
-    def __init__(self, fs: "DOS11Filesystem", uic: Optional[UIC]):
+    def __init__(self, fs: "DOS11Filesystem", uic: UIC = DEFAULT_UIC):
         self.fs = fs
         self.uic = uic
 
@@ -347,7 +376,7 @@ class MasterFileDirectoryEntry:
     """
 
     fs: "DOS11Filesystem"
-    uic: Optional[UIC] = None  # User Identification Code
+    uic: UIC = DEFAULT_UIC  # User Identification Code
     ufd_block: int = 0  # UFD start block
     num_words: int = 0  # num of words in UFD entry, always 9
     zero: int = 0  # always 0
@@ -433,7 +462,7 @@ class DOS11Filesystem(AbstractFilesystem):
     def read_mfd_entries(
         self,
         mfd_block: int = MFD_BLOCK,
-        uic: Optional[UIC] = None,
+        uic: UIC = ANY_UIC,
     ) -> Iterator["MasterFileDirectoryEntry"]:
         """Read master file directory"""
 
@@ -465,7 +494,7 @@ class DOS11Filesystem(AbstractFilesystem):
                     entry.read(t, i)
                     if entry.num_words:
                         # Filter by UIC
-                        if uic is None or uic == entry.uic:
+                        if uic.match(entry.uic):
                             yield entry
 
         else:  # MFD Variery #2 (XXDP+)
@@ -475,32 +504,14 @@ class DOS11Filesystem(AbstractFilesystem):
             entry.uic = self.uic
             yield entry
 
-    def dos11_canonical_filename(self, fullname: str, wildcard: bool = False) -> str:
-        try:
-            if "[" in fullname:
-                uic: Optional[UIC] = UIC.from_str(fullname)
-                fullname = fullname.split("]", 1)[1]
-            else:
-                uic = None
-        except Exception:
-            uic = None
-        if fullname:
-            fullname = rt11_canonical_filename(fullname, wildcard=wildcard)
-        return f"{uic or ''}{fullname}"
-
     def filter_entries_list(
-        self, pattern: Optional[str], include_all: bool = False, wildcard: bool = True
+        self,
+        pattern: Optional[str],
+        include_all: bool = False,
+        wildcard: bool = True,
+        uic: UIC = DEFAULT_UIC,
     ) -> Iterator["DOS11DirectoryEntry"]:
-        uic = self.uic
-        if pattern:
-            if "[" in pattern:
-                try:
-                    uic = UIC.from_str(pattern)
-                    pattern = pattern.split("]", 1)[1]
-                except Exception:
-                    return
-            if pattern:
-                pattern = rt11_canonical_filename(pattern, wildcard=wildcard)
+        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
         for mfd in self.read_mfd_entries(uic=uic):
             for ufd_block in mfd.read_ufd_blocks():
                 for entry in ufd_block.entries_list:
@@ -522,10 +533,11 @@ class DOS11Filesystem(AbstractFilesystem):
                         yield entry
 
     def get_file_entry(self, fullname: str) -> Optional[DOS11DirectoryEntry]:
-        fullname = self.dos11_canonical_filename(fullname)
+        fullname = dos11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return next(self.filter_entries_list(fullname, wildcard=False), None)
+        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        return next(self.filter_entries_list(basename, wildcard=False, uic=uic), None)
 
     def open_file(self, fullname: str) -> DOS11File:
         entry = self.get_file_entry(fullname)
@@ -566,19 +578,21 @@ class DOS11Filesystem(AbstractFilesystem):
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
-            for mfd in self.read_mfd_entries(uic=None):
+            sys.stdout.write(f"{volume_id}:\n\n")
+            for mfd in self.read_mfd_entries(uic=ANY_UIC):
                 sys.stdout.write(f"{mfd.uic.to_wide_str()}\n")
             return
-        i = 0
         files = 0
         blocks = 0
-        for x in self.filter_entries_list(pattern, include_all=True):
-            if i == 0 and not options.get("brief"):
-                if self.xxdp:
-                    sys.stdout.write("ENTRY# FILNAM.EXT        DATE          LENGTH  START\n")
-                else:
-                    dt = date.today().strftime('%y-%b-%d').upper()
-                    sys.stdout.write(f"DIRECTORY {volume_id}: {x.uic}\n\n{dt}\n\n")
+        i = 0
+        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=True, uic=self.uic)
+        if not options.get("brief"):
+            if self.xxdp:
+                sys.stdout.write("ENTRY# FILNAM.EXT        DATE          LENGTH  START\n")
+            else:
+                dt = date.today().strftime('%y-%b-%d').upper()
+                sys.stdout.write(f"DIRECTORY {volume_id}: {uic}\n\n{dt}\n\n")
+        for x in self.filter_entries_list(pattern, uic=uic, include_all=True, wildcard=True):
             if x.is_empty:
                 continue
             i = i + 1
@@ -596,8 +610,9 @@ class DOS11Filesystem(AbstractFilesystem):
                     f"{i:6} {fullname:>10s} {creation_date:>14s} {x.length:>10d}    {x.file_position:06o}\n"
                 )
             else:
+                uic_str = x.uic.to_wide_str() if uic.has_wildcard else ""
                 sys.stdout.write(
-                    f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}>\n"
+                    f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}> {uic_str}\n"
                 )
             blocks += x.length
             files += 1

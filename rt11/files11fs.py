@@ -30,7 +30,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, bytes_to_word, hex_dump, swap_words
 from .rad50 import asc2rad, rad2asc, rad50_word_to_asc
-from .uic import UIC
+from .uic import DEFAULT_UIC, UIC
 
 __all__ = [
     "Files11File",
@@ -46,7 +46,7 @@ MFD_DIR = 4  # Volume master file directory (000000.DIR)
 READ_FILE_FULL = -1
 UC_CNB = 128  # Contiguous as possible flag
 
-DEFAULT_UIC = UIC(0o1, 0o1)
+UIC_ZERO = UIC.from_str("[0,0]")
 MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 DIRECTORY_FILE_ENTRY_FORMAT = "<HHHHHHHH"
@@ -361,13 +361,13 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     filename: str  # File Name
     filetype: str  # File Type
     fver: int  # Version Number
-    uic: Optional[UIC] = None
+    uic: UIC
 
     def __init__(self, fs: "Files11Filesystem"):
         self.fs = fs
         self._header = None
 
-    def read(self, buffer: bytes, position: int = 0) -> None:
+    def read(self, buffer: bytes, position: int = 0, uic: UIC = DEFAULT_UIC) -> None:
         (
             self.fnum,  # 1 word File Number
             self.fseq,  # 1 word File Sequence Number
@@ -380,6 +380,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         ) = struct.unpack_from(DIRECTORY_FILE_ENTRY_FORMAT, buffer, position)
         self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
         self.filetype = rad50_word_to_asc(ftyp)
+        self.uic = uic
 
     @property
     def header(self) -> "Files11FileHeader":
@@ -535,7 +536,7 @@ class Files11Filesystem(AbstractFilesystem):
         assert file_header.flev == 0o401
         return file_header
 
-    def read_directory(self, file_number: int, uic: Optional[UIC] = None) -> Iterator["Files11DirectoryEntry"]:
+    def read_directory(self, file_number: int, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
         """
         Read directory by file number
         """
@@ -545,8 +546,7 @@ class Files11Filesystem(AbstractFilesystem):
             buffer = f.read_block(0, READ_FILE_FULL)
             for pos in range(0, len(buffer), DIRECTORY_FILE_ENTRY_LEN):
                 entry = Files11DirectoryEntry(self)
-                entry.read(buffer, position=pos)
-                entry.uic = uic
+                entry.read(buffer, position=pos, uic=uic)
                 if not entry.is_empty:
                     yield entry
         finally:
@@ -560,8 +560,8 @@ class Files11Filesystem(AbstractFilesystem):
             # Get UIC directory file number
             uic_dir = f"{uic.group:03o}{uic.user:03o}.DIR"
             uic_dir_entry = None
-            for entry in self.read_directory(MFD_DIR):
-                if entry.fullname == uic_dir:
+            for entry in self.read_directory(MFD_DIR, UIC_ZERO):
+                if entry.basename == uic_dir:
                     uic_dir_entry = entry
             if uic_dir_entry is None:
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))

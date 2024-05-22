@@ -29,10 +29,9 @@ from typing import Dict, Iterator, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, hex_dump
-from .dos11fs import dos11_to_date
+from .dos11fs import dos11_canonical_filename, dos11_split_fullname, dos11_to_date
 from .rad50 import rad50_word_to_asc
-from .rt11fs import rt11_canonical_filename
-from .uic import UIC
+from .uic import ANY_UIC, DEFAULT_UIC, UIC
 
 __all__ = [
     "DOS11MagTapeFile",
@@ -43,7 +42,6 @@ __all__ = [
 READ_FILE_FULL = -1
 HEADER_RECORD = "<HHHHHHH"
 HEADER_RECORD_SIZE = 14
-DEFAULT_UIC = UIC(0o1, 0o1)
 
 
 class DOS11MagTapeFile(AbstractFile):
@@ -201,6 +199,23 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
 class DOS11MagTapeFilesystem(AbstractFilesystem):
     """
     DOS-11 MagTape Filesystem
+
+
+    Record
+        +-------------------------------------+
+     1  |           File header               |  14 bytes
+        +-------------------------------------+
+     2  |              Data                   | 512 bytes
+        +-------------------------------------+
+     n  |               ...                   |
+        +-------------------------------------+
+    n-1 |              Data                   |
+        +-------------------------------------+
+     n  |               EOF                   |
+        +-------------------------------------+
+
+    DOS/BATCH File Utility Package (PIP), Pag 50
+    http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/dos-batch/V9/DEC-11-UPPA-A-D_PIP_Aug73.pdf
     """
 
     uic: UIC  # current User Identification Code
@@ -236,40 +251,22 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
                     data.clear()
                 rc = 0
 
-    def read_file_headers(self, uic: Optional[UIC] = None) -> Iterator["DOS11MagTapeDirectoryEntry"]:
+    def read_file_headers(self, uic: UIC = ANY_UIC) -> Iterator["DOS11MagTapeDirectoryEntry"]:
         """Read file headers"""
         for i, record in enumerate(self.read_magtape(), start=1):
             entry = DOS11MagTapeDirectoryEntry(self)
             entry.read(record, i)
-            if uic is None or uic == entry.uic:
+            if uic.match(entry.uic):
                 yield entry
 
-    def dos11_canonical_filename(self, fullname: str, wildcard: bool = False) -> str:
-        try:
-            if "[" in fullname:
-                uic: Optional[UIC] = UIC.from_str(fullname)
-                fullname = fullname.split("]", 1)[1]
-            else:
-                uic = None
-        except Exception:
-            uic = None
-        if fullname:
-            fullname = rt11_canonical_filename(fullname, wildcard=wildcard)
-        return f"{uic or ''}{fullname}"
-
     def filter_entries_list(
-        self, pattern: Optional[str], include_all: bool = False, wildcard: bool = True
+        self,
+        pattern: Optional[str],
+        include_all: bool = False,
+        wildcard: bool = True,
+        uic: UIC = DEFAULT_UIC,
     ) -> Iterator["DOS11MagTapeDirectoryEntry"]:
-        uic = self.uic
-        if pattern:
-            if "[" in pattern:
-                try:
-                    uic = UIC.from_str(pattern)
-                    pattern = pattern.split("]", 1)[1]
-                except Exception:
-                    return
-            if pattern:
-                pattern = rt11_canonical_filename(pattern, wildcard=wildcard)
+        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
         for entry in self.read_file_headers(uic=uic):
             if (
                 (not pattern)
@@ -287,10 +284,11 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
                 yield entry
 
     def get_file_entry(self, fullname: str) -> Optional[DOS11MagTapeDirectoryEntry]:
-        fullname = self.dos11_canonical_filename(fullname)
+        fullname = dos11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return next(self.filter_entries_list(fullname, wildcard=False), None)
+        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        return next(self.filter_entries_list(basename, uic=uic, wildcard=False), None)
 
     def open_file(self, fullname: str) -> DOS11MagTapeFile:
         entry = self.get_file_entry(fullname)
@@ -331,16 +329,18 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
-            for uic in sorted(set([x.uic for x in self.read_file_headers(uic=None)])):
+            sys.stdout.write(f"{volume_id}:\n\n")
+            for uic in sorted(set([x.uic for x in self.read_file_headers(uic=ANY_UIC)])):
                 sys.stdout.write(f"{uic.to_wide_str()}\n")
             return
         i = 0
         files = 0
         blocks = 0
-        for x in self.filter_entries_list(pattern, include_all=True):
-            if i == 0 and not options.get("brief"):
-                dt = date.today().strftime('%y-%b-%d').upper()
-                sys.stdout.write(f"DIRECTORY {volume_id}: {x.uic}\n\n{dt}\n\n")
+        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=True, uic=self.uic)
+        if not options.get("brief"):
+            dt = date.today().strftime('%y-%b-%d').upper()
+            sys.stdout.write(f"DIRECTORY {volume_id}: {uic}\n\n{dt}\n\n")
+        for x in self.filter_entries_list(pattern, uic=uic, include_all=True):
             if x.is_empty:
                 continue
             i = i + 1
@@ -353,7 +353,10 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
                 continue
             creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
             attr = ""
-            sys.stdout.write(f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}>\n")
+            uic_str = x.uic.to_wide_str() if uic.has_wildcard else ""
+            sys.stdout.write(
+                f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}> {uic_str}\n"
+            )
             blocks += x.length
             files += 1
         if options.get("brief"):
@@ -370,7 +373,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         if name:
             self.dump(name)
         else:
-            for entry in self.read_file_headers(uic=None):
+            for entry in self.read_file_headers(uic=ANY_UIC):
                 sys.stdout.write(f"{entry}\n")
 
     def get_size(self) -> int:

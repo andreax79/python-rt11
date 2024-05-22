@@ -18,7 +18,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-__all__ = ["UIC"]
+__all__ = [
+    "UIC",
+    "ANY_UIC",
+    "DEFAULT_UIC",
+]
+
+ANY_USER = 0xFF
+ANY_GROUP = 0xFF
 
 
 class UIC:
@@ -40,8 +47,14 @@ class UIC:
     def from_str(cls, code_str: str) -> "UIC":
         code_str = code_str.split("[")[1].split("]")[0]
         group_str, user_str = code_str.split(",")
-        group = int(group_str, 8) & 0xFF
-        user = int(user_str, 8) & 0xFF
+        if group_str == "*":
+            group = ANY_GROUP
+        else:
+            group = int(group_str, 8) & 0xFF
+        if user_str == "*":
+            user = ANY_USER
+        else:
+            user = int(user_str, 8) & 0xFF
         return cls(group, user)
 
     @classmethod
@@ -50,11 +63,29 @@ class UIC:
         user = code_int & 0xFF
         return cls(group, user)
 
+    @property
+    def has_wildcard(self):
+        return self.group == ANY_GROUP or self.user == ANY_USER
+
     def to_word(self) -> int:
         return (self.group << 8) + self.user
 
     def to_wide_str(self) -> str:
-        return f"[{self.group:>3o},{self.user:<3o}]"
+        g = f"{self.group:o}" if self.group != ANY_GROUP else "*"
+        u = f"{self.user:o}" if self.user != ANY_USER else "*"
+        return f"[{g:>3},{u:<3}]"
+
+    def match(self, other: "UIC") -> bool:
+        if self == other:
+            return True
+        elif self.group == ANY_GROUP and self.user == ANY_USER:
+            return True
+        elif self.group == ANY_GROUP and self.user == other.user:
+            return True
+        elif self.group == other.group and self.user == ANY_USER:
+            return True
+        else:
+            return False
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, UIC):
@@ -78,7 +109,13 @@ class UIC:
         return hash(self.to_word())
 
     def __str__(self) -> str:
-        return f"[{self.group:o},{self.user:o}]"
+        g = f"{self.group:o}" if self.group != ANY_GROUP else "*"
+        u = f"{self.user:o}" if self.user != ANY_USER else "*"
+        return f"[{g},{u}]"
 
     def __repr__(self) -> str:
-        return f"[{self.group:o},{self.user:o}]"
+        return str(self)
+
+
+ANY_UIC = UIC.from_str("[*,*]")
+DEFAULT_UIC = UIC.from_str("[1,1]")
