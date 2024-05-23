@@ -770,6 +770,15 @@ SHELL           Executes a system shell command
         return True
 
 
+class CustomAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        fstype = option_string.strip("-")
+        arr = getattr(namespace, "mounts", [])
+        for v in values:
+            arr.append((fstype, v))
+        setattr(namespace, "mounts", arr)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -799,6 +808,34 @@ def main() -> None:
         help="display verbose output",
     )
     parser.add_argument(
+        "--dos11",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a DOS-11 disk or DecTape",
+    )
+    parser.add_argument(
+        "--files11",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a Files11 disk",
+    )
+    parser.add_argument(
+        "--magtape",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a DOS-11 Magtape",
+    )
+    parser.add_argument(
+        "--rt11",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a RT-11 disk",
+    )
+    parser.add_argument(
         "disk",
         nargs="*",
         help="disk to be mounted",
@@ -806,8 +843,13 @@ def main() -> None:
     options = parser.parse_args()
     shell = Shell(verbose=options.verbose)
     # Mount disks
+    i = 0
+    for fstype, dsk in getattr(options, "mounts", []):
+        shell.volumes.mount(dsk, f"DL{i}:", fstype=fstype, verbose=shell.verbose)
+        i = i + 1
     for i, dsk in enumerate(options.disk):
         shell.volumes.mount(dsk, f"DL{i}:", verbose=shell.verbose)
+        i = i + 1
     # Change dir
     if options.dir:
         shell.volumes.set_default_volume(options.dir)
