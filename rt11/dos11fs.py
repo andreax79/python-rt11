@@ -509,8 +509,10 @@ class DOS11Filesystem(AbstractFilesystem):
         pattern: Optional[str],
         include_all: bool = False,
         wildcard: bool = True,
-        uic: UIC = DEFAULT_UIC,
+        uic: Optional[UIC] = None,
     ) -> Iterator["DOS11DirectoryEntry"]:
+        if uic is None:
+            uic = self.uic
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
         for mfd in self.read_mfd_entries(uic=uic):
             for ufd_block in mfd.read_ufd_blocks():

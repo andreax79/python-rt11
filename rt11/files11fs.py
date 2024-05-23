@@ -29,8 +29,9 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, bytes_to_word, hex_dump, swap_words
+from .dos11fs import dos11_split_fullname
 from .rad50 import asc2rad, rad2asc, rad50_word_to_asc
-from .uic import DEFAULT_UIC, UIC
+from .uic import ANY_GROUP, ANY_USER, DEFAULT_UIC, UIC
 
 __all__ = [
     "Files11File",
@@ -43,10 +44,12 @@ INDEXF_SYS = 1  # The index file is the root of the Files-11
 BITMAP_SYS = 2  # Storage bitmap file
 BADBLK_SYS = 3  # Bad block file
 MFD_DIR = 4  # Volume master file directory (000000.DIR)
+MFD_DIR_FULLNAME = "[0,0]000000.DIR"
 READ_FILE_FULL = -1
 UC_CNB = 128  # Contiguous as possible flag
+SC_DIR = 0x80  # File is a directory
 
-UIC_ZERO = UIC.from_str("[0,0]")
+MFD_UIC = UIC.from_str("[0,0]")
 MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 DIRECTORY_FILE_ENTRY_FORMAT = "<HHHHHHHH"
@@ -91,6 +94,20 @@ def files11_canonical_filename(fullname: Optional[str], wildcard: bool = False) 
     return f"{filename}.{filetype}"
 
 
+def files11_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
+    try:
+        if "[" in fullname:
+            uic: Optional[UIC] = UIC.from_str(fullname)
+            fullname = fullname.split("]", 1)[1]
+        else:
+            uic = None
+    except Exception:
+        uic = None
+    if fullname:
+        fullname = files11_canonical_filename(fullname, wildcard=wildcard)
+    return f"{uic or ''}{fullname}"
+
+
 @dataclass
 class RetrievalPointer:
     """
@@ -121,10 +138,12 @@ class RetrievalPointer:
 class Files11File(AbstractFile):
     header: "Files11FileHeader"
     closed: bool
+    fullname: str
 
-    def __init__(self, header: "Files11FileHeader"):
+    def __init__(self, header: "Files11FileHeader", fullname: str):
         self.header = header
         self.closed = False
+        self.fullname = fullname
 
     def read_block(
         self,
@@ -180,7 +199,7 @@ class Files11File(AbstractFile):
         self.closed = True
 
     def __str__(self) -> str:
-        return self.header.fullname
+        return self.fullname
 
 
 class Files11FileHeader:
@@ -328,6 +347,10 @@ class Files11FileHeader:
         return f"{self.filename}.{self.filetype}"
 
     @property
+    def isdir(self) -> bool:
+        return bool(self.fcha & SC_DIR) or (self.fnum == MFD_DIR)
+
+    @property
     def length(self) -> int:
         return self.map_length
 
@@ -361,13 +384,14 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     filename: str  # File Name
     filetype: str  # File Type
     fver: int  # Version Number
-    uic: UIC
+    uic: UIC = DEFAULT_UIC
 
-    def __init__(self, fs: "Files11Filesystem"):
+    def __init__(self, fs: "Files11Filesystem", uic: UIC):
         self.fs = fs
+        self.uic = uic
         self._header = None
 
-    def read(self, buffer: bytes, position: int = 0, uic: UIC = DEFAULT_UIC) -> None:
+    def read(self, buffer: bytes, position: int = 0) -> None:
         (
             self.fnum,  # 1 word File Number
             self.fseq,  # 1 word File Sequence Number
@@ -380,7 +404,6 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         ) = struct.unpack_from(DIRECTORY_FILE_ENTRY_FORMAT, buffer, position)
         self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
         self.filetype = rad50_word_to_asc(ftyp)
-        self.uic = uic
 
     @property
     def header(self) -> "Files11FileHeader":
@@ -396,7 +419,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     @property
     def is_empty(self) -> bool:
         """
-        If the file number portiontion of the File ID field is zero,
+        If the file number of the File ID field is zero,
         then this record is empty.
         """
         return self.fnum == 0
@@ -421,7 +444,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def __str__(self) -> str:
-        return f"File ID {'(' + self.file_id + ')':16} UIC: {str(self.uic):9} Name: {self.basename:12} Ver: {self.fver} FCHA: {self.header.fcha:04x} RTYP: {self.header.rtyp:1} Length: {self.header.length:9}"
+        return f"File ID {'(' + self.file_id + ')':16} Name: {self.basename:12} Ver: {self.fver} FCHA: {self.header.fcha:04x} RTYP: {self.header.rtyp:1} Length: {self.header.length:9}"
 
 
 class Files11Filesystem(AbstractFilesystem):
@@ -536,64 +559,63 @@ class Files11Filesystem(AbstractFilesystem):
         assert file_header.flev == 0o401
         return file_header
 
-    def read_directory(self, file_number: int, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
+    def read_directory(self, file_number: int, fullname: str, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
         """
         Read directory by file number
         """
         header = self.read_file_header(file_number)
         try:
-            f = Files11File(header)
+            f = Files11File(header, fullname)
             buffer = f.read_block(0, READ_FILE_FULL)
             for pos in range(0, len(buffer), DIRECTORY_FILE_ENTRY_LEN):
-                entry = Files11DirectoryEntry(self)
-                entry.read(buffer, position=pos, uic=uic)
+                entry = Files11DirectoryEntry(self, uic)
+                entry.read(buffer, position=pos)
                 if not entry.is_empty:
                     yield entry
         finally:
             f.close()
 
     def read_dir_entries(self, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
-        if uic.group == 0 and uic.user == 0:
+        if uic == MFD_UIC:
             # Master File Directory
-            dir_file_number = MFD_DIR
-        else:
+            yield from self.read_directory(MFD_DIR, MFD_DIR_FULLNAME, MFD_UIC)
+        elif not uic.has_wildcard:
             # Get UIC directory file number
             uic_dir = f"{uic.group:03o}{uic.user:03o}.DIR"
             uic_dir_entry = None
-            for entry in self.read_directory(MFD_DIR, UIC_ZERO):
+            for entry in self.read_directory(MFD_DIR, MFD_DIR_FULLNAME, MFD_UIC):
                 if entry.basename == uic_dir:
                     uic_dir_entry = entry
             if uic_dir_entry is None:
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
-            dir_file_number = uic_dir_entry.fnum
-        return self.read_directory(dir_file_number, uic=uic)
-
-    def files11_canonical_filename(self, fullname: str, wildcard: bool = False) -> str:
-        try:
-            if "[" in fullname:
-                uic: Optional[UIC] = UIC.from_str(fullname)
-                fullname = fullname.split("]", 1)[1]
-            else:
-                uic = None
-        except Exception:
-            uic = None
-        if fullname:
-            fullname = files11_canonical_filename(fullname, wildcard=wildcard)
-        return f"{uic or ''}{fullname}"
+            yield from self.read_directory(uic_dir_entry.fnum, uic_dir_entry.fullname, uic=uic)
+        else:
+            # Filter directories
+            g = f"{uic.group:03o}" if uic.group != ANY_GROUP else None
+            u = f"{uic.user:03o}" if uic.user != ANY_USER else None
+            uic_dir_entry = None
+            for entry in self.read_directory(MFD_DIR, MFD_DIR_FULLNAME, MFD_UIC):
+                if (
+                    (entry.header.isdir)
+                    and (g is None or entry.filename[0:3] == g)
+                    and (u is None or entry.filename[3:6] == u)
+                ):
+                    uic_dir_entry = entry
+                    dir_file_number = uic_dir_entry.fnum
+                    yield from self.read_directory(dir_file_number, entry.fullname, uic=uic)
+            if uic_dir_entry is None:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
 
     def filter_entries_list(
-        self, pattern: Optional[str], include_all: bool = False, wildcard: bool = True
+        self,
+        pattern: Optional[str],
+        include_all: bool = False,
+        wildcard: bool = True,
+        uic: Optional[UIC] = None,
     ) -> Iterator["Files11DirectoryEntry"]:
-        uic = self.uic
-        if pattern:
-            if "[" in pattern:
-                try:
-                    uic = UIC.from_str(pattern)
-                    pattern = pattern.split("]", 1)[1]
-                except Exception:
-                    return
-            if pattern:
-                pattern = files11_canonical_filename(pattern, wildcard=wildcard)
+        if uic is None:
+            uic = self.uic
+        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
         for entry in self.read_dir_entries(uic=uic):
             if entry.is_empty:
                 continue
@@ -610,16 +632,17 @@ class Files11Filesystem(AbstractFilesystem):
             yield entry
 
     def get_file_entry(self, fullname: str) -> Optional[Files11DirectoryEntry]:
-        fullname = self.files11_canonical_filename(fullname)
+        fullname = files11_canonical_fullname(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return next(self.filter_entries_list(fullname, wildcard=False), None)
+        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        return next(self.filter_entries_list(basename, wildcard=False, uic=uic), None)
 
     def open_file(self, fullname: str) -> Files11File:
         entry = self.get_file_entry(fullname)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return Files11File(entry.header)
+        return Files11File(entry.header, fullname)
 
     def read_bytes(self, fullname: str) -> bytes:
         f = self.open_file(fullname)
@@ -655,17 +678,14 @@ class Files11Filesystem(AbstractFilesystem):
         if options.get("uic"):
             # Listing of all UIC
             pattern = "[0,0]*.DIR"
-        i = 0
         files = 0
         blocks = 0
         allocated = 0
-        for x in self.filter_entries_list(pattern, include_all=True):
-            if x.is_empty:
-                continue
-            if i == 0 and not options.get("brief"):
-                dt = datetime.today().strftime('%y-%b-%d %H:%M').upper()
-                sys.stdout.write(f"DIRECTORY {volume_id}:{x.uic}\n{dt}\n\n")
-            i = i + 1
+        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=True, uic=self.uic)
+        if not options.get("brief"):
+            dt = datetime.today().strftime('%y-%b-%d %H:%M').upper()
+            sys.stdout.write(f"DIRECTORY {volume_id}:{uic}\n{dt}\n\n")
+        for x in self.filter_entries_list(pattern, uic=uic, include_all=True, wildcard=True):
             if x.is_empty:
                 continue
             fullname = f"{x.filename}.{x.filetype};{x.fver}"
@@ -722,7 +742,7 @@ class Files11Filesystem(AbstractFilesystem):
             indexfs = self.read_file_header(INDEXF_SYS)
             sys.stdout.write("\n\nINDEXF.SYS Header\n\n")
             sys.stdout.write(dump_struct(indexfs.__dict__))
-            f = Files11File(indexfs)
+            f = Files11File(indexfs, "[0,0]INDEXF.SYS")
             sys.stdout.write(f"\n\nINDEXF.SYS {f.header.length}\n\n")
             for i in range(1, f.header.length):
                 try:

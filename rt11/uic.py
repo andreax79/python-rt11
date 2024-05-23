@@ -64,7 +64,7 @@ class UIC:
         return cls(group, user)
 
     @property
-    def has_wildcard(self):
+    def has_wildcard(self) -> bool:
         return self.group == ANY_GROUP or self.user == ANY_USER
 
     def to_word(self) -> int:
