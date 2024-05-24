@@ -44,7 +44,6 @@ INDEXF_SYS = 1  # The index file is the root of the Files-11
 BITMAP_SYS = 2  # Storage bitmap file
 BADBLK_SYS = 3  # Bad block file
 MFD_DIR = 4  # Volume master file directory (000000.DIR)
-MFD_DIR_FULLNAME = "[0,0]000000.DIR"
 READ_FILE_FULL = -1
 UC_CNB = 128  # Contiguous as possible flag
 SC_DIR = 0x80  # File is a directory
@@ -138,12 +137,10 @@ class RetrievalPointer:
 class Files11File(AbstractFile):
     header: "Files11FileHeader"
     closed: bool
-    fullname: str
 
-    def __init__(self, header: "Files11FileHeader", fullname: str):
+    def __init__(self, header: "Files11FileHeader"):
         self.header = header
         self.closed = False
-        self.fullname = fullname
 
     def read_block(
         self,
@@ -199,7 +196,7 @@ class Files11File(AbstractFile):
         self.closed = True
 
     def __str__(self) -> str:
-        return self.fullname
+        return str(self.header)
 
 
 class Files11FileHeader:
@@ -559,13 +556,13 @@ class Files11Filesystem(AbstractFilesystem):
         assert file_header.flev == 0o401
         return file_header
 
-    def read_directory(self, file_number: int, fullname: str, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
+    def read_directory(self, file_number: int, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
         """
         Read directory by file number
         """
         header = self.read_file_header(file_number)
         try:
-            f = Files11File(header, fullname)
+            f = Files11File(header)
             buffer = f.read_block(0, READ_FILE_FULL)
             for pos in range(0, len(buffer), DIRECTORY_FILE_ENTRY_LEN):
                 entry = Files11DirectoryEntry(self, uic)
@@ -578,23 +575,23 @@ class Files11Filesystem(AbstractFilesystem):
     def read_dir_entries(self, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
         if uic == MFD_UIC:
             # Master File Directory
-            yield from self.read_directory(MFD_DIR, MFD_DIR_FULLNAME, MFD_UIC)
+            yield from self.read_directory(MFD_DIR, MFD_UIC)
         elif not uic.has_wildcard:
             # Get UIC directory file number
             uic_dir = f"{uic.group:03o}{uic.user:03o}.DIR"
             uic_dir_entry = None
-            for entry in self.read_directory(MFD_DIR, MFD_DIR_FULLNAME, MFD_UIC):
+            for entry in self.read_directory(MFD_DIR, MFD_UIC):
                 if entry.basename == uic_dir:
                     uic_dir_entry = entry
             if uic_dir_entry is None:
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
-            yield from self.read_directory(uic_dir_entry.fnum, uic_dir_entry.fullname, uic=uic)
+            yield from self.read_directory(uic_dir_entry.fnum, uic=uic)
         else:
             # Filter directories
             g = f"{uic.group:03o}" if uic.group != ANY_GROUP else None
             u = f"{uic.user:03o}" if uic.user != ANY_USER else None
             uic_dir_entry = None
-            for entry in self.read_directory(MFD_DIR, MFD_DIR_FULLNAME, MFD_UIC):
+            for entry in self.read_directory(MFD_DIR, MFD_UIC):
                 if (
                     (entry.header.isdir)
                     and (g is None or entry.filename[0:3] == g)
@@ -602,7 +599,7 @@ class Files11Filesystem(AbstractFilesystem):
                 ):
                     uic_dir_entry = entry
                     dir_file_number = uic_dir_entry.fnum
-                    yield from self.read_directory(dir_file_number, entry.fullname, uic=uic)
+                    yield from self.read_directory(dir_file_number, uic=uic)
             if uic_dir_entry is None:
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
 
@@ -642,7 +639,7 @@ class Files11Filesystem(AbstractFilesystem):
         entry = self.get_file_entry(fullname)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return Files11File(entry.header, fullname)
+        return Files11File(entry.header)
 
     def read_bytes(self, fullname: str) -> bytes:
         f = self.open_file(fullname)
@@ -742,7 +739,7 @@ class Files11Filesystem(AbstractFilesystem):
             indexfs = self.read_file_header(INDEXF_SYS)
             sys.stdout.write("\n\nINDEXF.SYS Header\n\n")
             sys.stdout.write(dump_struct(indexfs.__dict__))
-            f = Files11File(indexfs, "[0,0]INDEXF.SYS")
+            f = Files11File(indexfs)
             sys.stdout.write(f"\n\nINDEXF.SYS {f.header.length}\n\n")
             for i in range(1, f.header.length):
                 try:
