@@ -21,14 +21,16 @@
 import errno
 import fnmatch
 import io
+import math
 import os
+import struct
 import sys
 from datetime import date, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, bytes_to_word, hex_dump
-from .rad50 import rad2asc
+from .rad50 import asc_to_rad50_word, rad50_word_to_asc
 from .rt11fs import rt11_canonical_filename
 from .uic import ANY_UIC, DEFAULT_UIC, UIC
 
@@ -37,14 +39,13 @@ __all__ = [
     "DOS11DirectoryEntry",
     "DOS11Filesystem",
     "dos11_to_date",
+    "date_to_dos11",
     "dos11_canonical_filename",
     "dos11_split_fullname",
 ]
 
 MFD_BLOCK = 1
 UFD_ENTRIES = 28
-MFD_ENTRY_SIZE = 8
-UFD_ENTRY_SIZE = 18
 CONTIGUOUS_FILE_TYPE = 32768
 LINKED_FILE_BLOCK_SIZE = 510
 DECTAPE_MFD1_BLOCK = 0o100
@@ -52,6 +53,14 @@ DECTAPE_MFD2_BLOCK = 0o101
 DECTAPE_UFD1_BLOCK = 0o102
 DECTAPE_UFD2_BLOCK = 0o103
 READ_FILE_FULL = -1
+DEFAULT_PROTECTION_CODE = 0o233
+
+MFD_BLOCK_FORMAT = "<HHH"
+MFD_BLOCK_FORMAT_V2 = "<HHHH"
+MFD_ENTRY_SIZE = 8
+MFD_ENTRY_FORMAT = "<HHHH"
+UFD_ENTRY_SIZE = 18
+UFD_ENTRY_FORMAT = "<HHHHBBHHHBB"
 
 
 def dos11_to_date(val: int) -> Optional[date]:
@@ -67,6 +76,20 @@ def dos11_to_date(val: int) -> Optional[date]:
         return date(year, 1, 1) + timedelta(days=doy - 1)
     except:
         return None
+
+
+def date_to_dos11(val: date) -> int:
+    """
+    Translate Python date to DOS-11 date
+    """
+    if val is None:
+        return 0
+    # Calculate the number of years since 1970
+    year = val.year - 1970
+    # Calculate the day of the year
+    doy = (val - date(val.year, 1, 1)).days + 1
+    # Combine into DOS-11 format
+    return ((year * 1000) + doy) & 0o77777
 
 
 def dos11_canonical_filename(fullname: str, wildcard: bool = False) -> str:
@@ -94,6 +117,149 @@ def dos11_split_fullname(uic: UIC, fullname: Optional[str], wildcard: bool = Tru
         if fullname:
             fullname = rt11_canonical_filename(fullname, wildcard=wildcard)
     return uic, fullname
+
+
+class DOS11Bitmap:
+
+    fs: "DOS11Filesystem"
+    blocks: List[int]
+    bitmaps: List[int]
+    num_of_words: int
+    first_bitmap_block: int
+
+    def __init__(self, fs: "DOS11Filesystem"):
+        self.fs = fs
+
+    @classmethod
+    def read(cls, fs: "DOS11Filesystem", first_bitmap_block: int) -> "DOS11Bitmap":
+        """
+        Read the bitmap blocks
+        """
+        self = DOS11Bitmap(fs)
+        self.first_bitmap_block = first_bitmap_block
+        self.blocks = []
+        self.bitmaps = []
+        block_number = first_bitmap_block
+        while block_number:
+            # Read the bitmaps from the disk
+            self.blocks.append(block_number)
+            t = self.fs.read_block(block_number)
+            if not t:
+                raise OSError(errno.EIO, f"Failed to read block {block_number}")
+            words = struct.unpack_from("<256H", t)
+            (
+                block_number,  #      1 word  Next bitmap block number
+                _,  #                 1 word  Map number
+                self.num_of_words,  # 1 word  Number of words of map
+                _,  #                 1 word  First bitmap block number
+            ) = words[:4]
+            self.bitmaps.extend(words[4 : 4 + self.num_of_words])
+            block_number = bytes_to_word(t, 0)
+        return self
+
+    def write(self) -> None:
+        """
+        Write the bitmap blocks
+        """
+        for bitmap_num in range(0, len(self.blocks)):
+            next_block = self.blocks[bitmap_num + 1] if bitmap_num < len(self.blocks) - 1 else 0
+            words = (
+                [
+                    next_block,  #        1 word  Next bitmap block number
+                    bitmap_num + 1,  #    1 word  Map number
+                    self.num_of_words,  # 1 word  Number of words of map
+                    self.blocks[0],  #    1 word  First bitmap block number
+                ]
+                + self.bitmaps[bitmap_num * self.num_of_words : (bitmap_num + 1) * self.num_of_words]
+                + ([0] * (256 - 4 - self.num_of_words))
+            )
+            t = struct.pack("<256H", *words)
+            self.fs.write_block(t, self.blocks[bitmap_num])
+
+    @property
+    def total_bits(self) -> int:
+        """
+        Return the bitmap length in bit
+        """
+        return len(self.bitmaps) * 16
+
+    def get_bit(self, bit_index: int) -> bool:
+        """
+        Get the bit at the specified position
+        """
+        int_index = bit_index // 16
+        bit_position = bit_index % 16
+        bit_value = self.bitmaps[int_index]
+        return (bit_value & (1 << bit_position)) != 0
+
+    def set_bit(self, bit_index: int) -> None:
+        """
+        Set the bit at the specified position
+        """
+        int_index = bit_index // 16
+        bit_position = bit_index % 16
+        self.bitmaps[int_index] |= 1 << bit_position
+
+    def clear_bit(self, bit_index: int) -> None:
+        """
+        Clear the bit at the specified position
+        """
+        int_index = bit_index // 16
+        bit_position = bit_index % 16
+        self.bitmaps[int_index] &= ~(1 << bit_position)
+
+    def find_contiguous_blocks(self, size: int) -> int:
+        """
+        Find contiguous blocks, return the first block number
+        """
+        current_run = 0
+        start_index = -1
+        for i in range(self.total_bits - 1, -1, -1):
+            if not self.get_bit(i):
+                if current_run == 0:
+                    start_index = i
+                current_run += 1
+                if current_run == size:
+                    return start_index - size + 1
+            else:
+                current_run = 0
+        raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    def allocate(self, size: int, contiguous: bool = False) -> List[int]:
+        """
+        Allocate contiguous or sparse blocks
+        """
+        blocks = []
+        if contiguous and size != 1:
+            start_block = self.find_contiguous_blocks(size)
+            for block in range(start_block, start_block + size):
+                self.set_bit(block)
+                blocks.append(block)
+        else:
+            for block in range(0, self.total_bits):
+                if not self.get_bit(block):
+                    self.set_bit(block)
+                    blocks.append(block)
+                if len(blocks) == size:
+                    break
+            if len(blocks) < size:
+                raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        return blocks
+
+    def used(self) -> int:
+        """
+        Count the number of used blocks
+        """
+        used = 0
+        for block in self.bitmaps:
+            used += block.bit_count()
+        return used
+
+    def free(self) -> int:
+        """
+        Count the number of free blocks
+        """
+        return len(self.bitmaps) * 16 - self.used()
 
 
 class DOS11File(AbstractFile):
@@ -132,14 +298,14 @@ class DOS11File(AbstractFile):
         if self.contiguous:
             # Contiguous file
             return self.entry.ufd_block.fs.read_block(
-                self.entry.file_position + block_number,
+                self.entry.start_block + block_number,
                 number_of_blocks,
             )
         else:
             # Linked file
             seq = 0
             data = bytearray()
-            next_block_number = self.entry.file_position
+            next_block_number = self.entry.start_block
             while next_block_number != 0 and number_of_blocks:
                 t = self.entry.ufd_block.fs.read_block(next_block_number)
                 next_block_number = bytes_to_word(t, 0)
@@ -158,7 +324,36 @@ class DOS11File(AbstractFile):
         """
         Write block(s) of data to the file
         """
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        if (
+            self.closed
+            or block_number < 0
+            or number_of_blocks < 0
+            or block_number + number_of_blocks > self.entry.length
+        ):
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        if self.contiguous:
+            # Contiguous file
+            buffer += bytearray(BLOCK_SIZE * number_of_blocks - len(buffer))
+            self.entry.ufd_block.fs.write_block(
+                buffer,
+                self.entry.start_block + block_number,
+                number_of_blocks,
+            )
+        else:
+            # Linked file
+            seq = 0
+            next_block_number = self.entry.start_block
+            block_size = self.get_block_size()
+            while next_block_number != 0 and number_of_blocks:
+                t = self.entry.ufd_block.fs.read_block(next_block_number)
+                if seq >= block_number:
+                    t = t[:2] + buffer[:block_size]
+                    t += bytearray(BLOCK_SIZE - len(t))
+                    buffer = buffer[block_size:]
+                    number_of_blocks -= 1
+                    self.entry.ufd_block.fs.write_block(t, next_block_number)
+                next_block_number = bytes_to_word(t, 0)
+                seq += 1
 
     def get_size(self) -> int:
         """
@@ -194,18 +389,18 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         +-------------------------------------+
      6  |Type| Reserved |    Creation Date    |
         +-------------------------------------+
-     8  |          Next free byte             |
+     8  |     Spare     | Lock | Usage count  |
         +-------------------------------------+
     10  |           Start block #             |
         +-------------------------------------+
     12  |        Length (# of blocks)         |
         +-------------------------------------+
-    14  |         Last block written          |
+    14  |            End block #              |
         +-------------------------------------+
-    16  |Lock | Usage count | Protection code |
+     8  |     Spare     |   Protection code   |
         +-------------------------------------+
 
-    Disk Operating System Monitor - System Programmers Manual, Pag 136
+    Disk Operating System Monitor - System Programmers Manual, Pag 136, 202
     http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
     """
 
@@ -214,29 +409,73 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     filename: str = ""
     filetype: str = ""
     raw_creation_date: int = 0
-    file_position: int = 0
-    length: int = 0
-    contiguous: bool = False  # linked/contiguous file
+    start_block: int = 0  # Block number of the first logical block
+    length: int = 0  # Length in blocks
+    end_block: int = 0  # Block number of the last logical block
+    contiguous: bool = False  # Linked/contiguous file
     protection_code: int = 0  # System Programmers Manual, Pag 140
+    usage_count: int = 0  # System Programmers Manual, Pag 136
+    spare1: int = 0
+    spare2: int = 0
 
     def __init__(self, ufd_block: "UserFileDirectoryBlock"):
         self.ufd_block = ufd_block
         self.uic = ufd_block.uic
 
-    def read(self, buffer: bytes, position: int) -> None:
+    @classmethod
+    def read(cls, ufd_block: "UserFileDirectoryBlock", buffer: bytes, position: int) -> "DOS11DirectoryEntry":
         # DOS Course Handouts, Pag 14
         # http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DOS_CourseHandouts.pdf
-        self.filename = rad2asc(buffer, position + 0) + rad2asc(buffer, position + 2)  # RAD50 chars
-        self.filetype = rad2asc(buffer, position + 4)  # RAD50 chars
-        self.raw_creation_date = bytes_to_word(buffer, position + 6)
+        self = DOS11DirectoryEntry(ufd_block)
+        (
+            fnam0,  #                  1 word  File Name
+            fnam1,  #                  1 word
+            ftyp,  #                   1 word  File Type
+            self.raw_creation_date,  # 1 word  Type, Creation date
+            self.usage_count,  #       1 byte  Lock, usage count
+            self.spare1,  #            1 byte  spare
+            self.start_block,  #       1 word  Block number of the first logical block
+            self.length,  #            1 word  Length in blocks
+            self.end_block,  #         1 word  Block number of the last logical block
+            self.protection_code,  #   1 byte  Protection code
+            self.spare2,  #            1 byte  spare
+        ) = struct.unpack_from(UFD_ENTRY_FORMAT, buffer, position)
+        self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1)
+        self.filetype = rad50_word_to_asc(ftyp)
         if self.raw_creation_date & CONTIGUOUS_FILE_TYPE:
             self.contiguous = True
             self.raw_creation_date &= ~CONTIGUOUS_FILE_TYPE
-        # next free byte
-        self.file_position = bytes_to_word(buffer, position + 10)  # block number of the first logical block
-        self.length = bytes_to_word(buffer, position + 12)  # length in blocks
-        # last block written (word)
-        self.protection_code = bytes_to_word(buffer, position + 16)  # lock, usage count, protection code
+        else:
+            self.contiguous = False
+        return self
+
+    def write(self, buffer: bytearray, position: int) -> None:
+        # Create filename and filetype in RAD50 format
+        fnam0 = asc_to_rad50_word(self.filename[:3])
+        fnam1 = asc_to_rad50_word(self.filename[3:6])
+        ftyp = asc_to_rad50_word(self.filetype)
+        # Adjust raw_creation_date for contiguous files
+        if self.contiguous:
+            raw_creation_date = self.raw_creation_date | CONTIGUOUS_FILE_TYPE
+        else:
+            raw_creation_date = self.raw_creation_date & ~CONTIGUOUS_FILE_TYPE
+        # Pack values into buffer
+        struct.pack_into(
+            UFD_ENTRY_FORMAT,
+            buffer,
+            position,
+            fnam0,  #                  1 word  File Name
+            fnam1,  #                  1 word
+            ftyp,  #                   1 word  File Type
+            raw_creation_date,  #      1 word  Type, Creation date
+            self.usage_count,  #       1 byte  Lock, usage count
+            self.spare1,  #            1 byte  spare
+            self.start_block,  #       1 word  Block number of the first logical block
+            self.length,  #            1 word  Length in blocks
+            self.end_block,  #         1 word  Block number of the last logical block
+            self.protection_code,  #   1 byte  Protection code
+            self.spare2,  #            1 byte  spare
+        )
 
     @property
     def is_empty(self) -> bool:
@@ -255,7 +494,37 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         return dos11_to_date(self.raw_creation_date)
 
     def delete(self) -> bool:
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        contiguous = self.contiguous
+        start_block = self.start_block
+        length = self.length
+        # Write an empty User File Directory Entry
+        self.raw_creation_date = 0
+        self.usage_count = 0
+        self.spare1 = 0
+        self.start_block = 0
+        self.length = 0
+        self.end_block = 0
+        self.protection_code = 0
+        self.spare2 = 0
+        self.filename = ""
+        self.filetype = ""
+        self.contiguous = False
+        self.ufd_block.write()
+        # Free space
+        bitmap = self.ufd_block.fs.read_bitmap()
+        if contiguous:
+            # Contiguous file
+            for block_number in range(start_block, start_block + length):
+                bitmap.clear_bit(block_number)
+        else:
+            # Linked file
+            next_block_number = start_block
+            while next_block_number != 0:
+                bitmap.clear_bit(next_block_number)
+                t = self.ufd_block.fs.read_block(next_block_number)
+                next_block_number = bytes_to_word(t, 0)
+        bitmap.write()
+        return True
 
     def __str__(self) -> str:
         return (
@@ -264,8 +533,10 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
             f"{self.uic.to_wide_str() if self.uic else '':<9}  "
             f"{self.creation_date or '          '} "
             f"{self.length:>6}{'C' if self.contiguous else ' '} "
-            f"{self.file_position:6d} "
+            f"{self.start_block:6d} "
+            f"{self.end_block:6d} "
             f"{self.protection_code:>6o} "
+            f"{self.usage_count:>6o}"
         )
 
     def __repr__(self) -> str:
@@ -313,21 +584,59 @@ class UserFileDirectoryBlock(object):
         self.fs = fs
         self.uic = uic
 
-    def read(self, block_number: int) -> None:
+    @classmethod
+    def new(cls, fs: "DOS11Filesystem", uic: UIC, block_number: int) -> "UserFileDirectoryBlock":
+        """
+        Create a new empty User File Directory Block
+        """
+        self = UserFileDirectoryBlock(fs, uic)
+        self.block_number = block_number
+        self.next_block_number = 0
+        self.entries_list = []
+        for _ in range(2, UFD_ENTRIES * UFD_ENTRY_SIZE, UFD_ENTRY_SIZE):
+            dir_entry = DOS11DirectoryEntry(self)
+            self.entries_list.append(dir_entry)
+        return self
+
+    @classmethod
+    def read(cls, fs: "DOS11Filesystem", uic: UIC, block_number: int) -> "UserFileDirectoryBlock":
         """
         Read a User File Directory Block from disk
         """
+        self = UserFileDirectoryBlock(fs, uic)
         self.block_number = block_number
         t = self.fs.read_block(self.block_number, 2)
+        if not t:
+            raise OSError(errno.EIO, f"Failed to read block {self.block_number}")
         self.next_block_number = bytes_to_word(t, 0)
         self.entries_list = []
         for position in range(2, UFD_ENTRIES * UFD_ENTRY_SIZE, UFD_ENTRY_SIZE):
-            dir_entry = DOS11DirectoryEntry(self)
-            dir_entry.read(t, position)
+            dir_entry = DOS11DirectoryEntry.read(self, t, position)
             self.entries_list.append(dir_entry)
+        return self
 
     def write(self) -> None:
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        """
+        Write a User File Directory Block to disk
+        """
+        buffer = bytearray(BLOCK_SIZE * 2)
+        # Write the next block number to the buffer
+        struct.pack_into("<H", buffer, 0, self.next_block_number)
+        # Write each directory entry to the buffer
+        for i, dir_entry in enumerate(self.entries_list):
+            position = 2 + i * UFD_ENTRY_SIZE
+            dir_entry.write(buffer, position)
+        # Write the buffer to the disk
+        self.fs.write_block(buffer, self.block_number, 2)
+
+    def get_empty_entry(self) -> Optional["DOS11DirectoryEntry"]:
+        """
+        Get the first empty directory entry
+        """
+        for entry in self.entries_list:
+            if entry.is_empty:
+                return entry
+        return None
 
     def __str__(self) -> str:
         buf = io.StringIO()
@@ -335,7 +644,7 @@ class UserFileDirectoryBlock(object):
         buf.write(f"UIC:                   {self.uic or ''}\n")
         buf.write(f"Block number:          {self.block_number}\n")
         buf.write(f"Next dir block:        {self.next_block_number}\n")
-        buf.write("\nNum  File        UIC        Date       Length   Block   Code\n\n")
+        buf.write("\nNum  File        UIC        Date       Length   Block    End   Code  Usage\n\n")
         for i, x in enumerate(self.entries_list):
             buf.write(f"{i:02d}#  {x}\n")
         return buf.getvalue()
@@ -385,17 +694,19 @@ class MasterFileDirectoryEntry:
         self.fs = fs
 
     def read(self, buffer: bytes, position: int) -> None:
-        self.uic = UIC.from_word(bytes_to_word(buffer[position + 2 : position + 4]))
-        self.ufd_block = bytes_to_word(buffer[position + 4 : position + 6])  # UFD start block
-        self.num_words = bytes_to_word(buffer[position + 6 : position + 8])  # number of words in UFD entry
-        self.zero = bytes_to_word(buffer[position + 8 : position + 10])  # always 0
+        (
+            mfd_uic,  # UIC
+            self.ufd_block,  # UFD start block
+            self.num_words,  # number of words in UFD entry
+            self.zero,  # always 0
+        ) = struct.unpack_from(MFD_ENTRY_FORMAT, buffer, position)
+        self.uic = UIC.from_word(mfd_uic)
 
     def read_ufd_blocks(self) -> Iterator["UserFileDirectoryBlock"]:
         """Read User File Directory blocks"""
         next_block_number = self.ufd_block
         while next_block_number != 0:
-            ufd_block = UserFileDirectoryBlock(self.fs, self.uic)
-            ufd_block.read(next_block_number)
+            ufd_block = UserFileDirectoryBlock.read(self.fs, self.uic, next_block_number)
             next_block_number = ufd_block.next_block_number
             yield ufd_block
 
@@ -434,11 +745,15 @@ class DOS11Filesystem(AbstractFilesystem):
 
     DECtape format - Pag 206
     http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
+
+    XXDP File Structure Guide - Pag 8
+    https://raw.githubusercontent.com/rust11/xxdp/main/XXDP%2B%20File%20Structure.pdf
     """
 
     uic: UIC  # current User Identification Code
     xxdp: bool = False  # MFD Variety #2 (XXDP+)
     dectape: bool = False  # DECtape format
+    bitmap_start_block: int = 0
 
     def __init__(self, file: "AbstractFile"):
         self.f = file
@@ -457,7 +772,7 @@ class DOS11Filesystem(AbstractFilesystem):
         block_number: int,
         number_of_blocks: int = 1,
     ) -> None:
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        self.f.write_block(buffer, block_number, number_of_blocks)
 
     def read_mfd_entries(
         self,
@@ -467,19 +782,29 @@ class DOS11Filesystem(AbstractFilesystem):
         """Read master file directory"""
 
         # Check DECtape format
+        self.dectape = False
         t = self.read_block(DECTAPE_MFD1_BLOCK)
-        mfd2 = bytes_to_word(t[0:2])
-        if mfd2 == DECTAPE_MFD2_BLOCK:
-            tmp = self.read_block(mfd2)
-            mfd3 = bytes_to_word(tmp[0:2])  # 0, DECtape has only 2 MFD
-            ufd1 = bytes_to_word(tmp[4:6])  # 0o102, First UFD
-            self.dectape = (mfd3 == 0) and (ufd1 == DECTAPE_UFD1_BLOCK)
-        else:
-            self.dectape = False
+        if t:
+            (
+                mfd2,  # Next MFD block
+                _,  # Interlave factor
+                self.bitmap_start_block,  # Bitmap start block
+            ) = struct.unpack_from(MFD_BLOCK_FORMAT, t)
+            if mfd2 == DECTAPE_MFD2_BLOCK:
+                tmp = self.read_block(mfd2)
+                mfd3 = bytes_to_word(tmp[0:2])  # 0, DECtape has only 2 MFD
+                ufd1 = bytes_to_word(tmp[4:6])  # 0o102, First UFD
+                self.dectape = (mfd3 == 0) and (ufd1 == DECTAPE_UFD1_BLOCK)
 
         if not self.dectape:
             t = self.read_block(mfd_block)
-            mfd2 = bytes_to_word(t[0:2])
+            if not t:
+                raise OSError(errno.EIO, f"Failed to read block {mfd_block}")
+            (
+                mfd2,  # Next MFD block
+                _,  # Interlave factor
+                self.bitmap_start_block,  # Bitmap start block
+            ) = struct.unpack_from(MFD_BLOCK_FORMAT, t)
 
         if mfd2 != 0:  # MFD Variety #1 (DOS-11)
             # DOS Course Handouts, Pag 13
@@ -488,8 +813,10 @@ class DOS11Filesystem(AbstractFilesystem):
             next_mfd = mfd2
             while next_mfd:
                 t = self.read_block(next_mfd)
+                if not t:
+                    raise OSError(errno.EIO, f"Failed to read block {next_mfd}")
                 next_mfd = bytes_to_word(t[0:2])  # link to next MFD
-                for i in range(0, BLOCK_SIZE - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
+                for i in range(2, BLOCK_SIZE - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
                     entry = MasterFileDirectoryEntry(self)
                     entry.read(t, i)
                     if entry.num_words:
@@ -500,9 +827,18 @@ class DOS11Filesystem(AbstractFilesystem):
         else:  # MFD Variery #2 (XXDP+)
             self.xxdp = True
             entry = MasterFileDirectoryEntry(self)
-            entry.ufd_block = bytes_to_word(t[2:4])
+            (
+                _,  # Zero
+                entry.ufd_block,  # First UFD
+                _,  # Number of UFD
+                self.bitmap_start_block,  # Bitmap start block
+            ) = struct.unpack_from(MFD_BLOCK_FORMAT_V2, t)
             entry.uic = self.uic
             yield entry
+
+    def read_bitmap(self) -> DOS11Bitmap:
+        bitmap = DOS11Bitmap.read(self, self.bitmap_start_block)
+        return bitmap
 
     def filter_entries_list(
         self,
@@ -535,6 +871,9 @@ class DOS11Filesystem(AbstractFilesystem):
                         yield entry
 
     def get_file_entry(self, fullname: str) -> Optional[DOS11DirectoryEntry]:
+        """
+        Get the directory entry for a file
+        """
         fullname = dos11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -542,12 +881,18 @@ class DOS11Filesystem(AbstractFilesystem):
         return next(self.filter_entries_list(basename, wildcard=False, uic=uic), None)
 
     def open_file(self, fullname: str) -> DOS11File:
+        """
+        Open a file
+        """
         entry = self.get_file_entry(fullname)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return DOS11File(entry)
 
     def read_bytes(self, fullname: str) -> bytes:
+        """
+        Get the content of a file
+        """
         f = self.open_file(fullname)
         try:
             return f.read_block(0, READ_FILE_FULL)
@@ -559,21 +904,97 @@ class DOS11Filesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> None:
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        """
+        Write content to a file
+        """
+        if contiguous is None:
+            contiguous = False
+        block_size = BLOCK_SIZE if contiguous else LINKED_FILE_BLOCK_SIZE
+        length = int(math.ceil(len(content) * 1.0 / block_size))
+        entry = self.create_file(fullname, length, creation_date, contiguous)
+        if entry is not None:
+            f = DOS11File(entry)
+            try:
+                f.write_block(content, 0, entry.length)
+            finally:
+                f.close()
 
     def create_file(
         self,
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
+        contiguous: Optional[bool] = None,
     ) -> Optional[DOS11DirectoryEntry]:
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        """
+        Create a new file with a given length in number of blocks
+        """
+        if contiguous is None:
+            contiguous = False
+        # Delete the existing file
+        old_entry = self.get_file_entry(fullname)
+        if old_entry is not None:
+            old_entry.delete()
+        # Get the MFD entry for the target UIC
+        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        try:
+            mfd = next(self.read_mfd_entries(uic=uic))
+        except Exception:
+            raise NotADirectoryError
+        # Allocate the space for the file
+        bitmap = self.read_bitmap()
+        blocks = bitmap.allocate(length, contiguous)
+        # Create the directory entry
+        new_entry = None
+        for ufd_block in mfd.read_ufd_blocks():
+            new_entry = ufd_block.get_empty_entry()
+            if new_entry is not None:
+                break
+        if new_entry is None:
+            # Allocate a new UFD block
+            new_block_number = bitmap.allocate(1)[0]
+            # Write the link to new new block in the old block
+            ufd_block.next_block_number = new_block_number
+            ufd_block.write()
+            # Create a new UFD block
+            ufd_block = UserFileDirectoryBlock.new(self, uic, new_block_number)
+            new_entry = ufd_block.get_empty_entry()
+            if new_entry is None:
+                raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        try:
+            filename, filetype = basename.split(".", 1)
+        except Exception:
+            filename = basename
+            filetype = ""
+        new_entry.filename = filename
+        new_entry.filetype = filetype
+        new_entry.raw_creation_date = date_to_dos11(creation_date or date.today())
+        new_entry.start_block = blocks[0]
+        new_entry.length = length
+        new_entry.end_block = blocks[-1]
+        new_entry.contiguous = contiguous
+        new_entry.protection_code = DEFAULT_PROTECTION_CODE
+        new_entry.ufd_block.write()
+        # Write bitmap
+        bitmap.write()
+        # Write linked file
+        if not contiguous:
+            for i, block in enumerate(blocks):
+                buffer = bytearray(BLOCK_SIZE)
+                next_block_number = blocks[i + 1] if i + 1 < len(blocks) else 0
+                struct.pack_into("<H", buffer, 0, next_block_number)
+                self.write_block(buffer, block)
+        return new_entry
 
     def isdir(self, fullname: str) -> bool:
         return False
 
     def exists(self, fullname: str) -> bool:
+        """
+        Check if the given path exists
+        """
         entry = self.get_file_entry(fullname)
         return entry is not None
 
@@ -598,8 +1019,6 @@ class DOS11Filesystem(AbstractFilesystem):
             if x.is_empty:
                 continue
             i = i + 1
-            if x.is_empty:
-                continue
             fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.filetype)
             if options.get("brief"):
                 # Lists only file names and file types
@@ -608,9 +1027,7 @@ class DOS11Filesystem(AbstractFilesystem):
             creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
             attr = "C" if x.contiguous else ""
             if self.xxdp:
-                sys.stdout.write(
-                    f"{i:6} {fullname:>10s} {creation_date:>14s} {x.length:>10d}    {x.file_position:06o}\n"
-                )
+                sys.stdout.write(f"{i:6} {fullname:>10s} {creation_date:>14s} {x.length:>10d}    {x.start_block:06o}\n")
             else:
                 uic_str = x.uic.to_wide_str() if uic.has_wildcard else ""
                 sys.stdout.write(
@@ -662,6 +1079,9 @@ class DOS11Filesystem(AbstractFilesystem):
             return False
 
     def get_pwd(self) -> str:
+        """
+        Get the current User Identification Code
+        """
         return str(self.uic)
 
     def __str__(self) -> str:

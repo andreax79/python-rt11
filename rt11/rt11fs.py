@@ -506,9 +506,10 @@ class RT11Filesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> None:
         length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
-        entry = self.create_file(fullname, length, creation_date)
+        entry = self.create_file(fullname, length, creation_date, contiguous)
         if not entry:
             return
         content = content + (b"\0" * BLOCK_SIZE)
@@ -519,6 +520,7 @@ class RT11Filesystem(AbstractFilesystem):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
+        contiguous: Optional[bool] = None,
     ) -> Optional[RT11DirectoryEntry]:
         fullname = os.path.basename(fullname)
         entry: Optional[RT11DirectoryEntry] = self.get_file_entry(fullname)

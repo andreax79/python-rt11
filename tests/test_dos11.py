@@ -1,4 +1,13 @@
-from rt11.dos11fs import DOS11Filesystem
+from datetime import date
+
+import pytest
+
+from rt11.dos11fs import (
+    DOS11Filesystem,
+    UserFileDirectoryBlock,
+    date_to_dos11,
+    dos11_to_date,
+)
 from rt11.shell import Shell
 
 DSK = "tests/dsk/dos11_rk05.dsk"
@@ -43,3 +52,103 @@ def test_dos11():
 
     l = list(fs.filter_entries_list("*.TXT[1,2]"))
     assert len(l) == 0
+
+    x3 = fs.read_bytes("[200,200]500.txt")
+    x3 = x3.rstrip(b"\0")
+    assert len(x3) == 22000
+    for i in range(0, 500):
+        assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x3
+
+
+def test_dos11_bitmap():
+    shell = Shell(verbose=True)
+    shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
+    shell.onecmd(f"mount t: /dos {DSK}.mo", batch=True)
+    fs = shell.volumes.get('T')
+    assert isinstance(fs, DOS11Filesystem)
+
+    d = fs.get_file_entry("[200,200]500.TXT")
+    assert d is not None
+    assert not d.contiguous
+
+    e = fs.get_file_entry("[100,100]200.TXT")
+    assert e is not None
+    assert e.contiguous
+
+    # Test get_bit
+    bitmap = fs.read_bitmap()
+    for i in range(e.start_block, e.start_block + e.length):
+        assert bitmap.get_bit(i)
+    assert not bitmap.get_bit(187)
+    assert not bitmap.get_bit(4649)
+
+    # Test find_contiguous_blocks
+    assert bitmap.find_contiguous_blocks(10) == 4640
+    assert bitmap.find_contiguous_blocks(1000) == 3650
+    with pytest.raises(OSError):
+        bitmap.find_contiguous_blocks(10000)
+    assert bitmap.used() == 337
+    d_length = d.length
+    e_length = e.length
+
+    # Write UFD
+    e.ufd_block.write()
+    ufd_block2 = UserFileDirectoryBlock.read(e.ufd_block.fs, e.ufd_block.uic, e.ufd_block.block_number)
+    assert str(e.ufd_block) == str(ufd_block2)
+
+    # Delete contiguous file
+    e.delete()
+    e2 = fs.get_file_entry("[100,100]200.TXT")
+    assert e2 is None
+    bitmap = fs.read_bitmap()
+    assert bitmap.used() == 337 - e_length
+
+    # Delete linked file
+    d.delete()
+    d2 = fs.get_file_entry("[200,200]500.TXT")
+    assert d2 is None
+    bitmap = fs.read_bitmap()
+    assert bitmap.used() == 337 - e_length - d_length
+
+    # UIC not found
+    with pytest.raises(Exception):
+        shell.onecmd("copy /CONTIGUOUS t:10.TXT t:[123,321]10NEW.TXT", batch=True)
+
+    # Create a contiguous file
+    shell.onecmd("copy /CONTIGUOUS t:10.TXT t:[100,100]10NEW.TXT", batch=True)
+    x2 = fs.read_bytes("[100,100]10NEW.txt")
+    x2 = x2.rstrip(b"\0")
+    assert len(x2) == 440
+    for i in range(0, 10):
+        assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x2
+
+    for i in range(0, 100):
+        shell.onecmd(f"copy /CONTIGUOUS t:1.TXT t:[100,100]A{i}.TXT", batch=True)
+
+    # Create a non-contiguous file
+    shell.onecmd("copy /NOCONTIGUOUS t:10.TXT t:[200,200]10NEW.TXT", batch=True)
+    x2 = fs.read_bytes("[200,200]10NEW.txt")
+    x2 = x2.rstrip(b"\0")
+    assert len(x2) == 440
+    for i in range(0, 10):
+        assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x2
+
+
+def test_dos11_to_date():
+    assert dos11_to_date(0) is None
+    assert dos11_to_date(21163) == date(1991, 6, 12)
+    assert dos11_to_date(16134) == date(1986, 5, 14)
+
+
+def test_date_to_dos11():
+    assert date_to_dos11(None) == 0
+    assert date_to_dos11(date(1991, 6, 12)) == 21163
+    assert date_to_dos11(date(1986, 5, 14)) == 16134
+
+
+def test_date_combined():
+    assert dos11_to_date(date_to_dos11(None)) is None
+    original_date = date(1980, 5, 28)
+    dos11_date = date_to_dos11(original_date)
+    converted_date = dos11_to_date(dos11_date)
+    assert original_date == converted_date

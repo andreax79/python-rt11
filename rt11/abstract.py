@@ -90,7 +90,7 @@ class AbstractFile(ABC):
                 break
         return bytes(data)
 
-    def seek(self, offset: int, whence: int = 0):
+    def seek(self, offset: int, whence: int = 0) -> None:
         """Move the current position in the file to a new location"""
         if whence == os.SEEK_SET:  # Absolute file positioning
             self.current_position = offset
@@ -163,6 +163,7 @@ class AbstractFilesystem(object):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> None:
         """Write content to a file"""
 
@@ -172,6 +173,7 @@ class AbstractFilesystem(object):
         fullname: str,
         length: int,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> Optional["AbstractDirectoryEntry"]:
         """Create a new file with a given length in number of blocks"""
 

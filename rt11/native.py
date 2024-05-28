@@ -224,6 +224,7 @@ class NativeFilesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> None:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
@@ -239,6 +240,7 @@ class NativeFilesystem(AbstractFilesystem):
         fullname: str,
         length: int,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> Optional[NativeDirectoryEntry]:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)

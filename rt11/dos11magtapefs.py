@@ -310,6 +310,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
@@ -318,6 +319,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
+        contiguous: Optional[bool] = None,
     ) -> Optional[DOS11MagTapeDirectoryEntry]:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 

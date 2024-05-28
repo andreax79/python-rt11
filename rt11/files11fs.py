@@ -653,6 +653,7 @@ class Files11Filesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
+        contiguous: Optional[bool] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
@@ -661,6 +662,7 @@ class Files11Filesystem(AbstractFilesystem):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
+        contiguous: Optional[bool] = None,
     ) -> Optional[Files11DirectoryEntry]:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
