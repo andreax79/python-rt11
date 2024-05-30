@@ -389,7 +389,8 @@ COPY            Copies files
         elif from_len == 1:  # One file to be copied
             source = list(from_list)[0]
             if not to:
-                to_path = os.path.join(self.volumes.get(to_volume_id).get_pwd(), source.fullname)
+                to_pwd = self.volumes.get(to_volume_id).get_pwd()
+                to_path = os.path.join(to_pwd, source.basename)
             elif to and to_fs.isdir(to):
                 to_path = os.path.join(to, source.basename)
             else:
@@ -397,7 +398,7 @@ COPY            Copies files
             from_entry = from_fs.get_file_entry(source.fullname)
             if not from_entry:
                 raise Exception(f"?COPY-F-Error copying {source.fullname}")
-            sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, source.fullname, to_volume_id, to))
+            sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, source.fullname, to_volume_id, to_path))
             copy_file(from_fs, from_entry, to_fs, to_path, contiguous, self.verbose, cmd="COPY")
         else:
             if not to:
@@ -634,7 +635,7 @@ DEASSIGN        Removes logical device name assignments
     def do_initialize(self, line: str) -> None:
         # fmt: off
         """
-INITIALIZE      Writes an RT–11 empty device directory on the specified volume
+INITIALIZE      Writes an empty device directory on the specified volume
 
   SYNTAX
         INITIALIZE volume:

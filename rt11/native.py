@@ -106,6 +106,15 @@ class NativeFile(AbstractFile):
                 self.f.seek(position)  # not thread safe...
                 self.f.write(buffer[i * self.sector_size : (i + 1) * self.sector_size])
 
+    def truncate(self, size: Optional[int] = None) -> None:
+        """
+        Resize the file to the given number of bytes.
+        If the size is not specified, the current position will be used.
+        """
+        self.f.truncate(size)
+        if size is not None and self.current_position > size:
+            self.current_position = size
+
     def get_size(self) -> int:
         """
         Get file size in bytes

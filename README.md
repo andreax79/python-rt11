@@ -1,7 +1,17 @@
-python-rt11
+Python-RT11
 ===========
 
-Utility for reading/writing RT-11 and DOS-11 filesystems and reading DOS-11 MagTape and Files-11 filesystems.
+Python-RT11 is an utility for transferring files between various file systems.
+
+|   | RT-11 | DOS-11 | DOS-11 DecTape | DOS-11 MagTape | XXDP | CAPS-11 | Files-11 |
+| ------------- | --- |  --- | --- | --- | --- | --- | --- |
+| Read file | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
+| Write file  | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | |
+| Delete file  | :white_check_mark:  | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | |
+| Initialize  | :white_check_mark:  | | | :white_check_mark: | | :white_check_mark: | |
+
+Commands
+--------
 
 The file system must be logically mounted and assigned a logical device name before use.
 This is done with the MOUNT command.
@@ -20,7 +30,7 @@ The following commands are availables:
 * EXAMINE         Examines disk/block/file structure
 * EXIT            Exit the shell
 * HELP            Displays commands help
-* INITIALIZE      Writes an RT–11 empty device directory on the specified volume
+* INITIALIZE      Writes an empty device directory on the specified volume
 * MOUNT           Assigns a logical disk unit to a file
 * PWD             Displays the current working drive and directory
 * SHELL           Executes a system shell command
@@ -121,3 +131,6 @@ Links
 * [RT-11 Software Support Manual](http://www.bitsavers.org/www.computer.museum.uq.edu.au/RT-11/DEC-11-ORPGA-A-D%20RT-11%20Software%20Support%20Manual.pdf)
 * [RT–11 Volume and File Formats Manual](http://bitsavers.trailing-edge.com/pdf/dec/pdp11/rt11/v5.6_Aug91/AA-PD6PA-TC_RT-11_Volume_and_File_Formats_Manual_Aug91.pdf)
 * [Disk Operating System Monitor - System Programmers Manual](http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf)
+* [DOS/BATCH File Utility Package](http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/dos-batch/V9/DEC-11-UPPA-A-D_PIP_Aug73.pdf)
+* [XXDP File Structure Guide](https://raw.githubusercontent.com/rust11/xxdp/main/XXDP%2B%20File%20Structure.pdf)
+* [CAPS-11 User Guide](http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf)

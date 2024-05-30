@@ -905,6 +905,7 @@ class DOS11Filesystem(AbstractFilesystem):
         content: bytes,
         creation_date: Optional[date] = None,
         contiguous: Optional[bool] = None,
+        protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> None:
         """
         Write content to a file
@@ -913,7 +914,13 @@ class DOS11Filesystem(AbstractFilesystem):
             contiguous = False
         block_size = BLOCK_SIZE if contiguous else LINKED_FILE_BLOCK_SIZE
         length = int(math.ceil(len(content) * 1.0 / block_size))
-        entry = self.create_file(fullname, length, creation_date, contiguous)
+        entry = self.create_file(
+            fullname=fullname,
+            length=length,
+            creation_date=creation_date,
+            contiguous=contiguous,
+            protection_code=protection_code,
+        )
         if entry is not None:
             f = DOS11File(entry)
             try:
@@ -927,6 +934,7 @@ class DOS11Filesystem(AbstractFilesystem):
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
         contiguous: Optional[bool] = None,
+        protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> Optional[DOS11DirectoryEntry]:
         """
         Create a new file with a given length in number of blocks
@@ -975,7 +983,7 @@ class DOS11Filesystem(AbstractFilesystem):
         new_entry.length = length
         new_entry.end_block = blocks[-1]
         new_entry.contiguous = contiguous
-        new_entry.protection_code = DEFAULT_PROTECTION_CODE
+        new_entry.protection_code = protection_code
         new_entry.ufd_block.write()
         # Write bitmap
         bitmap.write()

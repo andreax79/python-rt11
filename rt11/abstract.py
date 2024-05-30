@@ -90,6 +90,30 @@ class AbstractFile(ABC):
                 break
         return bytes(data)
 
+    def write(self, data: bytes) -> int:
+        """Write bytes to the file"""
+        data_length = len(data)
+        written = 0
+        while written < data_length:
+            # Calculate current block and offset within the block
+            block_number = self.current_position // self.get_block_size()
+            block_offset = self.current_position % self.get_block_size()
+            # Read the current block
+            block_data = bytearray(self.read_block(block_number))
+            if not block_data:
+                block_data = bytearray(self.get_block_size())
+            # Calculate the amount of data to write in the current block
+            remaining_block_space = self.get_block_size() - block_offset
+            data_to_write = data[written : written + remaining_block_space]
+            # Write the data to the block
+            block_data[block_offset : block_offset + len(data_to_write)] = data_to_write
+            # Write the block to the device
+            self.write_block(block_data, block_number)
+            # Update current position and written count
+            self.current_position += len(data_to_write)
+            written += len(data_to_write)
+        return written
+
     def seek(self, offset: int, whence: int = 0) -> None:
         """Move the current position in the file to a new location"""
         if whence == os.SEEK_SET:  # Absolute file positioning
@@ -107,6 +131,14 @@ class AbstractFile(ABC):
     def tell(self) -> int:
         """Get current file position"""
         return self.current_position
+
+    def truncate(self, size: Optional[int] = None) -> None:
+        """
+        Resize the file to the given number of bytes.
+        If the size is not specified, the current position will be used.
+        """
+        if size is not None and self.current_position > size:
+            self.current_position = size
 
 
 class AbstractDirectoryEntry(ABC):
