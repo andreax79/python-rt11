@@ -24,6 +24,7 @@ import traceback
 from typing import Dict, Optional
 
 from .abstract import AbstractFilesystem
+from .caps11fs import CAPS11Filesystem
 from .commons import splitdrive
 from .dos11fs import DOS11Filesystem
 from .dos11magtapefs import DOS11MagTapeFilesystem
@@ -188,6 +189,8 @@ class Volumes(object):
                 self.volumes[logical] = DOS11MagTapeFilesystem(fs.open_file(fullname))
             elif fstype == "files11":
                 self.volumes[logical] = Files11Filesystem(fs.open_file(fullname))
+            elif fstype == "caps11":
+                self.volumes[logical] = CAPS11Filesystem(fs.open_file(fullname))
             else:
                 self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
             sys.stdout.write(f"?{cmd}-I-Disk {path} mounted to {logical}:\n")
