@@ -19,7 +19,6 @@
 # THE SOFTWARE.
 
 import errno
-import fnmatch
 import io
 import math
 import os
@@ -29,7 +28,7 @@ from datetime import date, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word, hex_dump
+from .commons import BLOCK_SIZE, bytes_to_word, filename_match, hex_dump
 from .rad50 import asc_to_rad50_word, rad50_word_to_asc
 from .rt11fs import rt11_canonical_filename
 from .uic import ANY_UIC, DEFAULT_UIC, UIC
@@ -853,14 +852,9 @@ class DOS11Filesystem(AbstractFilesystem):
         for mfd in self.read_mfd_entries(uic=uic):
             for ufd_block in mfd.read_ufd_blocks():
                 for entry in ufd_block.entries_list:
-                    if (
-                        (not pattern)
-                        or (wildcard and fnmatch.fnmatch(entry.basename, pattern))
-                        or (not wildcard and entry.basename == pattern)
-                    ):
-                        if not include_all and entry.is_empty:
-                            continue
-                        yield entry
+                    if filename_match(entry.basename, pattern, wildcard):
+                        if include_all or not entry.is_empty:
+                            yield entry
 
     @property
     def entries_list(self) -> Iterator["DOS11DirectoryEntry"]:

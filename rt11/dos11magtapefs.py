@@ -19,7 +19,6 @@
 # THE SOFTWARE.
 
 import errno
-import fnmatch
 import math
 import os
 import struct
@@ -28,7 +27,7 @@ from datetime import date
 from typing import Dict, Iterator, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, hex_dump
+from .commons import BLOCK_SIZE, filename_match, hex_dump
 from .dos11fs import (
     DEFAULT_PROTECTION_CODE,
     date_to_dos11,
@@ -335,14 +334,9 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
             uic = self.uic
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
         for entry in self.read_file_headers(uic=uic):
-            if (
-                (not pattern)
-                or (wildcard and fnmatch.fnmatch(entry.basename, pattern))
-                or (not wildcard and entry.basename == pattern)
-            ):
-                if not include_all and entry.is_empty:
-                    continue
-                yield entry
+            if filename_match(entry.basename, pattern, wildcard):
+                if include_all or not entry.is_empty:
+                    yield entry
 
     @property
     def entries_list(self) -> Iterator["DOS11MagTapeDirectoryEntry"]:

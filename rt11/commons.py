@@ -27,9 +27,11 @@ __all__ = [
     "getch",
     "swap_words",
     "hex_dump",
+    "filename_match",
     "PartialMatching",
 ]
 
+import fnmatch
 import sys
 from datetime import date
 from typing import Dict, Optional, Tuple
@@ -91,6 +93,15 @@ def hex_dump(data: bytes, bytes_per_line: int = BYTES_PER_LINE) -> None:
         hex_str = " ".join([f"{x:02x}" for x in line])
         ascii_str = "".join([chr(x) if 32 <= x <= 126 else "." for x in line])
         sys.stdout.write(f"{i:08x}   {hex_str.ljust(3 * bytes_per_line)}  {ascii_str}\n")
+
+
+def filename_match(basename: str, pattern: Optional[str], wildcard: bool) -> bool:
+    if not pattern:
+        return True
+    if wildcard:
+        return fnmatch.fnmatch(basename, pattern)
+    else:
+        return basename == pattern
 
 
 try:

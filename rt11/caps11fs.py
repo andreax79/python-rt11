@@ -19,7 +19,6 @@
 # THE SOFTWARE.
 
 import errno
-import fnmatch
 import math
 import os
 import struct
@@ -28,7 +27,7 @@ from datetime import date
 from typing import Dict, Iterator, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, hex_dump
+from .commons import BLOCK_SIZE, filename_match, hex_dump
 from .rt11fs import rt11_canonical_filename
 from .tape import Tape
 
@@ -378,11 +377,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         if pattern:
             pattern = rt11_canonical_filename(pattern, wildcard=True)
         for entry in self.read_file_headers():
-            if (
-                (not pattern)
-                or (wildcard and fnmatch.fnmatch(entry.basename, pattern))
-                or (not wildcard and entry.basename == pattern)
-            ) and (include_all or not entry.is_empty):
+            if filename_match(entry.basename, pattern, wildcard) and (include_all or not entry.is_empty):
                 yield entry
 
     @property

@@ -19,7 +19,6 @@
 # THE SOFTWARE.
 
 import errno
-import fnmatch
 import os
 import struct
 import sys
@@ -28,7 +27,7 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word, hex_dump, swap_words
+from .commons import BLOCK_SIZE, bytes_to_word, filename_match, hex_dump, swap_words
 from .dos11fs import dos11_split_fullname
 from .rad50 import asc2rad, rad2asc, rad50_word_to_asc
 from .uic import ANY_GROUP, ANY_USER, DEFAULT_UIC, UIC
@@ -614,13 +613,7 @@ class Files11Filesystem(AbstractFilesystem):
             uic = self.uic
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
         for entry in self.read_dir_entries(uic=uic):
-            if entry.is_empty:
-                continue
-            if (
-                (not pattern)
-                or (wildcard and fnmatch.fnmatch(entry.basename, pattern))
-                or (not wildcard and entry.basename == pattern)
-            ):
+            if filename_match(entry.basename, pattern, wildcard) and not entry.is_empty:
                 yield entry
 
     @property

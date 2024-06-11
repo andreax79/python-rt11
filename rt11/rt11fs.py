@@ -20,7 +20,6 @@
 
 import copy
 import errno
-import fnmatch
 import io
 import math
 import os
@@ -29,7 +28,14 @@ from datetime import date
 from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word, date_to_rt11, hex_dump, word_to_bytes
+from .commons import (
+    BLOCK_SIZE,
+    bytes_to_word,
+    date_to_rt11,
+    filename_match,
+    hex_dump,
+    word_to_bytes,
+)
 from .rad50 import asc2rad, rad2asc
 from .rx import (
     RX01_SECTOR_SIZE,
@@ -466,12 +472,17 @@ class RT11Filesystem(AbstractFilesystem):
             next_block_number = segment.next_block_number
             yield segment
 
-    def filter_entries_list(self, pattern: Optional[str], include_all: bool = False) -> Iterator["RT11DirectoryEntry"]:
+    def filter_entries_list(
+        self,
+        pattern: Optional[str],
+        include_all: bool = False,
+        wildcard: bool = True,
+    ) -> Iterator["RT11DirectoryEntry"]:
         if pattern:
-            pattern = rt11_canonical_filename(pattern, wildcard=True)
+            pattern = rt11_canonical_filename(pattern, wildcard=wildcard)
         for segment in self.read_dir_segments():
             for entry in segment.entries_list:
-                if (not pattern) or fnmatch.fnmatch(entry.fullname, pattern):
+                if filename_match(entry.basename, pattern, wildcard):
                     if not include_all and (entry.is_empty or entry.is_tentative or entry.is_end_of_segment):
                         continue
                     yield entry

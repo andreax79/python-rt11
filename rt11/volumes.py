@@ -31,6 +31,7 @@ from .dos11magtapefs import DOS11MagTapeFilesystem
 from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
 from .rt11fs import RT11Filesystem
+from .solofs import SOLOFilesystem
 
 __all__ = [
     "Volumes",
@@ -191,6 +192,8 @@ class Volumes(object):
                 self.volumes[logical] = Files11Filesystem(fs.open_file(fullname))
             elif fstype == "caps11":
                 self.volumes[logical] = CAPS11Filesystem(fs.open_file(fullname))
+            elif fstype == "solo":
+                self.volumes[logical] = SOLOFilesystem(fs.open_file(fullname))
             else:
                 self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
             sys.stdout.write(f"?{cmd}-I-Disk {path} mounted to {logical}:\n")

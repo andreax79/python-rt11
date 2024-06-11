@@ -524,7 +524,7 @@ MOUNT           Assigns a logical disk unit to a file
 
         """
         # fmt: on
-        args, options = extract_options(line, "/dos", "/dos11", "/dos11mt", "/magtape", "/files11", "/caps11")
+        args, options = extract_options(line, "/dos", "/dos11", "/dos11mt", "/magtape", "/files11", "/caps11", "/solo")
         if len(args) > 2:
             sys.stdout.write("?MOUNT-F-Too many arguments\n")
             return
@@ -542,6 +542,8 @@ MOUNT           Assigns a logical disk unit to a file
             fstype = "files11"
         elif options.get("caps11"):
             fstype = "caps11"
+        elif options.get("solo"):
+            fstype = "solo"
         else:
             fstype = None
         self.volumes.mount(path, logical, fstype=fstype, verbose=self.verbose)
@@ -859,6 +861,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a RT-11 disk",
+    )
+    parser.add_argument(
+        "--solo",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a SOLO disk",
     )
     parser.add_argument(
         "disk",
