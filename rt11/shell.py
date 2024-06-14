@@ -517,6 +517,10 @@ MOUNT           Assigns a logical disk unit to a file
         Mount DOS-11 MagTape filesystem
    FILES11
         Mount Files-11 filesystem
+   CAPS11
+        Mount CAPS-11 filesystem
+   SOLO
+        Mount SOLO filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
