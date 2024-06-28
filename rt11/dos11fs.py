@@ -34,18 +34,18 @@ from .rt11fs import rt11_canonical_filename
 from .uic import ANY_UIC, DEFAULT_UIC, UIC
 
 __all__ = [
-    "DOS11File",
     "DOS11DirectoryEntry",
+    "DOS11File",
     "DOS11Filesystem",
-    "dos11_to_date",
     "date_to_dos11",
     "dos11_canonical_filename",
+    "dos11_get_file_type_id",
     "dos11_split_fullname",
+    "dos11_to_date",
 ]
 
 MFD_BLOCK = 1
 UFD_ENTRIES = 28
-CONTIGUOUS_FILE_TYPE = 32768
 LINKED_FILE_BLOCK_SIZE = 510
 DECTAPE_MFD1_BLOCK = 0o100
 DECTAPE_MFD2_BLOCK = 0o101
@@ -60,6 +60,28 @@ MFD_ENTRY_SIZE = 8
 MFD_ENTRY_FORMAT = "<HHHH"
 UFD_ENTRY_SIZE = 18
 UFD_ENTRY_FORMAT = "<HHHHBBHHHBB"
+
+# File types
+LINKED_FILE_TYPE = 0
+CONTIGUOUS_FILE_TYPE = 32768
+
+FILE_TYPES = {
+    LINKED_FILE_TYPE: "NOCONTIGUOUS",
+    CONTIGUOUS_FILE_TYPE: "CONTIGUOUS",
+}
+
+
+def dos11_get_file_type_id(file_type: Optional[str], default: int = LINKED_FILE_TYPE) -> int:
+    """
+    Get the file type id from a string
+    """
+    if not file_type:
+        return default
+    file_type = file_type.upper()
+    for file_id, file_str in FILE_TYPES.items():
+        if file_str == file_type:
+            return file_id
+    raise Exception("?KMON-F-Invalid file type specified with option")
 
 
 def dos11_to_date(val: int) -> Optional[date]:
@@ -406,7 +428,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     ufd_block: "UserFileDirectoryBlock"
     uic: UIC = DEFAULT_UIC
     filename: str = ""
-    filetype: str = ""
+    extension: str = ""
     raw_creation_date: int = 0
     start_block: int = 0  # Block number of the first logical block
     length: int = 0  # Length in blocks
@@ -440,7 +462,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
             self.spare2,  #            1 byte  spare
         ) = struct.unpack_from(UFD_ENTRY_FORMAT, buffer, position)
         self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1)
-        self.filetype = rad50_word_to_asc(ftyp)
+        self.extension = rad50_word_to_asc(ftyp)
         if self.raw_creation_date & CONTIGUOUS_FILE_TYPE:
             self.contiguous = True
             self.raw_creation_date &= ~CONTIGUOUS_FILE_TYPE
@@ -449,10 +471,10 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         return self
 
     def write(self, buffer: bytearray, position: int) -> None:
-        # Create filename and filetype in RAD50 format
+        # Create filename and extension in RAD50 format
         fnam0 = asc_to_rad50_word(self.filename[:3])
         fnam1 = asc_to_rad50_word(self.filename[3:6])
-        ftyp = asc_to_rad50_word(self.filetype)
+        ftyp = asc_to_rad50_word(self.extension)
         # Adjust raw_creation_date for contiguous files
         if self.contiguous:
             raw_creation_date = self.raw_creation_date | CONTIGUOUS_FILE_TYPE
@@ -478,15 +500,15 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def is_empty(self) -> bool:
-        return self.filename == "" and self.filetype == ""
+        return self.filename == "" and self.extension == ""
 
     @property
     def fullname(self) -> str:
-        return f"{self.uic or ''}{self.filename}.{self.filetype}"
+        return f"{self.uic or ''}{self.filename}.{self.extension}"
 
     @property
     def basename(self) -> str:
-        return f"{self.filename}.{self.filetype}"
+        return f"{self.filename}.{self.extension}"
 
     @property
     def creation_date(self) -> Optional[date]:
@@ -506,7 +528,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         self.protection_code = 0
         self.spare2 = 0
         self.filename = ""
-        self.filetype = ""
+        self.extension = ""
         self.contiguous = False
         self.ufd_block.write()
         # Free space
@@ -528,7 +550,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     def __str__(self) -> str:
         return (
             f"{self.filename:<6}."
-            f"{self.filetype:<3}  "
+            f"{self.extension:<3}  "
             f"{self.uic.to_wide_str() if self.uic else '':<9}  "
             f"{self.creation_date or '          '} "
             f"{self.length:>6}{'C' if self.contiguous else ' '} "
@@ -898,21 +920,19 @@ class DOS11Filesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> None:
         """
         Write content to a file
         """
-        if contiguous is None:
-            contiguous = False
-        block_size = BLOCK_SIZE if contiguous else LINKED_FILE_BLOCK_SIZE
+        block_size = BLOCK_SIZE if dos11_get_file_type_id(file_type) == CONTIGUOUS_FILE_TYPE else LINKED_FILE_BLOCK_SIZE
         length = int(math.ceil(len(content) * 1.0 / block_size))
         entry = self.create_file(
             fullname=fullname,
             length=length,
             creation_date=creation_date,
-            contiguous=contiguous,
+            file_type=file_type,
             protection_code=protection_code,
         )
         if entry is not None:
@@ -927,14 +947,13 @@ class DOS11Filesystem(AbstractFilesystem):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> Optional[DOS11DirectoryEntry]:
         """
         Create a new file with a given length in number of blocks
         """
-        if contiguous is None:
-            contiguous = False
+        contiguous = dos11_get_file_type_id(file_type) == CONTIGUOUS_FILE_TYPE
         # Delete the existing file
         old_entry = self.get_file_entry(fullname)
         if old_entry is not None:
@@ -966,12 +985,12 @@ class DOS11Filesystem(AbstractFilesystem):
             if new_entry is None:
                 raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         try:
-            filename, filetype = basename.split(".", 1)
+            filename, extension = basename.split(".", 1)  # type: ignore
         except Exception:
             filename = basename
-            filetype = ""
+            extension = ""
         new_entry.filename = filename
-        new_entry.filetype = filetype
+        new_entry.extension = extension
         new_entry.raw_creation_date = date_to_dos11(creation_date or date.today())
         new_entry.start_block = blocks[0]
         new_entry.length = length
@@ -1021,7 +1040,7 @@ class DOS11Filesystem(AbstractFilesystem):
             if x.is_empty:
                 continue
             i = i + 1
-            fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.filetype)
+            fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.extension)
             if options.get("brief"):
                 # Lists only file names and file types
                 sys.stdout.write(f"{fullname}\n")

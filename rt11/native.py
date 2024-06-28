@@ -142,9 +142,9 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
     def __init__(self, fullname: str):
         self.native_fullname = fullname
         self.filename = os.path.basename(fullname)
-        self.filename, self.filetype = os.path.splitext(self.filename)
-        if self.filetype.startswith("."):
-            self.filetype = self.filename[1:]
+        self.filename, self.extension = os.path.splitext(self.filename)
+        if self.extension.startswith("."):
+            self.extension = self.filename[1:]
         self.stat = os.stat(fullname)
         self.length = self.stat.st_size  # length in bytes
 
@@ -233,7 +233,7 @@ class NativeFilesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> None:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
@@ -249,7 +249,7 @@ class NativeFilesystem(AbstractFilesystem):
         fullname: str,
         length: int,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> Optional[NativeDirectoryEntry]:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)

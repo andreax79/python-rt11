@@ -24,7 +24,7 @@ import os
 import shlex
 import sys
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFilesystem
 from .commons import PartialMatching, splitdrive
@@ -62,12 +62,18 @@ def ask(prompt: str) -> str:
     return result
 
 
-def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, bool]]:
+def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, Union[bool, str]]]:
     args = shlex.split(line)
     result: List[str] = []
-    options_result: Dict[str, bool] = {}
+    options_result: Dict[str, Union[bool, str]] = {}
     for arg in args:
-        if arg.lower() in options:
+        if ':' in arg:
+            key, value = arg.split(':', 1)
+            if key.lower() in options:
+                options_result[key.lower()[1:]] = value
+            else:
+                result.append(arg)
+        elif arg.lower() in options:
             options_result[arg.lower()[1:]] = True
         else:
             result.append(arg)
@@ -87,13 +93,13 @@ def copy_file(
     from_entry: AbstractDirectoryEntry,
     to_fs: AbstractFilesystem,
     to_path: str,
-    contiguous: Optional[bool],
+    file_type: Optional[str],
     verbose: int,
     cmd: str = "COPY",
 ) -> None:
     try:
         content = from_fs.read_bytes(from_entry.fullname)
-        to_fs.write_bytes(to_path, content, from_entry.creation_date, contiguous)
+        to_fs.write_bytes(to_path, content, from_entry.creation_date, file_type)
     except Exception:
         raise
         if verbose:
@@ -348,13 +354,13 @@ TYPE            Outputs files to the terminal
 COPY            Copies files
 
   SYNTAX
-        COPY [input-volume:]input-filespec [output-volume:][output-filespec]
+        COPY [/options] [input-volume:]input-filespec [output-volume:][output-filespec]
 
   OPTIONS
-   CONTIGUOUS
+   TYPE:CONTIGUOUS
         Specifies that the output file is to be contiguous,
         if supported by the taget filesystem
-   NOCONTIGUOUS
+   TYPE:NOCONTIGUOUS
         Specifies that the output file is to be noncontiguous,
         if supported by the taget filesystem
 
@@ -363,7 +369,7 @@ COPY            Copies files
 
         """
         # fmt: on
-        args, options = extract_options(line, "/contiguous", "/nocontiguous")
+        args, options = extract_options(line, "/type")
         if len(args) > 2:
             sys.stdout.write("?COPY-F-Too many arguments\n")
             return
@@ -379,11 +385,7 @@ COPY            Copies files
         to_fs = self.volumes.get(to_volume_id, cmd="COPY")
         from_len = len(list(from_fs.filter_entries_list(cfrom)))
         from_list = from_fs.filter_entries_list(cfrom)
-        contiguous = None
-        if options.get("contiguous"):
-            contiguous = True
-        elif options.get("nocontiguous"):
-            contiguous = False
+        file_type = options["type"].upper() if isinstance(options.get("type"), str) else None
         if from_len == 0:  # No files
             raise Exception("?COPY-F-No files")
         elif from_len == 1:  # One file to be copied
@@ -399,7 +401,7 @@ COPY            Copies files
             if not from_entry:
                 raise Exception(f"?COPY-F-Error copying {source.fullname}")
             sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, source.fullname, to_volume_id, to_path))
-            copy_file(from_fs, from_entry, to_fs, to_path, contiguous, self.verbose, cmd="COPY")
+            copy_file(from_fs, from_entry, to_fs, to_path, file_type, self.verbose, cmd="COPY")
         else:
             if not to:
                 to = self.volumes.get(to_volume_id).get_pwd()
@@ -411,7 +413,7 @@ COPY            Copies files
                 else:
                     to_path = from_entry.basename
                 sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, from_entry.fullname, to_volume_id, to_path))
-                copy_file(from_fs, from_entry, to_fs, to_path, contiguous, self.verbose, cmd="COPY")
+                copy_file(from_fs, from_entry, to_fs, to_path, file_type, self.verbose, cmd="COPY")
 
     @flgtxt("DEL_ETE")
     def do_delete(self, line: str) -> None:
@@ -795,7 +797,13 @@ SHELL           Executes a system shell command
 
 
 class CustomAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: Optional[str] = None,
+    ) -> None:
         fstype = option_string.strip("-")
         arr = getattr(namespace, "mounts", [])
         for v in values:

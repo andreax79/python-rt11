@@ -139,7 +139,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
     fs: "DOS11MagTapeFilesystem"
     uic: UIC = DEFAULT_UIC
     filename: str = ""
-    filetype: str = ""
+    extension: str = ""
     raw_creation_date: int = 0
     protection_code: int = 0  # System Programmers Manual, Pag 140
     size: int = 0  # size in bytes
@@ -155,7 +155,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         tape_pos: int,
         uic: UIC,
         filename: str,
-        filetype: str,
+        extension: str,
         creation_date: Optional[date] = None,  # optional creation date
         protection_code: int = DEFAULT_PROTECTION_CODE,
         size: int = 0,
@@ -164,7 +164,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         self.tape_pos = tape_pos
         self.uic = uic
         self.filename = filename
-        self.filetype = filetype
+        self.extension = extension
         self.raw_creation_date = date_to_dos11(creation_date) if creation_date is not None else 0
         self.protection_code = protection_code
         self.size = size
@@ -190,7 +190,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
             fnam3,
         ) = struct.unpack_from(HEADER_RECORD, buffer, 0)
         self.filename = rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2) + rad50_word_to_asc(fnam3)  # RAD50 chars
-        self.filetype = rad50_word_to_asc(ftyp)  # RAD50 chars
+        self.extension = rad50_word_to_asc(ftyp)  # RAD50 chars
         self.uic = UIC.from_word(fuic)
         self.size = size - HEADER_RECORD_SIZE
         return self
@@ -201,7 +201,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         fnam1 = asc_to_rad50_word(self.filename[:3])
         fnam2 = asc_to_rad50_word(self.filename[3:6])
         fnam3 = asc_to_rad50_word(self.filename[6:9])
-        ftyp = asc_to_rad50_word(self.filetype)
+        ftyp = asc_to_rad50_word(self.extension)
         fuic = self.uic.to_word()
         # Pack the data into the buffer
         struct.pack_into(
@@ -219,15 +219,15 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def is_empty(self) -> bool:
-        return self.filename == "" and self.filetype == ""
+        return self.filename == "" and self.extension == ""
 
     @property
     def fullname(self) -> str:
-        return f"{self.uic or ''}{self.filename}.{self.filetype}"
+        return f"{self.uic or ''}{self.filename}.{self.extension}"
 
     @property
     def basename(self) -> str:
-        return f"{self.filename}.{self.filetype}"
+        return f"{self.filename}.{self.extension}"
 
     @property
     def creation_date(self) -> Optional[date]:
@@ -239,7 +239,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         """
         self.uic = DEFAULT_UIC
         self.filename = ""
-        self.filetype = ""
+        self.extension = ""
         self.raw_creation_date = 0
         self.protection_code = 0
         self.write()
@@ -248,7 +248,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
     def __str__(self) -> str:
         return (
             f"{self.filename:>9}."
-            f"{self.filetype:<3} "
+            f"{self.extension:<3} "
             f"{self.uic.to_wide_str() if self.uic else '':<9}  "
             f"<{self.protection_code:o}> "
             f"{self.creation_date or '          '} "
@@ -369,7 +369,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> None:
         """
@@ -389,7 +389,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
         content: Optional[bytes] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> Optional[DOS11MagTapeDirectoryEntry]:
@@ -398,20 +398,20 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         """
         # Delete the existing file
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
-        old_entry = self.get_file_entry(basename)
+        old_entry = self.get_file_entry(basename)  # type: ignore
         if old_entry is not None:
             old_entry.delete()
         # Find the position for the new file
         tape_pos = self.tape_pos - 4  # tape mark size
         self.f.truncate(tape_pos)
         # Create the new directory entry
-        filename, filetype = basename.split(".", 1)
+        filename, extension = basename.split(".", 1)  # type: ignore
         entry = DOS11MagTapeDirectoryEntry.new(
             fs=self,
             tape_pos=tape_pos,
             uic=uic,
             filename=filename,
-            filetype=filetype,
+            extension=extension,
             creation_date=creation_date,
             protection_code=protection_code,
         )
@@ -459,7 +459,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
             i = i + 1
             if x.is_empty:
                 continue
-            fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.filetype)
+            fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.extension)
             if options.get("brief"):
                 # Lists only file names and file types
                 sys.stdout.write(f"{fullname}\n")

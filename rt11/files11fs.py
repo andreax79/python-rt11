@@ -83,13 +83,13 @@ def files11_canonical_filename(fullname: Optional[str], wildcard: bool = False) 
     """
     fullname = (fullname or "").upper()
     try:
-        filename, filetype = fullname.split(".", 1)
+        filename, extension = fullname.split(".", 1)
     except Exception:
         filename = fullname
-        filetype = "*" if wildcard else ""
+        extension = "*" if wildcard else ""
     filename = rad2asc(asc2rad(filename[0:3])) + rad2asc(asc2rad(filename[3:6])) + rad2asc(asc2rad(filename[6:9]))
-    filetype = rad2asc(asc2rad(filetype))
-    return f"{filename}.{filetype}"
+    extension = rad2asc(asc2rad(extension))
+    return f"{filename}.{extension}"
 
 
 def files11_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
@@ -218,7 +218,7 @@ class Files11FileHeader:
     ufat: bytes  # User Attribute Area
     # Ident Area
     filename: str  # File Name
-    filetype: str  # File Type
+    extension: str  # File Type
     fver: int  # Version Number
     rvno: int  # Revision Number
     rvdt: bytes  # Revision Date
@@ -279,7 +279,7 @@ class Files11FileHeader:
             _,
         ) = struct.unpack_from(IDENT_AREA_FORMAT, buffer, position + self.idof * 2)
         self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
-        self.filetype = rad50_word_to_asc(ftyp)
+        self.extension = rad50_word_to_asc(ftyp)
         # Map Area
         # It describes the mapping of virtual blocks of the file to the logical blocks of the volume
         (
@@ -340,7 +340,7 @@ class Files11FileHeader:
 
     @property
     def basename(self) -> str:
-        return f"{self.filename}.{self.filetype}"
+        return f"{self.filename}.{self.extension}"
 
     @property
     def isdir(self) -> bool:
@@ -378,7 +378,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     fseq: int  # File Sequence Number
     fvol: int  # Relative Volume Number
     filename: str  # File Name
-    filetype: str  # File Type
+    extension: str  # File Type
     fver: int  # Version Number
     uic: UIC = DEFAULT_UIC
 
@@ -399,7 +399,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
             self.fver,  # 1 word File Version
         ) = struct.unpack_from(DIRECTORY_FILE_ENTRY_FORMAT, buffer, position)
         self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
-        self.filetype = rad50_word_to_asc(ftyp)
+        self.extension = rad50_word_to_asc(ftyp)
 
     @property
     def header(self) -> "Files11FileHeader":
@@ -422,11 +422,11 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return f"{self.uic or ''}{self.filename}.{self.filetype}"
+        return f"{self.uic or ''}{self.filename}.{self.extension}"
 
     @property
     def basename(self) -> str:
-        return f"{self.filename}.{self.filetype}"
+        return f"{self.filename}.{self.extension}"
 
     @property
     def creation_date(self) -> Optional[date]:
@@ -646,7 +646,7 @@ class Files11Filesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
@@ -655,7 +655,7 @@ class Files11Filesystem(AbstractFilesystem):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> Optional[Files11DirectoryEntry]:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
@@ -680,7 +680,7 @@ class Files11Filesystem(AbstractFilesystem):
         for x in self.filter_entries_list(pattern, uic=uic, include_all=True, wildcard=True):
             if x.is_empty:
                 continue
-            fullname = f"{x.filename}.{x.filetype};{x.fver}"
+            fullname = f"{x.filename}.{x.extension};{x.fver}"
             if options.get("brief"):
                 # Lists only file names and file types
                 sys.stdout.write(f"{fullname}\n")

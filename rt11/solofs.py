@@ -10,7 +10,7 @@
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY FILE_TYPES, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -69,13 +69,26 @@ ASCII = 2  #   Ascii file
 SEQCODE = 3  # Sequential Pascal code file
 CONCODE = 4  # Concurrent Pascal code file
 
-KIND = {
+FILE_TYPES = {
     EMPTY: "EMPTY",
     SCRATCH: "SCRATCH",
     ASCII: "ASCII",
     SEQCODE: "SEQCODE",
     CONCODE: "CONCODE",
 }
+
+
+def get_file_type_id(file_type: Optional[str], default: int = ASCII) -> int:
+    """
+    Get the file type id from a string
+    """
+    if not file_type:
+        return default
+    file_type = file_type.upper()
+    for file_id, file_str in FILE_TYPES.items():
+        if file_str == file_type:
+            return file_id
+    raise Exception("?KMON-F-Invalid file type specified with option")
 
 
 def filename_hash(filename: str, catalog_length: int) -> int:
@@ -212,7 +225,7 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
 
     cat_page: "SOLOCatalogPage"
     filename: str = ""  # Filename (12 chars)
-    kind_id: int = 0  # File type (scratch, ascii, seqcode and concode)
+    file_type_id: int = 0  # File type (scratch, ascii, seqcode and concode)
     page_map_block_number: int = 0  # Page map block number
     protected: bool = False  # Protected against accidental overwriting or deletion
     spare: bytes = b""
@@ -225,11 +238,16 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
 
     @classmethod
     def new(
-        cls, cat_page: "SOLOCatalogPage", filename: str, kind_id: int, page_map_block_number: int, page_map: List[int]
+        cls,
+        cat_page: "SOLOCatalogPage",
+        filename: str,
+        file_type_id: int,
+        page_map_block_number: int,
+        page_map: List[int],
     ) -> "SOLODirectoryEntry":
         self = SOLODirectoryEntry(cat_page)
         self.filename = filename
-        self.kind_id = kind_id
+        self.file_type_id = file_type_id
         self.page_map_block_number = page_map_block_number
         self.hash_key = filename_hash(filename, cat_page.fs.catalog_length)
         self.searchlength = 0
@@ -241,7 +259,7 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
         self = SOLODirectoryEntry(cat_page)
         (
             file_id,
-            self.kind_id,
+            self.file_type_id,
             self.page_map_block_number,
             raw_protected,
             self.spare,
@@ -264,7 +282,7 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
             buffer,
             position,
             file_id,
-            self.kind_id,
+            self.file_type_id,
             self.page_map_block_number,
             raw_protected,
             self.spare,
@@ -285,8 +303,8 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
         return self.filename
 
     @property
-    def kind(self) -> str:
-        return KIND.get(self.kind_id, "")
+    def file_type(self) -> str:
+        return FILE_TYPES.get(self.file_type_id, "")
 
     @property
     def creation_date(self) -> Optional[date]:
@@ -313,7 +331,7 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
         # Delete entry from the catalog
         old_key = self.hash_key
         self.hash_key = 0
-        self.kind_id = EMPTY
+        self.file_type_id = EMPTY
         self.protected = False
         self.filename = ""
         self.page_map_block_number = 0
@@ -327,7 +345,7 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
 
     def __str__(self) -> str:
         return f"{self.filename:<12}  \
-{self.kind:<8}  \
+{self.file_type:<8}  \
 {'PROT' if self.protected else '    '}  \
 Key: {self.hash_key:>6} {'('+str(self.searchlength)+')':<6}  \
 Length: {self.length:>4}  \
@@ -511,7 +529,7 @@ class SOLOCatalogPage:
     def create_entry(
         self,
         filename: str,
-        kind_id: int,
+        file_type: Optional[str],
         page_map_block_number: int,
         page_map: List[int],
         search_key: Optional[int] = None,
@@ -520,12 +538,15 @@ class SOLOCatalogPage:
         Create a new entry in this catalog page.
         If search_key is not None, put the new entry in the first position after the search_key
         """
+        file_type_id = get_file_type_id(file_type)
+        if file_type_id == EMPTY:
+            raise Exception("?KMON-F-Invalid file type specified with option")
         found = search_key is None
         for i, entry in enumerate(self.entries):
             if not found and (search_key is not None and entry.hash_key < search_key):
                 found = True
             if found and entry.is_empty:
-                self.entries[i] = SOLODirectoryEntry.new(self, filename, kind_id, page_map_block_number, page_map)
+                self.entries[i] = SOLODirectoryEntry.new(self, filename, file_type_id, page_map_block_number, page_map)
                 return self.entries[i]
         return None
 
@@ -684,7 +705,7 @@ class SOLOFilesystem(AbstractFilesystem):
             data = f.read_block(0, READ_FILE_FULL)
         finally:
             f.close()
-        if (not raw) and data and f.entry.kind_id == ASCII:
+        if (not raw) and data and f.entry.file_type_id == ASCII:
             data = solo_to_ascii(data)
         return data
 
@@ -693,8 +714,7 @@ class SOLOFilesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
-        kind: int = ASCII,
+        file_type: Optional[str] = None,
         protected: bool = False,
     ) -> None:
         """
@@ -703,10 +723,10 @@ class SOLOFilesystem(AbstractFilesystem):
         length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
         if length > MAX_FILE_SIZE:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
-        if kind == ASCII:
+        if get_file_type_id(file_type) == ASCII:
             content = ascii_to_solo(content)
 
-        entry = self.create_file(fullname=fullname, length=length, kind=kind, protected=protected)
+        entry = self.create_file(fullname=fullname, length=length, file_type=file_type, protected=protected)
         if entry is not None:
             f = SOLOFile(entry)
             try:
@@ -719,8 +739,7 @@ class SOLOFilesystem(AbstractFilesystem):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
-        contiguous: Optional[bool] = None,
-        kind: int = ASCII,
+        file_type: Optional[str] = None,
         protected: bool = False,
     ) -> Optional[SOLODirectoryEntry]:
         """
@@ -746,18 +765,20 @@ class SOLOFilesystem(AbstractFilesystem):
         if existing_entry:
             catalog_page = existing_entry.cat_page
         else:
-            page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1  # 1 >= page_num >= CAT_PAGES
+            page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1  # 1 >= page_num >= CAT_PAGE_LENGTH
             cat_pages = self.read_page_map(CAT_ADDR)
             block_number = cat_pages[page_num - 1]
             catalog_page = SOLOCatalogPage.read(self, block_number)
         # print(f"{hash_key=} {page_num+1=} {block_number=} {catalog_page=}")
-        new_entry = catalog_page.create_entry(fullname, kind, page_map_block_number, file_blocks, search_key=hash_key)
+        new_entry = catalog_page.create_entry(
+            fullname, file_type, page_map_block_number, file_blocks, search_key=hash_key
+        )
         if new_entry is None:
             for block_number in self.read_page_map(CAT_ADDR):
                 catalog_page = SOLOCatalogPage.read(self, block_number)
                 new_entry = catalog_page.create_entry(
                     fullname,
-                    kind,
+                    file_type,
                     page_map_block_number,
                     file_blocks,
                 )
@@ -794,7 +815,7 @@ class SOLOFilesystem(AbstractFilesystem):
                 sys.stdout.write(f"{x.filename}\n")
             else:
                 sys.stdout.write(
-                    f"{x.filename:<12} {x.kind:<12} {'PROTECTED' if x.protected else 'UNPROTECTED':<12} {x.length:>6} PAGES\n"
+                    f"{x.filename:<12} {x.file_type:<12} {'PROTECTED' if x.protected else 'UNPROTECTED':<12} {x.length:>6} PAGES\n"
                 )
             blocks += x.length
             files += 1

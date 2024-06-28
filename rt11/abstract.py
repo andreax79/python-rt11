@@ -195,7 +195,7 @@ class AbstractFilesystem(object):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> None:
         """Write content to a file"""
 
@@ -205,7 +205,7 @@ class AbstractFilesystem(object):
         fullname: str,
         length: int,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> Optional["AbstractDirectoryEntry"]:
         """Create a new file with a given length in number of blocks"""
 

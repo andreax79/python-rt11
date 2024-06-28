@@ -122,7 +122,7 @@ except Exception:
     import msvcrt
 
     def getch() -> str:
-        return msvcrt.getch()
+        return msvcrt.getch()  # type: ignore
 
 
 class PartialMatching:

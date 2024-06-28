@@ -5,22 +5,23 @@ import pytest
 from rt11.commons import PartialMatching, bytes_to_word, word_to_bytes
 from rt11.rad50 import asc2rad, rad2asc
 from rt11.rt11fs import date_to_rt11, rt11_canonical_filename, rt11_to_date
+from rt11.shell import extract_options
 
 
 def test_bytes_to_word():
     # Test with valid input
-    assert bytes_to_word(b'\x01\x00') == 1
-    assert bytes_to_word(b'\xff\xff') == 65535
-    assert bytes_to_word(b'\x01\xab\xcd', position=1) == 52651
+    assert bytes_to_word(b"\x01\x00") == 1
+    assert bytes_to_word(b"\xff\xff") == 65535
+    assert bytes_to_word(b"\x01\xab\xcd", position=1) == 52651
     # Test with out of bounds position
     with pytest.raises(IndexError):
-        bytes_to_word(b'\x01\x02', position=2)
+        bytes_to_word(b"\x01\x02", position=2)
 
 
 def test_word_to_bytes():
     # Test with valid input
-    assert word_to_bytes(1) == b'\x01\x00'
-    assert word_to_bytes(65535) == b'\xFF\xFF'
+    assert word_to_bytes(1) == b"\x01\x00"
+    assert word_to_bytes(65535) == b"\xFF\xFF"
     assert len(word_to_bytes(1234)) == 2
     for i in range(0, 1 << 16):
         assert bytes_to_word(word_to_bytes(i)) == i
@@ -34,24 +35,24 @@ def test_word_to_bytes():
 
 def test_rad2asc():
     # Test with valid input
-    assert rad2asc(b'\x01\x00') == "A"
-    assert rad2asc(b'\x06\x01') == "FV"
-    assert rad2asc(b'\x00\x00') == ""
+    assert rad2asc(b"\x01\x00") == "A"
+    assert rad2asc(b"\x06\x01") == "FV"
+    assert rad2asc(b"\x00\x00") == ""
     # Test with different positions
-    assert rad2asc(b'\x10\x37\x31\x43\x74', position=0) == "H2P"
-    assert rad2asc(b'\x10\x37\x31\x43\x74', position=2) == "J0A"
+    assert rad2asc(b"\x10\x37\x31\x43\x74", position=0) == "H2P"
+    assert rad2asc(b"\x10\x37\x31\x43\x74", position=2) == "J0A"
     # Test with all zeros
-    assert rad2asc(b'\x00\x00\x00') == ""
+    assert rad2asc(b"\x00\x00\x00") == ""
 
 
 def test_asc2rad():
     # Test with valid input
-    assert asc2rad("ABC") == b'\x93\x06'
-    assert asc2rad("Z12") == b'x\xa7'
-    assert asc2rad("") == b'\x00\x00'
+    assert asc2rad("ABC") == b"\x93\x06"
+    assert asc2rad("Z12") == b"x\xa7"
+    assert asc2rad("") == b"\x00\x00"
     # Test with lowercase characters
-    assert asc2rad("zia") == b'\xe9\xa3'
-    assert asc2rad(":$%") == b'\x54\xfe'
+    assert asc2rad("zia") == b"\xe9\xa3"
+    assert asc2rad(":$%") == b"\x54\xfe"
 
 
 def test_rt11_to_date():
@@ -120,3 +121,48 @@ def test_partial_matching():
     assert x.get("ORANGO") is None
     assert x.get("TD") is None
     assert x.get("") is None
+
+
+def test_extract_options():
+    line = "command /a /b /c:1 /d:abc /flag value1 value2"
+    options = ("/a", "/b", "/c", "/d", "/flag")
+
+    args, opts = extract_options(line, *options)
+    assert args == ["command", "value1", "value2"]
+    assert opts == {"a": True, "b": True, "c": "1", "d": "abc", "flag": True}
+
+
+def test_extract_options_with_no_options():
+    line = "command value1 value2"
+    options = ("/a", "/b", "/flag")
+
+    args, opts = extract_options(line, *options)
+    assert args == ["command", "value1", "value2"]
+    assert opts == {}
+
+
+def test_extract_options_with_some_options():
+    line = "command /a value1 /flag value2"
+    options = ("/a", "/b", "/flag")
+
+    args, opts = extract_options(line, *options)
+    assert args == ["command", "value1", "value2"]
+    assert opts == {"a": True, "flag": True}
+
+
+def test_extract_options_case_insensitive():
+    line = "command /A /B /FLAG value1 value2"
+    options = ("/a", "/b", "/flag")
+
+    args, opts = extract_options(line, *options)
+    assert args == ["command", "value1", "value2"]
+    assert opts == {"a": True, "b": True, "flag": True}
+
+
+def test_extract_options_with_unexpected_options():
+    line = "command /x /y value1 value2"
+    options = ("/a", "/b", "/flag")
+
+    args, opts = extract_options(line, *options)
+    assert args == ["command", "/x", "/y", "value1", "value2"]
+    assert opts == {}

@@ -92,13 +92,13 @@ def rt11_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> 
     """
     fullname = (fullname or "").upper()
     try:
-        filename, filetype = fullname.split(".", 1)
+        filename, extension = fullname.split(".", 1)
     except Exception:
         filename = fullname
-        filetype = "*" if wildcard else ""
+        extension = "*" if wildcard else ""
     filename = rad2asc(asc2rad(filename[0:3])) + rad2asc(asc2rad(filename[3:6]))
-    filetype = rad2asc(asc2rad(filetype))
-    return f"{filename}.{filetype}"
+    extension = rad2asc(asc2rad(extension))
+    return f"{filename}.{extension}"
 
 
 class RT11File(AbstractFile):
@@ -178,7 +178,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
     type: int = 0
     clazz: int = 0
     filename: str = ""
-    filetype: str = ""
+    extension: str = ""
     length: int = 0
     job: int = 0
     channel: int = 0
@@ -193,7 +193,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         self.type = buffer[position]
         self.clazz = buffer[position + 1]
         self.filename = rad2asc(buffer, position + 2) + rad2asc(buffer, position + 4)  # 6 RAD50 chars
-        self.filetype = rad2asc(buffer, position + 6)  # 3 RAD50 chars
+        self.extension = rad2asc(buffer, position + 6)  # 3 RAD50 chars
         self.length = bytes_to_word(buffer, position + 8)  # length in blocks
         self.job = buffer[position + 10]
         self.channel = buffer[position + 11]
@@ -207,7 +207,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         out.append(self.clazz)
         out.extend(asc2rad(self.filename[0:3]))
         out.extend(asc2rad(self.filename[3:6]))
-        out.extend(asc2rad(self.filetype))
+        out.extend(asc2rad(self.extension))
         out.extend(word_to_bytes(self.length))
         out.append(self.job)
         out.append(self.channel)
@@ -241,7 +241,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return f"{self.filename}.{self.filetype}"
+        return f"{self.filename}.{self.extension}"
 
     @property
     def basename(self) -> str:
@@ -517,10 +517,10 @@ class RT11Filesystem(AbstractFilesystem):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> None:
         length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
-        entry = self.create_file(fullname, length, creation_date, contiguous)
+        entry = self.create_file(fullname, length, creation_date, file_type)
         if not entry:
             return
         content = content + (b"\0" * BLOCK_SIZE)
@@ -531,7 +531,7 @@ class RT11Filesystem(AbstractFilesystem):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> Optional[RT11DirectoryEntry]:
         fullname = os.path.basename(fullname)
         entry: Optional[RT11DirectoryEntry] = self.get_file_entry(fullname)
@@ -593,7 +593,7 @@ class RT11Filesystem(AbstractFilesystem):
         Allocate space for a new file
         """
         entry: Optional[RT11DirectoryEntry] = None
-        entry_number: Optional[int] = None
+        entry_number: int = -1
         # Search for an empty entry to be splitted
         for segment in self.read_dir_segments():
             for i, e in enumerate(segment.entries_list):
@@ -614,7 +614,7 @@ class RT11Filesystem(AbstractFilesystem):
         # Fill the entry
         t = os.path.splitext(fullname.upper())
         entry.filename = t[0]
-        entry.filetype = t[1] and t[1][1:] or ""
+        entry.extension = t[1] and t[1][1:] or ""
         entry.raw_creation_date = date_to_rt11(creation_date)
         entry.job = 0
         entry.channel = 0
@@ -659,7 +659,7 @@ class RT11Filesystem(AbstractFilesystem):
                 date = ""
                 unused = unused + x.length
             else:
-                fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.filetype)
+                fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.extension)
                 if options.get("brief"):
                     # Lists only file names and file types
                     sys.stdout.write(f"{fullname}\n")
@@ -760,7 +760,7 @@ class RT11Filesystem(AbstractFilesystem):
         dir_entry.length = length - dir_entry.file_position
         dir_entry.clazz = 2
         dir_entry.filename = "EMPTY"
-        dir_entry.filetype = "FIL"
+        dir_entry.extension = "FIL"
         segment.entries_list.append(dir_entry)
         # second entry
         dir_entry = RT11DirectoryEntry(segment)

@@ -49,10 +49,10 @@ def test_dos11_dectape_bitmap():
 
     # UIC not found
     with pytest.raises(Exception):
-        shell.onecmd("copy /CONTIGUOUS t:10.TXT t:[123,321]10NEW.TXT", batch=True)
+        shell.onecmd("copy /TYPE:CONTIGUOUS t:10.TXT t:[123,321]10NEW.TXT", batch=True)
 
     # Create a contiguous file
-    shell.onecmd("copy /CONTIGUOUS t:10.TXT t:10NEW.TXT", batch=True)
+    shell.onecmd("copy /TYPE:CONTIGUOUS t:10.TXT t:10NEW.TXT", batch=True)
     x2 = fs.read_bytes("10NEW.txt")
     x2 = x2.rstrip(b"\0")
     assert len(x2) == 440
@@ -60,7 +60,7 @@ def test_dos11_dectape_bitmap():
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x2
 
     # Create a non-contiguous file
-    shell.onecmd("copy /NOCONTIGUOUS t:10.TXT t:10NEW2.TXT", batch=True)
+    shell.onecmd("copy /TYPE:NOCONTIGUOUS t:10.TXT t:10NEW2.TXT", batch=True)
     x2 = fs.read_bytes("10NEW2.txt")
     x2 = x2.rstrip(b"\0")
     assert len(x2) == 440

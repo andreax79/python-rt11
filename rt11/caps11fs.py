@@ -179,7 +179,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
 
     fs: "CAPS11Filesystem"
     filename: str = ""  #             6 chars - name
-    filetype: str = ""  #             3 chars - extension
+    extension: str = ""  #             3 chars - extension
     record_type: int = 0  #           1 byte  - record type
     record_length: int = 0  #         2 bytes - file record length (fixed at 128 bytes)
     sequence: int = 0  #              1 byte  - file sequence number for multi volume files (0)
@@ -201,7 +201,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         file_number: int,
         tape_pos: int,
         filename: str,
-        filetype: str,
+        extension: str,
         creation_date: Optional[date] = None,  # optional creation date
         record_type: int = FILE_TYPE_BIN,
     ) -> "CAPS11DirectoryEntry":
@@ -209,7 +209,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.file_number = file_number
         self.tape_pos = tape_pos
         self.filename = filename
-        self.filetype = filetype
+        self.extension = extension
         self.record_type = record_type
         self.record_length = RECORD_SIZE
         self.raw_creation_date = date_to_caps11(creation_date)
@@ -232,7 +232,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.tape_pos = tape_pos
         (
             filename,
-            filetype,
+            extension,
             self.record_type,
             self.record_length,
             self.sequence,
@@ -241,10 +241,10 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
             self.unused,
         ) = struct.unpack_from(HEADER_RECORD, buffer, 0)
         self.filename = filename.decode("ascii", errors="ignore").rstrip(" ")
-        self.filetype = filetype.decode("ascii", errors="ignore").rstrip(" ")
+        self.extension = extension.decode("ascii", errors="ignore").rstrip(" ")
         if not self.filename or self.filename.startswith("\0"):  # Sentinel file
             self.filename = ""
-            self.filetype = ""
+            self.extension = ""
         self.size = size - self.continued
         return self
 
@@ -252,17 +252,17 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         buffer = bytearray(HEADER_RECORD_SIZE)
         if not self.filename:  # Sentinel file
             filename = b"\0"
-            filetype = b"\0"
+            extension = b"\0"
         else:
             filename = self.filename.ljust(6).encode("ascii", errors="ignore")
-            filetype = self.filetype.ljust(3).encode("ascii", errors="ignore")
+            extension = self.extension.ljust(3).encode("ascii", errors="ignore")
         # Pack the data into the buffer
         struct.pack_into(
             HEADER_RECORD,
             buffer,
             0,
             filename,
-            filetype,
+            extension,
             self.record_type,
             self.record_length,
             self.sequence,
@@ -290,11 +290,11 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return f"{self.filename}.{self.filetype}"
+        return f"{self.filename}.{self.extension}"
 
     @property
     def basename(self) -> str:
-        return f"{self.filename}.{self.filetype}"
+        return f"{self.filename}.{self.extension}"
 
     @property
     def creation_date(self) -> Optional[date]:
@@ -305,7 +305,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         Delete the file
         """
         self.filename = "*EMPTY"
-        self.filetype = ""
+        self.extension = ""
         self.record_type = FILE_TYPE_BAD
         self.record_length = 0
         self.sequence = 0
@@ -319,7 +319,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         return (
             f"{self.file_number:<4} "
             f"{self.filename:>6}."
-            f"{self.filetype:<3}  "
+            f"{self.extension:<3}  "
             f"{record_type:>6}  "
             f"{self.record_length:>6} "
             f"{self.sequence:>4} "
@@ -410,7 +410,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         fullname: str,
         content: bytes,
         creation_date: Optional[date] = None,
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
     ) -> None:
         """
         Write content to a file
@@ -423,7 +423,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         fullname: str,
         length: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
-        contiguous: Optional[bool] = None,
+        file_type: Optional[str] = None,
         content: Optional[bytes] = None,
     ) -> Optional[CAPS11DirectoryEntry]:
         """
@@ -443,8 +443,8 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         self.tape_seek(tape_pos)
         self.f.truncate(tape_pos)
         # Create the new directory entry
-        filename, filetype = fullname.split(".", 1)
-        entry = CAPS11DirectoryEntry.new(self, 0, tape_pos, filename, filetype, creation_date)
+        filename, extension = fullname.split(".", 1)
+        entry = CAPS11DirectoryEntry.new(self, 0, tape_pos, filename, extension, creation_date)
         entry.write(skip_file=False)
         # Write the file
         empty_record = b"\0" * RECORD_SIZE
@@ -478,10 +478,10 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
                 # Lists only file names and file types
                 if x.is_empty:
                     continue
-                sys.stdout.write(f"{x.filename:<6s} {x.filetype:<3s}\n")
+                sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s}\n")
             else:
                 creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or "--"
-                sys.stdout.write(f"{x.filename:<6s} {x.filetype:<3s} {creation_date:<9s}\n")
+                sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s} {creation_date:<9s}\n")
 
     def dump(self, name: str) -> None:
         data = self.read_bytes(name)
