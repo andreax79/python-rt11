@@ -12,7 +12,7 @@ Python-RT11 is an utility for transferring files between various file systems.
 | XXDP          | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
 | CAPS-11       | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 | Files-11      | :white_check_mark:|                   |                   |                   |
-| SOLO          | :white_check_mark:|                   |                   |                   |
+| SOLO          | :white_check_mark:| :write_check_mark:| :white_check_mark:|                   |
 
 Commands
 --------

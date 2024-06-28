@@ -24,7 +24,7 @@ import os
 import struct
 import sys
 from datetime import date
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, filename_match, hex_dump
@@ -47,7 +47,8 @@ CAT_PAGE_LENGTH = BLOCK_SIZE // ENTRY_LENGTH  # Entries in a catalog page
 BLOCKS_PER_CYLINDER = 24  # Blocks per cylinder
 CYLINDERS_PER_GROUP = 5  # Cylinders per group
 GROUP_LENGTH = BLOCKS_PER_CYLINDER * CYLINDERS_PER_GROUP  # Blocks per group (120)
-SEGMENT_LENGTH = 64  # Segment length
+KERNEL_LENGTH = 24  # Kernel length (in blocks)
+SEGMENT_LENGTH = 64  # Segment length (in blocks)
 FREE_LIST_LENGTH = 2  # Free blocks bitmap length in blocks
 # Bitset 0 - 119 => 120 bits => 15 chars, 7.5 words (8 words, 1 unused byte)
 FREE_PAGE_GROUP_LENGTH = GROUP_LENGTH // 8  # 15 bytes
@@ -57,17 +58,26 @@ FREE_PAGE_MISC_FORMAT = "<2H12x"  # Misc entry format
 FREE_PAGE_MISC_LENGTH = 16
 MAX_FILE_SIZE = 255  # Max file length in blocks
 
-SOLO_OS_ADDR = 24  # Solo OS segment block number
+KERNEL_ADDR = 0  # Kernel block number
+SOLO_OS_ADDR = KERNEL_ADDR + KERNEL_LENGTH  # 24 Solo OS segment block number
 OTHER_OS_ADDR = SOLO_OS_ADDR + SEGMENT_LENGTH  # 88 Other OS segment block number
 FREE_LIST_ADDR = OTHER_OS_ADDR + SEGMENT_LENGTH  # 152 Free blocks bitmap block number
 CAT_ADDR = FREE_LIST_ADDR + FREE_LIST_LENGTH  # 154 - Catalog block number
 
+# Segments are 3 contiguous, fixed-size files
+SEGMENTS = {
+    KERNEL_ADDR: "@KERNEL",
+    SOLO_OS_ADDR: "@SOLO",
+    OTHER_OS_ADDR: "@OTHEROS",
+}
+
 # File types
-EMPTY = 0  #   Empty file
-SCRATCH = 1  # Scratch file
-ASCII = 2  #   Ascii file
-SEQCODE = 3  # Sequential Pascal code file
-CONCODE = 4  # Concurrent Pascal code file
+SEGMENT = -1  # Segment
+EMPTY = 0  #    Empty file
+SCRATCH = 1  #  Scratch file
+ASCII = 2  #    Ascii file
+SEQCODE = 3  #  Sequential Pascal code file
+CONCODE = 4  #  Concurrent Pascal code file
 
 FILE_TYPES = {
     EMPTY: "EMPTY",
@@ -75,6 +85,7 @@ FILE_TYPES = {
     ASCII: "ASCII",
     SEQCODE: "SEQCODE",
     CONCODE: "CONCODE",
+    SEGMENT: "SEGMENT",
 }
 
 
@@ -102,11 +113,20 @@ def filename_hash(filename: str, catalog_length: int) -> int:
     return key
 
 
-def solo_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> str:
+def solo_canonical_filename(fullname: Optional[str], wildcard: bool = False, segment: bool = False) -> str:
     """
     Generate the canonical SOLO name
     """
-    return "".join(filter(str.isalnum, fullname or "")).upper()[:ID_LENGTH]
+
+    def filter_fn(s: str) -> bool:
+        if wildcard and s == "*":
+            return True
+        return str.isalnum(s)
+
+    if segment and fullname and fullname.startswith("@"):
+        return "@" + "".join(filter(filter_fn, fullname or "")).upper()[:ID_LENGTH]
+    else:
+        return "".join(filter(filter_fn, fullname or "")).upper()[:ID_LENGTH]
 
 
 def solo_to_ascii(data: bytes) -> bytes:
@@ -200,7 +220,91 @@ class SOLOFile(AbstractFile):
         return self.entry.fullname
 
 
-class SOLODirectoryEntry(AbstractDirectoryEntry):
+class SOLOSegment(AbstractFile):
+    """
+    Segments are 3 pre-defined, contiguous, fixed-size files
+
+             start    end      size
+             block    block
+    @KERNEL      0 => 23        24
+    @SOLO       24 => 87        64
+    @OTHEROS    88 => 152       64
+    """
+
+    entry: "SOLOSegmentDirectoryEntry"
+    closed: bool
+
+    def __init__(self, entry: "SOLOSegmentDirectoryEntry"):
+        self.closed = False
+        self.entry = entry
+
+    def read_block(
+        self,
+        block_number: int,
+        number_of_blocks: int = 1,
+    ) -> bytes:
+        """
+        Read block(s) of data from the segment
+        """
+        if number_of_blocks == READ_FILE_FULL:
+            number_of_blocks = self.entry.length
+        if self.closed or block_number < 0 or number_of_blocks < 0:
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        if block_number + number_of_blocks > self.entry.size:
+            number_of_blocks = self.entry.size - block_number
+        return self.entry.fs.read_block(self.entry.segment_addr + block_number, number_of_blocks)
+
+    def write_block(
+        self,
+        buffer: bytes,
+        block_number: int,
+        number_of_blocks: int = 1,
+    ) -> None:
+        """
+        Write block(s) of data to the segment
+        """
+        if self.closed or block_number < 0 or number_of_blocks < 0 or block_number + number_of_blocks > self.entry.size:
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        self.entry.fs.write_block(buffer, self.entry.segment_addr + block_number, number_of_blocks)
+
+    def get_size(self) -> int:
+        """
+        Get segment size in bytes
+        """
+        return self.entry.size * BLOCK_SIZE
+
+    def get_block_size(self) -> int:
+        """
+        Get segment block size in bytes
+        """
+        return BLOCK_SIZE
+
+    def close(self) -> None:
+        """
+        Close the file
+        """
+        self.closed = True
+
+
+class SOLOAbstractSortableDirectoryEntry(AbstractDirectoryEntry):
+    filename: str = ""
+
+    @property
+    def fullname(self) -> str:
+        return self.filename
+
+    @property
+    def basename(self) -> str:
+        return self.filename
+
+    def __lt__(self, other: "SOLOAbstractSortableDirectoryEntry") -> bool:
+        return self.filename < other.filename
+
+    def __gt__(self, other: "SOLOAbstractSortableDirectoryEntry") -> bool:
+        return self.filename > other.filename
+
+
+class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
     """
     SOLO Directory Entry
 
@@ -244,11 +348,13 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
         file_type_id: int,
         page_map_block_number: int,
         page_map: List[int],
+        protected: bool = False,
     ) -> "SOLODirectoryEntry":
         self = SOLODirectoryEntry(cat_page)
         self.filename = filename
         self.file_type_id = file_type_id
         self.page_map_block_number = page_map_block_number
+        self.protected = protected
         self.hash_key = filename_hash(filename, cat_page.fs.catalog_length)
         self.searchlength = 0
         self.page_map = page_map
@@ -266,7 +372,7 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
             self.hash_key,
             self.searchlength,
         ) = struct.unpack_from(ENTRY_FORMAT, buffer, position)
-        self.filename = file_id.decode("ascii", errors="ignore").rstrip()
+        self.filename = file_id.decode("ascii", errors="ignore").rstrip(" \x00")
         self.protected = bool(raw_protected)
         if self.is_empty:
             self.page_map = []
@@ -293,14 +399,6 @@ class SOLODirectoryEntry(AbstractDirectoryEntry):
     @property
     def is_empty(self) -> bool:
         return self.filename == ""
-
-    @property
-    def fullname(self) -> str:
-        return self.filename
-
-    @property
-    def basename(self) -> str:
-        return self.filename
 
     @property
     def file_type(self) -> str:
@@ -355,11 +453,50 @@ Blocks: {[x for x in self.page_map]}"
     def __repr__(self) -> str:
         return str(self)
 
-    def __lt__(self, other: "SOLODirectoryEntry") -> bool:
-        return self.filename < other.filename
 
-    def __gt__(self, other: "SOLODirectoryEntry") -> bool:
-        return self.filename > other.filename
+class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
+    fs: "SOLOFilesystem"
+    filename: str = ""
+    segment_addr: int = 0
+    file_type_id: int = SEGMENT
+    protected: bool = True
+    is_empty: bool = False
+    file_type: str = "SEGMENT"
+    creation_date: Optional[date] = None
+
+    def __init__(self, fs: "SOLOFilesystem", filename: str):
+        self.fs = fs
+        self.filename = filename.upper()
+        self.segment_addr = -1
+        for addr, segment_name in SEGMENTS.items():
+            if segment_name == self.filename:
+                self.segment_addr = addr
+                break
+        if self.segment_addr == -1:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filename)
+        if self.segment_addr == KERNEL_ADDR:
+            self.size = KERNEL_LENGTH
+        else:
+            self.size = SEGMENT_LENGTH
+
+    @property
+    def length(self) -> int:
+        """
+        Segment length in blocks
+        """
+        if self.segment_addr == KERNEL_ADDR:
+            return KERNEL_LENGTH
+        else:
+            return SEGMENT_LENGTH
+
+    def delete(self) -> bool:
+        return False
+
+    def __str__(self) -> str:
+        return f"{self.filename:<12}  {self.file_type:<8}  Length: {self.length:>4}"
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
 class SOLOBitmap:
@@ -398,11 +535,12 @@ class SOLOBitmap:
         """
         free = self.free()
         first_free_block = self.find_first_free()
+        bitmaps = list(self.bitmaps)
         for block_number in range(FREE_LIST_ADDR, FREE_LIST_ADDR + FREE_LIST_LENGTH):
             t = bytearray(BLOCK_SIZE)
             for i in range(0, FREE_PAGE_LENGTH):
                 position = i * (FREE_PAGE_GROUP_LENGTH + FREE_PAGE_GROUP_PAD)
-                bitmap = self.bitmaps.pop(0)
+                bitmap = bitmaps.pop(0)
                 t[position : position + FREE_PAGE_GROUP_LENGTH] = bitmap.to_bytes(
                     FREE_PAGE_GROUP_LENGTH, byteorder="big"
                 )
@@ -446,8 +584,6 @@ class SOLOBitmap:
         """
         Allocate blocks
         """
-        if size > MAX_FILE_SIZE:
-            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         blocks = []
         for block in range(0, self.total_bits):
             if self.is_free(block):
@@ -533,20 +669,23 @@ class SOLOCatalogPage:
         page_map_block_number: int,
         page_map: List[int],
         search_key: Optional[int] = None,
+        protected: bool = False,
     ) -> Optional["SOLODirectoryEntry"]:
         """
         Create a new entry in this catalog page.
         If search_key is not None, put the new entry in the first position after the search_key
         """
         file_type_id = get_file_type_id(file_type)
-        if file_type_id == EMPTY:
+        if file_type_id == EMPTY or file_type_id == SEGMENT:
             raise Exception("?KMON-F-Invalid file type specified with option")
         found = search_key is None
         for i, entry in enumerate(self.entries):
             if not found and (search_key is not None and entry.hash_key < search_key):
                 found = True
             if found and entry.is_empty:
-                self.entries[i] = SOLODirectoryEntry.new(self, filename, file_type_id, page_map_block_number, page_map)
+                self.entries[i] = SOLODirectoryEntry.new(
+                    self, filename, file_type_id, page_map_block_number, page_map, protected
+                )
                 return self.entries[i]
         return None
 
@@ -631,7 +770,25 @@ class SOLOFilesystem(AbstractFilesystem):
         buffer = struct.pack("<256H", *words)
         self.write_block(buffer, block_number)
 
-    def read_catalog(self) -> Iterator["SOLODirectoryEntry"]:
+    def filter_entries_list(
+        self,
+        pattern: Optional[str],
+        include_all: bool = True,
+        wildcard: bool = True,
+    ) -> Iterator[Union["SOLODirectoryEntry", "SOLOSegmentDirectoryEntry"]]:
+        if pattern:
+            pattern = solo_canonical_filename(pattern, segment=True, wildcard=True)
+        if include_all:
+            for segment in SEGMENTS.values():
+                if filename_match(segment, pattern, wildcard):
+                    yield SOLOSegmentDirectoryEntry(self, segment)
+
+        for entry in self.entries_list:
+            if filename_match(entry.basename, pattern, wildcard) and not entry.is_empty:
+                yield entry
+
+    @property
+    def entries_list(self) -> Iterator["SOLODirectoryEntry"]:
         """
         Read the catalog
         """
@@ -639,22 +796,6 @@ class SOLOFilesystem(AbstractFilesystem):
             catalog_page = SOLOCatalogPage.read(self, block_number)
             for entry in catalog_page.entries:
                 yield entry
-
-    def filter_entries_list(
-        self,
-        pattern: Optional[str],
-        include_all: bool = False,
-        wildcard: bool = True,
-    ) -> Iterator["SOLODirectoryEntry"]:
-        if pattern:
-            pattern = solo_canonical_filename(pattern)
-        for entry in self.read_catalog():
-            if filename_match(entry.basename, pattern, wildcard) and (include_all or not entry.is_empty):
-                yield entry
-
-    @property
-    def entries_list(self) -> Iterator["SOLODirectoryEntry"]:
-        yield from self.read_catalog()
 
     def get_first_file_entry_for_hash(self, hash_key: int) -> Optional[SOLODirectoryEntry]:
         page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1
@@ -666,13 +807,15 @@ class SOLOFilesystem(AbstractFilesystem):
                 return entry
         return None
 
-    def get_file_entry(self, fullname: str) -> Optional[SOLODirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> Union[None, SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
         """
         Get the directory entry for a file
         """
-        fullname = solo_canonical_filename(fullname)
+        fullname = solo_canonical_filename(fullname, segment=True)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+        if fullname.startswith("@"):
+            return SOLOSegmentDirectoryEntry(self, fullname)
         # Lookup file by key hash
         hash_key = filename_hash(fullname, self.catalog_length)
         entry = self.get_first_file_entry_for_hash(hash_key)
@@ -687,18 +830,21 @@ class SOLOFilesystem(AbstractFilesystem):
         # Fallback
         return next(self.filter_entries_list(fullname, wildcard=False), None)
 
-    def open_file(self, fullname: str) -> SOLOFile:
+    def open_file(self, fullname: str) -> Union[SOLOFile, SOLOSegment]:
         """
-        Open a file
+        Open a file/segment
         """
         entry = self.get_file_entry(fullname)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return SOLOFile(entry)
+        elif isinstance(entry, SOLOSegmentDirectoryEntry):
+            return SOLOSegment(entry)
+        else:
+            return SOLOFile(entry)
 
     def read_bytes(self, fullname: str, raw: bool = False) -> bytes:
         """
-        Get the content of a file
+        Get the content of a file/segment
         """
         f = self.open_file(fullname)
         try:
@@ -718,7 +864,7 @@ class SOLOFilesystem(AbstractFilesystem):
         protected: bool = False,
     ) -> None:
         """
-        Write content to a file
+        Write content to a file/segment
         """
         length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
         if length > MAX_FILE_SIZE:
@@ -727,12 +873,14 @@ class SOLOFilesystem(AbstractFilesystem):
             content = ascii_to_solo(content)
 
         entry = self.create_file(fullname=fullname, length=length, file_type=file_type, protected=protected)
-        if entry is not None:
+        if isinstance(entry, SOLOSegmentDirectoryEntry):
+            f: Union[SOLOSegment, SOLOFile] = SOLOSegment(entry)
+        else:
             f = SOLOFile(entry)
-            try:
-                f.write_block(content, 0, entry.length)
-            finally:
-                f.close()
+        try:
+            f.write_block(content, 0, entry.length)
+        finally:
+            f.close()
 
     def create_file(
         self,
@@ -741,15 +889,17 @@ class SOLOFilesystem(AbstractFilesystem):
         creation_date: Optional[date] = None,  # optional creation date
         file_type: Optional[str] = None,
         protected: bool = False,
-    ) -> Optional[SOLODirectoryEntry]:
+    ) -> Union[SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
         """
         Create a new file with a given length in number of blocks
         """
         if length > MAX_FILE_SIZE:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         # Delete the existing file
-        fullname = solo_canonical_filename(fullname)
+        fullname = solo_canonical_filename(fullname, segment=True)
         old_entry = self.get_file_entry(fullname)
+        if isinstance(old_entry, SOLOSegmentDirectoryEntry):
+            return old_entry
         if old_entry is not None:
             old_entry.delete()
         # Allocate the space for the page map and the the file
@@ -759,6 +909,7 @@ class SOLOFilesystem(AbstractFilesystem):
         file_blocks = blocks[1:]
         self.write_page_map(file_blocks, page_map_block_number)
         # Lookup catalog entry by key hash
+        fullname = solo_canonical_filename(fullname, segment=False)
         hash_key = filename_hash(fullname, self.catalog_length)
         existing_entry = self.get_first_file_entry_for_hash(hash_key)
         # Create the catalog entry
@@ -771,7 +922,12 @@ class SOLOFilesystem(AbstractFilesystem):
             catalog_page = SOLOCatalogPage.read(self, block_number)
         # print(f"{hash_key=} {page_num+1=} {block_number=} {catalog_page=}")
         new_entry = catalog_page.create_entry(
-            fullname, file_type, page_map_block_number, file_blocks, search_key=hash_key
+            fullname,
+            file_type,
+            page_map_block_number,
+            file_blocks,
+            search_key=hash_key,
+            protected=protected,
         )
         if new_entry is None:
             for block_number in self.read_page_map(CAT_ADDR):
@@ -781,6 +937,7 @@ class SOLOFilesystem(AbstractFilesystem):
                     file_type,
                     page_map_block_number,
                     file_blocks,
+                    protected=protected,
                 )
                 if new_entry is not None:
                     break
@@ -810,7 +967,7 @@ class SOLOFilesystem(AbstractFilesystem):
         blocks = 0
         if not options.get("brief"):
             sys.stdout.write("SOLO SYSTEM FILES\n\n")
-        for x in sorted(self.filter_entries_list(pattern, include_all=False, wildcard=True)):
+        for x in sorted(self.filter_entries_list(pattern, include_all=bool(options.get("full")), wildcard=True)):
             if options.get("brief"):
                 sys.stdout.write(f"{x.filename}\n")
             else:
@@ -832,6 +989,9 @@ class SOLOFilesystem(AbstractFilesystem):
 
     def examine(self, name_or_block: Optional[str]) -> None:
         if not name_or_block:
+            for segment in SEGMENTS.values():
+                segment_entry = SOLOSegmentDirectoryEntry(self, segment)
+                sys.stdout.write(f" -  {segment_entry}\n")
             for page_num, block_number in enumerate(self.read_page_map(CAT_ADDR), start=1):
                 catalog_page = SOLOCatalogPage.read(self, block_number)
                 for entry in catalog_page.entries:
@@ -852,7 +1012,28 @@ class SOLOFilesystem(AbstractFilesystem):
         return self.f.get_size()
 
     def initialize(self) -> None:
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        # Zero disk
+        empty_block = b"\0" * BLOCK_SIZE
+        for block_number in range(0, DISK_SIZE):
+            self.write_block(empty_block, block_number)
+        # Mark the blocks allocated in the bitmap
+        bitmap = SOLOBitmap.read(self)
+        for i in range(0, CAT_ADDR + 1):
+            bitmap.set_used(i)
+        for i in range(CAT_ADDR + 1, DISK_SIZE):
+            bitmap.set_free(i)
+        bitmap.write()
+        # Create the catalog
+        self.catalog_length = 15
+        bitmap = SOLOBitmap.read(self)
+        catalog_pages = bitmap.allocate(self.catalog_length)
+        bitmap.write()
+        self.write_page_map(catalog_pages, CAT_ADDR)
+        for block_number in catalog_pages:
+            catalog_page = SOLOCatalogPage.read(self, block_number)
+            catalog_page.write()
+        # Create NEXT
+        self.create_file(fullname="NEXT", length=255, file_type="SCRATCH", protected=True)
 
     def close(self) -> None:
         self.f.close()

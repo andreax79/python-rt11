@@ -290,6 +290,8 @@ DIR             Lists file directories
   OPTIONS
    BRIEF
         Lists only file names and file types
+   FULL
+        Lists the entire directory, including unused areas
    UIC
         Lists all UIC on a device (only for DOS-11)
 
@@ -299,7 +301,7 @@ DIR             Lists file directories
 
         """
         # fmt: on
-        args, options = extract_options(line, "/brief", "/uic")
+        args, options = extract_options(line, "/brief", "/uic", "/full")
         if len(args) > 1:
             sys.stdout.write("?DIR-F-Too many arguments\n")
             return
@@ -357,15 +359,19 @@ COPY            Copies files
         COPY [/options] [input-volume:]input-filespec [output-volume:][output-filespec]
 
   OPTIONS
-   TYPE:CONTIGUOUS
-        Specifies that the output file is to be contiguous,
-        if supported by the taget filesystem
-   TYPE:NOCONTIGUOUS
-        Specifies that the output file is to be noncontiguous,
-        if supported by the taget filesystem
+   TYPE:type
+        Specifies that the output file type, if supported by the taget filesystem
+   TYPE:CONTIGUOUS      Contiguous
+   TYPE:NOCONTIGUOUS    Noncontiguous
+   TYPE:ASCII           Ascii file
+   TYPE:SCRATCH         Scratch file (SOLO)
+   TYPE:SEQCODE         Sequential Pascal code file (SOLO)
+   TYPE:CONCODE         Concurrent Pascal code file (SOLO)
+
 
   EXAMPLES
         COPY *.TXT DK:
+        COPY /TYPE:ASCII LICENSE DK:
 
         """
         # fmt: on
