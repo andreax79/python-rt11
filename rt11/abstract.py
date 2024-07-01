@@ -154,9 +154,14 @@ class AbstractDirectoryEntry(ABC):
         """Final path component"""
 
     @property
-    @abstractmethod
     def creation_date(self) -> Optional[date]:
         """Creation date"""
+        return None
+
+    @property
+    def file_type(self) -> Optional[str]:
+        """File type"""
+        return None
 
     @abstractmethod
     def delete(self) -> bool:

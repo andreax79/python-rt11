@@ -132,14 +132,17 @@ def solo_canonical_filename(fullname: Optional[str], wildcard: bool = False, seg
 def solo_to_ascii(data: bytes) -> bytes:
     if not data:
         return data
-    data = data.split(EM)[0]
+    if not EM in data:
+        data = data.rstrip(b"\0")
+    else:
+        data = data.split(EM)[0]
     return data
 
 
 def ascii_to_solo(data: bytes) -> bytes:
     if not data:
         return data
-    if data.endswith(EM):
+    if not data.endswith(EM):
         data += EM
     return data
 
@@ -348,7 +351,8 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         file_type_id: int,
         page_map_block_number: int,
         page_map: List[int],
-        protected: bool = False,
+        protected: bool,
+        searchlength: int,
     ) -> "SOLODirectoryEntry":
         self = SOLODirectoryEntry(cat_page)
         self.filename = filename
@@ -356,7 +360,7 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         self.page_map_block_number = page_map_block_number
         self.protected = protected
         self.hash_key = filename_hash(filename, cat_page.fs.catalog_length)
-        self.searchlength = 0
+        self.searchlength = searchlength
         self.page_map = page_map
         return self
 
@@ -405,10 +409,6 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         return FILE_TYPES.get(self.file_type_id, "")
 
     @property
-    def creation_date(self) -> Optional[date]:
-        return None
-
-    @property
     def length(self) -> int:
         """
         File length in blocks
@@ -433,12 +433,9 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         self.protected = False
         self.filename = ""
         self.page_map_block_number = 0
-        # Update searchlength for the first entry with the same key (if any)
-        for entry in self.cat_page.entries:
-            if entry.hash_key == old_key:
-                entry.searchlength = max(entry.searchlength - 1, 0)
-                break
         self.cat_page.write()
+        # Decrement the counter of files with the same key
+        self.fs.update_searchlength(old_key, -1)
         return True
 
     def __str__(self) -> str:
@@ -678,15 +675,23 @@ class SOLOCatalogPage:
         file_type_id = get_file_type_id(file_type)
         if file_type_id == EMPTY or file_type_id == SEGMENT:
             raise Exception("?KMON-F-Invalid file type specified with option")
-        found = search_key is None
-        for i, entry in enumerate(self.entries):
-            if not found and (search_key is not None and entry.hash_key < search_key):
-                found = True
-            if found and entry.is_empty:
-                self.entries[i] = SOLODirectoryEntry.new(
-                    self, filename, file_type_id, page_map_block_number, page_map, protected
-                )
-                return self.entries[i]
+        if search_key is not None:
+            pos = (search_key - 1) % CAT_PAGE_LENGTH
+            for i, entry in enumerate(self.entries[pos:], start=pos):
+                if entry.is_empty:
+                    searchlength = self.entries[i].searchlength
+                    self.entries[i] = SOLODirectoryEntry.new(
+                        self, filename, file_type_id, page_map_block_number, page_map, protected, searchlength
+                    )
+                    return self.entries[i]
+        else:
+            for i, entry in enumerate(self.entries):
+                if entry.is_empty:
+                    searchlength = self.entries[i].searchlength
+                    self.entries[i] = SOLODirectoryEntry.new(
+                        self, filename, file_type_id, page_map_block_number, page_map, protected, searchlength
+                    )
+                    return self.entries[i]
         return None
 
     def __str__(self) -> str:
@@ -796,6 +801,27 @@ class SOLOFilesystem(AbstractFilesystem):
             catalog_page = SOLOCatalogPage.read(self, block_number)
             for entry in catalog_page.entries:
                 yield entry
+
+    def get_searchlength(self, hash_key: int) -> None:
+        page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1
+        pages = self.read_page_map(CAT_ADDR)
+        block_number = pages[page_num - 1]
+        catalog_page = SOLOCatalogPage.read(self, block_number)
+        pos = (hash_key - 1) % CAT_PAGE_LENGTH
+        entry = catalog_page.entries[pos]
+        return entry.searchlength
+
+    def update_searchlength(self, hash_key: int, delta: int) -> None:
+        page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1
+        pages = self.read_page_map(CAT_ADDR)
+        block_number = pages[page_num - 1]
+        catalog_page = SOLOCatalogPage.read(self, block_number)
+        pos = (hash_key - 1) % CAT_PAGE_LENGTH
+        entry = catalog_page.entries[pos]
+        entry.searchlength += delta
+        if entry.searchlength < 0:
+            entry.searchlength = 0
+        catalog_page.write()
 
     def get_first_file_entry_for_hash(self, hash_key: int) -> Optional[SOLODirectoryEntry]:
         page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1
@@ -911,15 +937,11 @@ class SOLOFilesystem(AbstractFilesystem):
         # Lookup catalog entry by key hash
         fullname = solo_canonical_filename(fullname, segment=False)
         hash_key = filename_hash(fullname, self.catalog_length)
-        existing_entry = self.get_first_file_entry_for_hash(hash_key)
         # Create the catalog entry
-        if existing_entry:
-            catalog_page = existing_entry.cat_page
-        else:
-            page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1  # 1 >= page_num >= CAT_PAGE_LENGTH
-            cat_pages = self.read_page_map(CAT_ADDR)
-            block_number = cat_pages[page_num - 1]
-            catalog_page = SOLOCatalogPage.read(self, block_number)
+        page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1  # 1 >= page_num >= CAT_PAGE_LENGTH
+        cat_pages = self.read_page_map(CAT_ADDR)
+        block_number = cat_pages[page_num - 1]
+        catalog_page = SOLOCatalogPage.read(self, block_number)
         # print(f"{hash_key=} {page_num+1=} {block_number=} {catalog_page=}")
         new_entry = catalog_page.create_entry(
             fullname,
@@ -943,13 +965,11 @@ class SOLOFilesystem(AbstractFilesystem):
                     break
         if new_entry is None:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
-        # Increment the counter of files with the same key
-        if existing_entry:
-            existing_entry.searchlength += 1
-            existing_entry.cat_page.write()
         catalog_page.write()
         # Write bitmap
         bitmap.write()
+        # Increment the counter of files with the same key
+        self.update_searchlength(new_entry.hash_key, delta=+1)
         return new_entry
 
     def isdir(self, fullname: str) -> bool:
@@ -992,10 +1012,12 @@ class SOLOFilesystem(AbstractFilesystem):
             for segment in SEGMENTS.values():
                 segment_entry = SOLOSegmentDirectoryEntry(self, segment)
                 sys.stdout.write(f" -  {segment_entry}\n")
+            t = 1
             for page_num, block_number in enumerate(self.read_page_map(CAT_ADDR), start=1):
                 catalog_page = SOLOCatalogPage.read(self, block_number)
                 for entry in catalog_page.entries:
-                    sys.stdout.write(f"{page_num:>2}# {entry}\n")
+                    sys.stdout.write(f"{t:>3} {page_num:>2}# {entry}\n")
+                    t += 1
         elif name_or_block.strip().lower() == "/free":
             bitmap = SOLOBitmap.read(self)
             for i in range(0, bitmap.total_bits):

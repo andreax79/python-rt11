@@ -97,11 +97,12 @@ def copy_file(
     verbose: int,
     cmd: str = "COPY",
 ) -> None:
+    if not file_type:
+        file_type = from_entry.file_type
     try:
         content = from_fs.read_bytes(from_entry.fullname)
         to_fs.write_bytes(to_path, content, from_entry.creation_date, file_type)
     except Exception:
-        raise
         if verbose:
             traceback.print_exc()
         raise Exception(f"?{cmd}-F-Error copying {from_entry.fullname}")

@@ -63,6 +63,10 @@ def test_solo_write():
     for i in range(0, 50):
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x
 
+    entry = fs.get_file_entry("50.txt")
+    hash_key = entry.hash_key
+    assert fs.get_searchlength(hash_key) == 1
+
 
 def test_dos11_bitmap():
     shell = Shell(verbose=True)

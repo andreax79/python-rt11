@@ -300,6 +300,10 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
     def creation_date(self) -> Optional[date]:
         return caps11_to_date(self.raw_creation_date)
 
+    @property
+    def file_type(self) -> Optional[str]:
+        return STANDARD_FILE_TYPES.get(self.record_type)
+
     def delete(self) -> bool:
         """
         Delete the file
@@ -315,12 +319,12 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         return True
 
     def __str__(self) -> str:
-        record_type = STANDARD_FILE_TYPES.get(self.record_type, f"{self.record_type:>4o}")
+        file_type = self.file_type or f"{self.record_type:>4o}"
         return (
             f"{self.file_number:<4} "
             f"{self.filename:>6}."
             f"{self.extension:<3}  "
-            f"{record_type:>6}  "
+            f"{file_type:>6}  "
             f"{self.record_length:>6} "
             f"{self.sequence:>4} "
             f"{self.continued:>4}  "
