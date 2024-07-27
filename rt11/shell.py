@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFilesystem
 from .commons import PartialMatching, splitdrive
-from .volumes import DEFAULT_VOLUME, Volumes
+from .volumes import DEFAULT_VOLUME, FILESYSTEMS, Volumes
 
 try:
     import readline
@@ -530,6 +530,12 @@ MOUNT           Assigns a logical disk unit to a file
         Mount CAPS-11 filesystem
    SOLO
         Mount SOLO filesystem
+   UNIX1
+        Mount UNIX version 1 filesystem
+   UNIX6
+        Mount UNIX version 6 filesystem
+   UNIX7
+        Mount UNIX version 7 filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
@@ -537,7 +543,8 @@ MOUNT           Assigns a logical disk unit to a file
 
         """
         # fmt: on
-        args, options = extract_options(line, "/dos", "/dos11", "/dos11mt", "/magtape", "/files11", "/caps11", "/solo")
+        fs_args = [f"/{x}" for x in FILESYSTEMS.keys()]
+        args, options = extract_options(line, *fs_args)
         if len(args) > 2:
             sys.stdout.write("?MOUNT-F-Too many arguments\n")
             return
@@ -547,18 +554,11 @@ MOUNT           Assigns a logical disk unit to a file
             logical = ask("Volume? ")
         if not path:
             path = ask("File? ")
-        if options.get("dos") or options.get("dos11"):
-            fstype = "dos11"
-        elif options.get("dos11mt") or options.get("magtape"):
-            fstype = "dos11mt"
-        elif options.get("files11"):
-            fstype = "files11"
-        elif options.get("caps11"):
-            fstype = "caps11"
-        elif options.get("solo"):
-            fstype = "solo"
-        else:
-            fstype = None
+        fstype = None
+        for filesystem in FILESYSTEMS.keys():
+            if options.get(filesystem):
+                fstype = filesystem
+                break
         self.volumes.mount(path, logical, fstype=fstype, verbose=self.verbose)
 
     @flgtxt("DIS_MOUNT")
@@ -887,6 +887,27 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a SOLO disk",
+    )
+    parser.add_argument(
+        "--unix1",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a UNIX v1 disk",
+    )
+    parser.add_argument(
+        "--unix6",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a UNIX v6 disk",
+    )
+    parser.add_argument(
+        "--unix7",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a UNIX v7 disk",
     )
     parser.add_argument(
         "disk",

@@ -32,14 +32,29 @@ from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
 from .rt11fs import RT11Filesystem
 from .solofs import SOLOFilesystem
+from .unixfs import UNIXFilesystem
 
 __all__ = [
     "Volumes",
     "DEFAULT_VOLUME",
+    "FILESYSTEMS",
 ]
 
 DEFAULT_VOLUME = "DK"
 SYSTEM_VOLUME = "SY"
+FILESYSTEMS = {
+    "caps11": CAPS11Filesystem,
+    "dos": DOS11Filesystem,
+    "dos11": DOS11Filesystem,
+    "dos11mt": DOS11MagTapeFilesystem,
+    "files11": Files11Filesystem,
+    "magtape": DOS11MagTapeFilesystem,
+    "rt11": RT11Filesystem,
+    "solo": SOLOFilesystem,
+    "unix1": lambda f: UNIXFilesystem(f, version=1),
+    "unix6": lambda f: UNIXFilesystem(f, version=6),
+    "unix7": lambda f: UNIXFilesystem(f, version=7),
+}
 
 
 class Volumes(object):
@@ -184,18 +199,8 @@ class Volumes(object):
         volume_id, fullname = splitdrive(path)
         fs = self.get(volume_id, cmd=cmd)
         try:
-            if fstype == "dos11":
-                self.volumes[logical] = DOS11Filesystem(fs.open_file(fullname))
-            elif fstype == "dos11mt" or fstype == "magtape":
-                self.volumes[logical] = DOS11MagTapeFilesystem(fs.open_file(fullname))
-            elif fstype == "files11":
-                self.volumes[logical] = Files11Filesystem(fs.open_file(fullname))
-            elif fstype == "caps11":
-                self.volumes[logical] = CAPS11Filesystem(fs.open_file(fullname))
-            elif fstype == "solo":
-                self.volumes[logical] = SOLOFilesystem(fs.open_file(fullname))
-            else:
-                self.volumes[logical] = RT11Filesystem(fs.open_file(fullname))
+            filesystem = FILESYSTEMS.get(fstype or "rt11", RT11Filesystem)
+            self.volumes[logical] = filesystem(fs.open_file(fullname))
             sys.stdout.write(f"?{cmd}-I-Disk {path} mounted to {logical}:\n")
         except Exception:
             if verbose:
