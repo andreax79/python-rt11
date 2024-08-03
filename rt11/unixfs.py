@@ -23,12 +23,13 @@ import math
 import os
 import struct
 import sys
+from abc import ABC, abstractmethod
 from datetime import date, datetime, timedelta
 from functools import reduce
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, filename_match, hex_dump
+from .commons import BLOCK_SIZE, dump_struct, filename_match, hex_dump
 
 __all__ = [
     "UNIXFile",
@@ -37,13 +38,50 @@ __all__ = [
 ]
 
 READ_FILE_FULL = -1
-V6_SUPER_BLOCK = 1  # Superblock
-V6_SUPER_BLOCK_FORMAT = '<HHH 100H H 100H B B B 2H'
 
-V1_ALL = 0o100000  # i-node is allocated
+# ==================================================================
+
+V0_BYTES_PER_WORD = 4  # We encode each word into 4 bytes
+V0_WORDS_PER_BLOCK = 64
+V0_BLOCK_SIZE = V0_BYTES_PER_WORD * V0_WORDS_PER_BLOCK
+
+V0_BLOCKS_PER_SURFACE = 8000  # Number of blocks on a surface
+V0_NUMINODEBLKS = 710  # Number of i-node blocks
+V0_FIRSTINODEBLK = 2  # First i-node block number
+V0_INODE_SIZE = 12  # Inode size (in words)
+V0_INODESPERBLK = V0_WORDS_PER_BLOCK // V0_INODE_SIZE
+V0_DIRENT_SIZE = 8  # Size of a directory entry
+V0_SURFACE_SIZE = V0_BLOCKS_PER_SURFACE * V0_WORDS_PER_BLOCK * V0_BYTES_PER_WORD
+
+V0_MAXINT = 0o777777  # Biggest unsigned integer
+
+V0_FLAGS = 0
+V0_ADDR = 1
+V0_UID = 8
+V0_NLINKS = 9
+V0_SIZE = 10
+V0_UNIQ = 11
+
+V0_NUMBLKS = 7  # Seven block pointers in i-node
+
+V0_USED = 0o400000  # i-node is allocated
+V0_LARGE = 0o200000  # large file
+V0_SPECIAL = 0o000040  # special file
+V0_DIR = 0o000020  # directory
+
+V0_ROWN = 0o000010  # read, owner
+V0_WOWN = 0o000004  # write, owner
+V0_ROTH = 0o000002  # read, non-owner
+V0_WOTH = 0o000001  # write, non-owner
+
+V0_ROOT_INODE = 4  # 'dd' folder
+
+# ==================================================================
+
+V1_USED = 0o100000  # i-node is allocated
 V1_DIR = 0o040000  # directory
 V1_MOD = 0o020000  # file has been modified (always on)
-V1_LRG = 0o010000  # large file
+V1_LARGE = 0o010000  # large file
 
 V1_SUID = 0o000040  # set user ID on execution
 V1_XOWN = 0o000020  # executable
@@ -52,11 +90,21 @@ V1_WOWN = 0o000004  # write, owner
 V1_ROTH = 0o000002  # read, non-owner
 V1_WOTH = 0o000001  # write, non-owner
 
-V6_ALL = 0o100000  # i-node is allocated
+V1_INODE_FORMAT = "<HBBH 16s II H"
+V1_FILENAME_LEN = 8
+V1_INODE_SIZE = 32
+V1_NADDR = 8
+V1_DIR_FORMAT = f"H{V1_FILENAME_LEN}s"
+V1_ROOT_INODE = 41
+assert struct.calcsize(V1_INODE_FORMAT) == V1_INODE_SIZE
+
+# ==================================================================
+
+V6_USED = 0o100000  # i-node is allocated
 V6_BLK = 0o060000  # block device
 V6_DIR = 0o040000  # directory
 V6_CHR = 0o020000  # character device
-V6_LRG = 0o010000  # large file
+V6_LARGE = 0o010000  # large file
 
 V6_SUID = 0o4000  # set user ID on execution
 V6_SGID = 0o2000  # set group ID on execution
@@ -72,13 +120,8 @@ V6_ROTH = 0o004  # read by other
 V6_WOTH = 0o002  # write by other
 V6_XOTH = 0o001  # execute by other
 
-V1_INODE_FORMAT = "<HBBH 16s II H"
-V1_FILENAME_LEN = 8
-V1_INODE_SIZE = 32
-V1_NADDR = 8
-V1_DIR_FORMAT = f"H{V1_FILENAME_LEN}s"
-V1_ROOT_INODE = 41
-assert struct.calcsize(V1_INODE_FORMAT) == V1_INODE_SIZE
+V6_SUPER_BLOCK = 1  # Superblock
+V6_SUPER_BLOCK_FORMAT = '<HHH 100H H 100H B B B 2H'
 
 V6_INODE_FORMAT = "<HBBBBH 16s II"
 V6_FILENAME_LEN = 14
@@ -87,6 +130,8 @@ V6_NADDR = 8
 V6_DIR_FORMAT = f"H{V6_FILENAME_LEN}s"
 V6_ROOT_INODE = 1
 assert struct.calcsize(V6_INODE_FORMAT) == V6_INODE_SIZE
+
+# ==================================================================
 
 V7_INODE_FORMAT = "<HHHH HH 40s III"
 V7_FILENAME_LEN = 14
@@ -146,8 +191,28 @@ def l3tol(data: bytes, n: int) -> List[int]:
     return result
 
 
+def get_v0_inode_block_offset(inode_num: int) -> Tuple[int, int]:
+    """
+    Return block number and offset for an inode number
+    """
+    block_num = V0_FIRSTINODEBLK + (inode_num // V0_INODESPERBLK)
+    offset = V0_INODE_SIZE * (inode_num % V0_INODESPERBLK)
+    return block_num, offset
+
+
+def from_18bit_words_to_bytes(words: list[int]) -> bytes:
+    """
+    Convert 18bit words to bytes
+    """
+    data = bytearray()
+    for word in words:
+        data.append((word >> 9) & 0o177)
+        data.append(word & 0o177)
+    return bytes(data)
+
+
 V1_PERMS = [
-    [(V1_LRG, "l"), (0, "s")],
+    [(V1_LARGE, "l"), (0, "s")],
     [(V1_DIR, "d"), (V1_SUID, "s"), (V1_XOWN, "x"), (0, "-")],
     [(V1_ROWN, "r"), (0, "-")],
     [(V1_WOWN, "w"), (0, "-")],
@@ -220,7 +285,11 @@ class UNIXFile(AbstractFile):
         data = bytearray()
         for i, next_block_number in enumerate(self.inode.blocks()):
             if i >= block_number:
-                t = self.inode.fs.read_block(next_block_number)
+                if self.inode.fs.version == 0:
+                    words = self.inode.fs.read_18bit_words_block(next_block_number)
+                    t = from_18bit_words_to_bytes(words)
+                else:
+                    t = self.inode.fs.read_block(next_block_number)
                 data.extend(t)
                 number_of_blocks -= 1
                 if number_of_blocks == 0:
@@ -260,90 +329,58 @@ class UNIXFile(AbstractFile):
         return str(self.inode)
 
 
-class UNIXInode:
+class UNIXInode(ABC):
 
     fs: "UNIXFilesystem"
-    inode_num: int  #  inode number
-    flags: int  #      flags
-    nlinks: int  #     number of links to file
-    uid: int  #        user ID of owner
-    gid: int  #        group ID of owner
-    size: int  #       size
-    addr: List[int]  # block numbers or device numbers
-    atime: int  #      time of last access
-    mtime: int  #      time of last modification
+    inode_num: int  #      inode number
+    flags: int  #          flags
+    nlinks: int  #         number of links to file
+    uid: int  #            user ID of owner
+    gid: Optional[int]  # group ID of owner
+    size: int  #           size
+    addr: List[int]  #     block numbers or device numbers
+    atime: int = 0  #      time of last access
+    mtime: int = 0  #      time of last modification
+    ctime: int = 0  #      time of last change to the inode
 
     def __init__(self, fs: "UNIXFilesystem"):
         self.fs = fs
 
     @classmethod
     def read(cls, fs: "UNIXFilesystem", inode_num: int, buffer: bytes, position: int = 0) -> "UNIXInode":
-        self = UNIXInode(fs)
-        self.inode_num = inode_num
-        if fs.version == 1:
-            (
-                self.flags,  #   1 word  flags
-                self.nlinks,  #  1 byte  number of links to file
-                self.uid,  #     1 byte  user ID of owner
-                self.size,  #    1 word  size
-                addr,  #         8 words block numbers or device numbers
-                self.atime,  #   1 long  time of last access
-                self.mtime,  #   1 long  time of last modification
-                _,  #             1 word  unused
-            ) = struct.unpack_from(V1_INODE_FORMAT, buffer, position)
-            self.addr = struct.unpack_from(f"{V1_NADDR}H", addr)
-            self.gid = None
-
+        if fs.version == 0:
+            return UNIXInode0.read(fs, inode_num, buffer, position)
+        elif fs.version == 1:
+            return UNIXInode1.read(fs, inode_num, buffer, position)
         elif fs.version == 6:
-            (
-                self.flags,  #   1 word  flags
-                self.nlinks,  #  1 byte  number of links to file
-                self.uid,  #     1 byte  user ID of owner
-                self.gid,  #     1 byte  group ID of owner
-                sz0,  #          1 byte  high byte of 24-bit size
-                sz1,  #          1 word  low word of 24-bit size
-                addr,  #         8 words block numbers or device numbers
-                self.atime,  #   1 long  time of last access
-                self.mtime,  #   1 long  time of last modification
-            ) = struct.unpack_from(V6_INODE_FORMAT, buffer, position)
-            self.addr = struct.unpack_from(f"{V6_NADDR}H", addr)
-            self.size = (sz0 << 16) + sz1  # byte + short
-
+            return UNIXInode6.read(fs, inode_num, buffer, position)
         elif fs.version == 7:
-            (
-                self.flags,  #    1 word  flags
-                self.nlinks,  #   1 word  number of links to file
-                self.uid,  #      1 word  user ID of owner
-                self.gid,  #      1 word  group ID of owner
-                sz0,  #           1 word  high word of size
-                sz1,  #           1 word  low word of size
-                addr,  #          40 chars disk block addresses
-                self.atime,  #    1 long  time of last access
-                self.mtime,  #    1 long  time of last modification
-                self.mtime,  #    1 long  time created
-            ) = struct.unpack_from(V7_INODE_FORMAT, buffer, position)
-            self.addr = l3tol(addr, V7_NADDR)
-            self.size = (sz0 << 16) + sz1  # byte + short
-
+            return UNIXInode7.read(fs, inode_num, buffer, position)
         else:
             raise ValueError(f"Invalid version {fs.version}")
-
-        return self
 
     def blocks(self) -> Iterator[int]:
         # if self.size > BIGGEST_NOT_HUGE_SIZE:
         #     raise HugeFileError("huge files not implemented")
         if self.is_large:
+            # Large file
             for block_number in self.addr:
                 if block_number == 0:
                     break
-                indirect_block = self.fs.read_block(block_number)
-                for i in range(0, len(indirect_block), 2):
-                    n = struct.unpack("H", indirect_block[i : i + 2])[0]
-                    if n == 0:
-                        return
-                    yield n
+                if self.fs.version == 0:
+                    for n in self.fs.read_18bit_words_block(block_number):
+                        if n == 0:
+                            continue
+                        yield n
+                else:
+                    indirect_block = self.fs.read_block(block_number)
+                    for i in range(0, len(indirect_block), 2):
+                        n = struct.unpack("H", indirect_block[i : i + 2])[0]
+                        if n == 0:
+                            return
+                        yield n
         else:
+            # Small file
             for block_number in self.addr:
                 if block_number == 0:
                     break
@@ -357,11 +394,53 @@ class UNIXInode:
         return bytes(data)[: self.size]
 
     @property
+    @abstractmethod
     def isdir(self) -> bool:
-        if self.fs.version == 1:
-            return (self.flags & V1_DIR) == V1_DIR
-        else:
-            return (self.flags & V6_DIR) == V6_DIR
+        pass
+
+    @property
+    @abstractmethod
+    def is_regular_file(self) -> bool:
+        pass
+
+    @property
+    @abstractmethod
+    def is_large(self) -> bool:
+        pass
+
+    @property
+    @abstractmethod
+    def is_allocated(self) -> bool:
+        pass
+
+    @property
+    def length(self) -> int:
+        return int(math.ceil(self.size / BLOCK_SIZE))
+
+    def __repr__(self) -> str:
+        return str(self.__dict__)
+
+
+class UNIXInode0(UNIXInode):
+
+    @classmethod
+    def read(cls, fs: "UNIXFilesystem", inode_num: int, buffer: bytes, position: int = 0) -> "UNIXInode":
+        self = UNIXInode0(fs)
+        self.inode_num = inode_num
+        self.flags = buffer[position + V0_FLAGS]
+        self.uid = buffer[position + V0_UID]
+        if self.uid == V0_MAXINT:
+            self.uid = -1  # root uid
+        self.nlinks = V0_MAXINT - buffer[position + V0_NLINKS] + 1
+        self.size = buffer[position + V0_SIZE]
+        # uniq = buffer[position + V0_UNIQ]
+        self.addr = buffer[position + V0_ADDR : position + V0_ADDR + V0_NUMBLKS]
+        self.gid = None
+        return self
+
+    @property
+    def isdir(self) -> bool:
+        return (self.flags & V0_DIR) == V0_DIR
 
     @property
     def is_regular_file(self) -> bool:
@@ -369,35 +448,135 @@ class UNIXInode:
 
     @property
     def is_large(self) -> bool:
-        if self.fs.version == 1:
-            return bool(self.flags & V1_LRG)
-        else:
-            return bool(self.flags & V6_LRG)
+        return bool(self.flags & V0_LARGE)
 
     @property
     def is_allocated(self) -> bool:
-        if self.fs.version == 1:
-            return bool(self.flags & V1_ALL)
-        elif self.fs.version == 6:
-            return bool(self.flags & V6_ALL)
-        else:
-            return bool(self.flags)
+        return (self.flags & V0_USED) != 0
 
-    @property
-    def length(self) -> int:
-        return int(math.ceil(self.size / BLOCK_SIZE))
+    def read_words(self) -> List[int]:
+        data = []
+        for block_number in self.blocks():
+            data.extend(self.fs.read_18bit_words_block(block_number))
+        return data
 
     def __str__(self) -> str:
         if not self.is_allocated:
             return f"{self.inode_num:>4}# ---"
-        mode = format_mode(self.flags, version=self.fs.version)
-        if self.fs.version < 4:
-            return f"{self.inode_num:>4}# {self.uid:>3}  nlinks: {self.nlinks} size: {self.size} {mode} flags: {self.flags}"
         else:
-            return f"{self.inode_num:>4}# {self.uid:>3},{self.gid:<3}  nlinks: {self.nlinks} size: {self.size} {mode} flags: {self.flags}"
+            return f"{self.inode_num:>4}# uid: {self.uid:>3} nlinks: {self.nlinks:>3} size: {self.size:>5} flags: {self.flags:o}"
 
-    def __repr__(self) -> str:
-        return str(self.__dict__)
+
+class UNIXInode1(UNIXInode):
+
+    @classmethod
+    def read(cls, fs: "UNIXFilesystem", inode_num: int, buffer: bytes, position: int = 0) -> "UNIXInode":
+        self = UNIXInode1(fs)
+        self.inode_num = inode_num
+        (
+            self.flags,  #   1 word  flags
+            self.nlinks,  #  1 byte  number of links to file
+            self.uid,  #     1 byte  user ID of owner
+            self.size,  #    1 word  size
+            addr,  #         8 words block numbers or device numbers
+            self.atime,  #   1 long  time of last access
+            self.mtime,  #   1 long  time of last modification
+            _,  #            1 word  unused
+        ) = struct.unpack_from(V1_INODE_FORMAT, buffer, position)
+        self.addr = struct.unpack_from(f"{V1_NADDR}H", addr)
+        self.gid = None
+        return self
+
+    @property
+    def isdir(self) -> bool:
+        return (self.flags & V1_DIR) == V1_DIR
+
+    @property
+    def is_regular_file(self) -> bool:
+        return not self.isdir
+
+    @property
+    def is_large(self) -> bool:
+        return bool(self.flags & V1_LARGE)
+
+    @property
+    def is_allocated(self) -> bool:
+        return bool(self.flags & V1_USED)
+
+    def __str__(self) -> str:
+        if not self.is_allocated:
+            return f"{self.inode_num:>4}# ---"
+        else:
+            mode = format_mode(self.flags, version=self.fs.version)
+            return f"{self.inode_num:>4}# uid: {self.uid:>3} nlinks: {self.nlinks:>3} size: {self.size:>5} {mode} flags: {self.flags:o}"
+
+
+class UNIXInode6(UNIXInode):
+
+    @classmethod
+    def read(cls, fs: "UNIXFilesystem", inode_num: int, buffer: bytes, position: int = 0) -> "UNIXInode":
+        self = UNIXInode6(fs)
+        self.inode_num = inode_num
+        (
+            self.flags,  #   1 word  flags
+            self.nlinks,  #  1 byte  number of links to file
+            self.uid,  #     1 byte  user ID of owner
+            self.gid,  #     1 byte  group ID of owner
+            sz0,  #          1 byte  high byte of 24-bit size
+            sz1,  #          1 word  low word of 24-bit size
+            addr,  #         8 words block numbers or device numbers
+            self.atime,  #   1 long  time of last access
+            self.mtime,  #   1 long  time of last modification
+        ) = struct.unpack_from(V6_INODE_FORMAT, buffer, position)
+        self.addr = struct.unpack_from(f"{V6_NADDR}H", addr)
+        self.size = (sz0 << 16) + sz1
+        return self
+
+    @property
+    def isdir(self) -> bool:
+        return (self.flags & V6_DIR) == V6_DIR
+
+    @property
+    def is_regular_file(self) -> bool:
+        return not self.isdir
+
+    @property
+    def is_large(self) -> bool:
+        return bool(self.flags & V6_LARGE)
+
+    @property
+    def is_allocated(self) -> bool:
+        return bool(self.flags & V6_USED)
+
+    def __str__(self) -> str:
+        if not self.is_allocated:
+            return f"{self.inode_num:>4}# ---"
+        else:
+            mode = format_mode(self.flags, version=self.fs.version)
+            return f"{self.inode_num:>4}# {self.uid:>3},{self.gid:<3} nlinks: {self.nlinks:>3} size: {self.size:>5} {mode} flags: {self.flags:o}"
+
+
+class UNIXInode7(UNIXInode6):
+
+    @classmethod
+    def read(cls, fs: "UNIXFilesystem", inode_num: int, buffer: bytes, position: int = 0) -> "UNIXInode":
+        self = UNIXInode7(fs)
+        self.inode_num = inode_num
+        (
+            self.flags,  #    1 word  flags
+            self.nlinks,  #   1 word  number of links to file
+            self.uid,  #      1 word  user ID of owner
+            self.gid,  #      1 word  group ID of owner
+            sz0,  #           1 word  high word of size
+            sz1,  #           1 word  low word of size
+            addr,  #          40 chars disk block addresses
+            self.atime,  #    1 long  time of last access
+            self.mtime,  #    1 long  time of last modification
+            self.ctime,  #    1 long  time created
+        ) = struct.unpack_from(V7_INODE_FORMAT, buffer, position)
+        self.addr = l3tol(addr, V7_NADDR)
+        self.size = (sz0 << 16) + sz1
+        return self
 
 
 class UNIXDirectoryEntry(AbstractDirectoryEntry):
@@ -466,7 +645,10 @@ class UNIXFilesystem(AbstractFilesystem):
         self.f = file
         self.version = version
         self.pwd = "/"
-        if self.version == 1:
+        if self.version == 0:
+            self.inode_size = V0_INODE_SIZE
+            self.root_inode = V0_ROOT_INODE
+        elif self.version == 1:
             self.inode_size = V1_INODE_SIZE
             self.dir_format = V1_DIR_FORMAT
             self.root_inode = V1_ROOT_INODE
@@ -500,12 +682,32 @@ class UNIXFilesystem(AbstractFilesystem):
         elif self.version == 7:
             pass  # TODO
 
+    def read_18bit_word(self) -> int:
+        """
+        Read 4 bytes as one 18bit word
+        """
+        b1, b2, b3, b4 = struct.unpack("BBBB", self.f.read(V0_BYTES_PER_WORD))
+        return (b1 & 0xFF) | ((b2 & 0xFF) << 8) | ((b3 & 0xFF) << 16) | ((b4 & 0xFF) << 24)
+
     def read_block(
         self,
         block_number: int,
         number_of_blocks: int = 1,
     ) -> bytes:
-        return self.f.read_block(block_number, number_of_blocks)
+        if self.version == 0:
+            return self.read_18bit_words_block(block_number)
+        else:
+            return self.f.read_block(block_number, number_of_blocks)
+
+    def read_18bit_words_block(
+        self,
+        block_number: int,
+    ) -> List[int]:
+        """
+        Read a 256 bytes block as 18bit words
+        """
+        self.f.seek(V0_SURFACE_SIZE + block_number * V0_WORDS_PER_BLOCK * V0_BYTES_PER_WORD)
+        return [self.read_18bit_word() for _ in range(V0_WORDS_PER_BLOCK)]
 
     def write_block(
         self,
@@ -515,13 +717,17 @@ class UNIXFilesystem(AbstractFilesystem):
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def read_inode(self, inode: int) -> UNIXInode:
+    def read_inode(self, inode_num: int) -> UNIXInode:
         """
         Read inode by number
         """
-        self.f.seek(BLOCK_SIZE * 2 + (inode - 1) * self.inode_size)
-        data = self.f.read(self.inode_size)
-        return UNIXInode.read(self, inode, data)
+        if self.version == 0:
+            block_number, offset = get_v0_inode_block_offset(inode_num)
+            data = self.read_18bit_words_block(block_number)[offset : offset + V0_INODE_SIZE]
+        else:
+            self.f.seek(BLOCK_SIZE * 2 + (inode_num - 1) * self.inode_size)
+            data = self.f.read(self.inode_size)
+        return UNIXInode.read(self, inode_num, data)
 
     def get_inode(self, path: str, inode_num: int = -1) -> Optional["UNIXInode"]:
         """
@@ -549,13 +755,23 @@ class UNIXFilesystem(AbstractFilesystem):
         if not inode.isdir:
             return []
         files = []
-        data = inode.read_bytes()
-        for i in range(0, len(data), struct.calcsize(self.dir_format)):
-            inum, name = struct.unpack_from(self.dir_format, data, i)
-            if inum > 0:
-                name = name.decode("ascii", errors="ignore").rstrip("\x00")
-                files.append((inum, name))
-        return files
+        if self.version == 0:
+            data = inode.read_words()
+            for i in range(0, len(data), V0_DIRENT_SIZE):
+                inum = data[i]
+                name = from_18bit_words_to_bytes(data[i + 1 : i + 2 + 4])
+                if inum > 0:
+                    name_ascii = name.decode("ascii", errors="ignore").rstrip(" \x00")
+                    files.append((inum, name_ascii))
+            return files
+        else:
+            data = inode.read_bytes()
+            for i in range(0, len(data), struct.calcsize(self.dir_format)):
+                inum, name = struct.unpack_from(self.dir_format, data, i)
+                if inum > 0:
+                    name_ascii = name.decode("ascii", errors="ignore").rstrip("\x00")
+                    files.append((inum, name_ascii))
+            return files
 
     def read_dir_entries(self, dirname: str) -> Iterator["UNIXDirectoryEntry"]:
         inode = self.get_inode(dirname)
@@ -671,7 +887,7 @@ class UNIXFilesystem(AbstractFilesystem):
         if not entries:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), pattern)
         uids = self.read_uids()
-        if not options.get("brief"):
+        if not options.get("brief") and not self.version == 0:
             blocks = reduce(lambda x, y: x + y, [x.inode.length for x in entries])
             if self.version < 3:
                 sys.stdout.write(f"total {blocks:>4}\n")
@@ -683,6 +899,11 @@ class UNIXFilesystem(AbstractFilesystem):
             elif options.get("brief"):
                 # Lists only file names
                 sys.stdout.write(f"{x.basename}\n")
+            elif self.version == 0:
+                uid = x.inode.uid if x.inode.uid != -1 else 0o77
+                sys.stdout.write(
+                    f"{x.inode_num:>03o} {x.inode.flags & 0o77:02o} {uid:02o} {x.inode.nlinks:>02o} {x.inode.size:>05o} {x.basename}\n"
+                )
             else:
                 mode = format_mode(x.inode.flags, self.version)
                 time = format_time(x.inode.mtime)
@@ -704,17 +925,6 @@ class UNIXFilesystem(AbstractFilesystem):
         hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
-        def dump_struct(d: Dict[str, Any]) -> str:
-            result: List[str] = []
-            for k, v in d.items():
-                if type(v) in (int, str, bytes, list):
-                    if len(k) < 6:
-                        label = k.upper() + ":"
-                    else:
-                        label = k.replace("_", " ").title() + ":"
-                    result.append(f"{label:20s}{v}")
-            return "\n".join(result)
-
         if name_or_block:
             self.dump(name_or_block)
         else:

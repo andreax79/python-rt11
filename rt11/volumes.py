@@ -51,6 +51,7 @@ FILESYSTEMS = {
     "magtape": DOS11MagTapeFilesystem,
     "rt11": RT11Filesystem,
     "solo": SOLOFilesystem,
+    "unix0": lambda f: UNIXFilesystem(f, version=0),
     "unix1": lambda f: UNIXFilesystem(f, version=1),
     "unix6": lambda f: UNIXFilesystem(f, version=6),
     "unix7": lambda f: UNIXFilesystem(f, version=7),

@@ -24,10 +24,17 @@ import struct
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word, filename_match, hex_dump, swap_words
+from .commons import (
+    BLOCK_SIZE,
+    bytes_to_word,
+    dump_struct,
+    filename_match,
+    hex_dump,
+    swap_words,
+)
 from .dos11fs import dos11_split_fullname
 from .rad50 import asc2rad, rad2asc, rad50_word_to_asc
 from .uic import ANY_GROUP, ANY_USER, DEFAULT_UIC, UIC
@@ -705,17 +712,6 @@ class Files11Filesystem(AbstractFilesystem):
         hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
-        def dump_struct(d: Dict[str, Any]) -> str:
-            result: List[str] = []
-            for k, v in d.items():
-                if type(v) in (int, str, bytes, UIC, list):
-                    if len(k) < 6:
-                        label = k.upper() + ":"
-                    else:
-                        label = k.replace('_', ' ').title() + ":"
-                    result.append(f"{label:20s}{v}")
-            return "\n".join(result)
-
         uic = None
         if name_or_block and "[" in name_or_block:
             try:

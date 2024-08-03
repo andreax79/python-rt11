@@ -20,21 +20,22 @@
 
 __all__ = [
     "BLOCK_SIZE",
-    "bytes_to_word",
-    "word_to_bytes",
-    "splitdrive",
-    "date_to_rt11",
-    "getch",
-    "swap_words",
-    "hex_dump",
-    "filename_match",
     "PartialMatching",
+    "bytes_to_word",
+    "date_to_rt11",
+    "dump_struct",
+    "filename_match",
+    "getch",
+    "hex_dump",
+    "splitdrive",
+    "swap_words",
+    "word_to_bytes",
 ]
 
 import fnmatch
 import sys
 from datetime import date
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 BLOCK_SIZE = 512
 BYTES_PER_LINE = 16
@@ -88,11 +89,26 @@ def swap_words(val: int) -> int:
 
 
 def hex_dump(data: bytes, bytes_per_line: int = BYTES_PER_LINE) -> None:
+    """
+    Display contents in hexadecimal
+    """
     for i in range(0, len(data), bytes_per_line):
         line = data[i : i + bytes_per_line]
         hex_str = " ".join([f"{x:02x}" for x in line])
         ascii_str = "".join([chr(x) if 32 <= x <= 126 else "." for x in line])
         sys.stdout.write(f"{i:08x}   {hex_str.ljust(3 * bytes_per_line)}  {ascii_str}\n")
+
+
+def dump_struct(d: Dict[str, Any]) -> str:
+    result: List[str] = []
+    for k, v in d.items():
+        if type(v) in (int, str, bytes, list):
+            if len(k) < 6:
+                label = k.upper() + ":"
+            else:
+                label = k.replace("_", " ").title() + ":"
+            result.append(f"{label:20s}{v}")
+    return "\n".join(result)
 
 
 def filename_match(basename: str, pattern: Optional[str], wildcard: bool) -> bool:

@@ -530,6 +530,8 @@ MOUNT           Assigns a logical disk unit to a file
         Mount CAPS-11 filesystem
    SOLO
         Mount SOLO filesystem
+   UNIX0
+        Mount PDP-7 UNIX version 0 filesystem
    UNIX1
         Mount UNIX version 1 filesystem
    UNIX6
@@ -887,6 +889,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a SOLO disk",
+    )
+    parser.add_argument(
+        "--unix0",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a PDP-7 UNIX v0 disk",
     )
     parser.add_argument(
         "--unix1",

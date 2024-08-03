@@ -781,16 +781,22 @@ class SOLOFilesystem(AbstractFilesystem):
         include_all: bool = True,
         wildcard: bool = True,
     ) -> Iterator[Union["SOLODirectoryEntry", "SOLOSegmentDirectoryEntry"]]:
+        file_type_id: Optional[int] = None
         if pattern:
+            if ";" in pattern:
+                pattern, file_type = pattern.split(";", 1)
+                file_type_id = get_file_type_id(file_type)
             pattern = solo_canonical_filename(pattern, segment=True, wildcard=True)
-        if include_all:
+        if include_all or file_type_id == SEGMENT:
             for segment in SEGMENTS.values():
                 if filename_match(segment, pattern, wildcard):
-                    yield SOLOSegmentDirectoryEntry(self, segment)
+                    if file_type_id is None or file_type_id == SEGMENT:
+                        yield SOLOSegmentDirectoryEntry(self, segment)
 
         for entry in self.entries_list:
             if filename_match(entry.basename, pattern, wildcard) and not entry.is_empty:
-                yield entry
+                if file_type_id is None or file_type_id == entry.file_type_id:
+                    yield entry
 
     @property
     def entries_list(self) -> Iterator["SOLODirectoryEntry"]:
@@ -802,7 +808,7 @@ class SOLOFilesystem(AbstractFilesystem):
             for entry in catalog_page.entries:
                 yield entry
 
-    def get_searchlength(self, hash_key: int) -> None:
+    def get_searchlength(self, hash_key: int) -> int:
         page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1
         pages = self.read_page_map(CAT_ADDR)
         block_number = pages[page_num - 1]
