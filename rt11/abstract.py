@@ -18,10 +18,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import errno
 import os
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import Dict, Iterator, Optional
+
+from .commons import ASCII, IMAGE, READ_FILE_FULL, hex_dump
 
 __all__ = [
     "AbstractFile",
@@ -65,7 +68,7 @@ class AbstractFile(ABC):
         """Close the file"""
 
     def read(self, size: Optional[int] = None) -> bytes:
-        """Read bytes from the file"""
+        """Read bytes from the file, starting at the current position"""
         data = bytearray()
         while size is None or len(data) < size:
             # Calculate current block and offset within the block
@@ -91,7 +94,7 @@ class AbstractFile(ABC):
         return bytes(data)
 
     def write(self, data: bytes) -> int:
-        """Write bytes to the file"""
+        """Write bytes to the file at the current position"""
         data_length = len(data)
         written = 0
         while written < data_length:
@@ -164,8 +167,24 @@ class AbstractDirectoryEntry(ABC):
         return None
 
     @abstractmethod
+    def get_length(self) -> int:
+        """Get the length in blocks"""
+
+    @abstractmethod
+    def get_size(self) -> int:
+        """Get file size in bytes"""
+
+    @abstractmethod
+    def get_block_size(self) -> int:
+        """Get file block size in bytes"""
+
+    @abstractmethod
     def delete(self) -> bool:
         """Delete the file"""
+
+    @abstractmethod
+    def open(self, file_type: Optional[str] = None) -> AbstractFile:
+        """Open a file"""
 
 
 class AbstractFilesystem(object):
@@ -185,14 +204,6 @@ class AbstractFilesystem(object):
     @abstractmethod
     def get_file_entry(self, fullname: str) -> Optional["AbstractDirectoryEntry"]:
         """Get the directory entry for a file"""
-
-    @abstractmethod
-    def open_file(self, fullname: str) -> "AbstractFile":
-        """Open a file"""
-
-    @abstractmethod
-    def read_bytes(self, fullname: str) -> bytes:
-        """Get the content of a file"""
 
     @abstractmethod
     def write_bytes(
@@ -223,10 +234,6 @@ class AbstractFilesystem(object):
         """Check if the given path is a directory"""
 
     @abstractmethod
-    def exists(self, fullname: str) -> bool:
-        """Check if the given path exists"""
-
-    @abstractmethod
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         """List directory contents"""
 
@@ -249,3 +256,55 @@ class AbstractFilesystem(object):
     @abstractmethod
     def get_pwd(self) -> str:
         """Get the current directory"""
+
+    def exists(self, fullname: str) -> bool:
+        """Check if the given path exists"""
+        entry = self.get_file_entry(fullname)
+        return entry is not None
+
+    def open_file(self, fullname: str, file_type: Optional[str] = None) -> "AbstractFile":
+        """Open a file"""
+        entry = self.get_file_entry(fullname)
+        if not entry:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+        return entry.open(file_type)
+
+    def read_bytes(self, fullname: str, file_type: Optional[str] = None) -> bytes:
+        """Get the content of a file"""
+        f = self.open_file(fullname, file_type)
+        try:
+            return f.read_block(0, READ_FILE_FULL)[: f.get_size()]
+        finally:
+            f.close()
+
+    def read_text(self, fullname: str, encoding: str = "ascii", errors: str = "ignore", file_type: str = ASCII) -> str:
+        """Get the content of a file as text"""
+        data = self.read_bytes(fullname, file_type)
+        return data.decode(encoding, errors)
+
+    def dump(self, fullname: Optional[str], start: Optional[int] = None, end: Optional[int] = None) -> None:
+        """Dump the content of a file or a range of blocks"""
+        # TODO: Check block range
+        if fullname:
+            if start is None:
+                start = 0
+            if end is None:
+                entry = self.get_file_entry(fullname)
+                if not entry:
+                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+                end = entry.get_length() - 1
+            f = self.open_file(fullname, file_type=IMAGE)
+            try:
+                for block_number in range(start, end + 1):
+                    data = f.read_block(block_number)
+                    print(f"\nBLOCK NUMBER   {block_number:08}")
+                    hex_dump(data)
+            finally:
+                f.close()
+        else:
+            if start is None:
+                start = 0
+            for block_number in range(start, end + 1):
+                data = self.read_block(block_number)
+                print(f"\nBLOCK NUMBER   {block_number:08}")
+                hex_dump(data)

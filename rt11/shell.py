@@ -27,7 +27,7 @@ import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFilesystem
-from .commons import PartialMatching, splitdrive
+from .commons import ASCII, PartialMatching, splitdrive
 from .volumes import DEFAULT_VOLUME, FILESYSTEMS, Volumes
 
 try:
@@ -63,6 +63,9 @@ def ask(prompt: str) -> str:
 
 
 def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, Union[bool, str]]]:
+    """
+    Extract options from the command line
+    """
     args = shlex.split(line)
     result: List[str] = []
     options_result: Dict[str, Union[bool, str]] = {}
@@ -78,6 +81,21 @@ def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, Unio
         else:
             result.append(arg)
     return result, options_result
+
+
+def get_int_option(options: Dict[str, Union[bool, str]], key: str, default: Optional[int] = None) -> Optional[int]:
+    """
+    Get an integer option from the options dictionary
+    """
+    try:
+        value = int(options[key])
+        if value < 0:
+            raise ValueError
+        return value
+    except KeyError:
+        return default
+    except ValueError:
+        raise Exception("?KMON-F-Invalid value specified with option")
 
 
 def flgtxt(arg: str) -> Callable[[Callable], Callable]:
@@ -100,7 +118,7 @@ def copy_file(
     if not file_type:
         file_type = from_entry.file_type
     try:
-        content = from_fs.read_bytes(from_entry.fullname)
+        content = from_fs.read_bytes(from_entry.fullname, file_type)
         to_fs.write_bytes(to_path, content, from_entry.creation_date, file_type)
     except Exception:
         if verbose:
@@ -343,7 +361,8 @@ TYPE            Outputs files to the terminal
         match = False
         for x in fs.filter_entries_list(pattern):
             match = True
-            content = fs.read_bytes(x.fullname)
+            # content = fs.read_bytes(x.fullname)
+            content = fs.read_bytes(x.fullname, file_type=ASCII)
             if content is not None:
                 os.write(sys.stdout.fileno(), content)
                 sys.stdout.write("\n")
@@ -457,16 +476,47 @@ DELETE          Removes files from a volume
     def do_examine(self, line: str) -> None:
         # fmt: off
         """
-EXAMINE         Examines disk/block/file structure
+EXAMINE         Examines disk structure
 
   SYNTAX
-        EXAMINE volume:[filespec/block num]
+        EXAMINE volume:
 
         """
         # fmt: on
         volume_id, block = splitdrive(line or "")
         fs = self.volumes.get(volume_id)
         fs.examine(block)
+
+    @flgtxt("DU_MP")
+    def do_dump(self, line: str) -> None:
+        # fmt: off
+        """
+DUMP            Prints formatted data dumps of files or devices
+
+  SYNTAX
+        DUMP [/options] filespec
+
+  SEMANTICS
+        Filespec represents the device or file to be dumped.
+
+  OPTIONS
+   START:block
+        Specifies the first block to be dumped
+   END:block
+        Specifies the last block to be dumped
+
+  EXAMPLES
+        DUMP A.OBJ
+        DUMP /START:6 /END:6 DL0:
+
+        """
+        # fmt: on
+        args, options = extract_options(line, "/start", "/end")
+        start = get_int_option(options, "start")
+        end = get_int_option(options, "end")
+        volume_id, fullname = splitdrive(args[0])
+        fs = self.volumes.get(volume_id)
+        fs.dump(fullname, start=start, end=end)
 
     @flgtxt("CR_EATE")
     def do_create(self, line: str) -> None:
@@ -534,6 +584,8 @@ MOUNT           Assigns a logical disk unit to a file
         Mount PDP-7 UNIX version 0 filesystem
    UNIX1
         Mount UNIX version 1 filesystem
+   UNIX5
+        Mount UNIX version 5 filesystem
    UNIX6
         Mount UNIX version 6 filesystem
    UNIX7
@@ -903,6 +955,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a UNIX v1 disk",
+    )
+    parser.add_argument(
+        "--unix5",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a UNIX v5 disk",
     )
     parser.add_argument(
         "--unix6",

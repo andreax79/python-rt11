@@ -30,10 +30,10 @@ from typing import Dict, Iterator, List, Optional
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import (
     BLOCK_SIZE,
+    READ_FILE_FULL,
     bytes_to_word,
     date_to_rt11,
     filename_match,
-    hex_dump,
     word_to_bytes,
 )
 from .rad50 import asc2rad, rad2asc
@@ -119,6 +119,8 @@ class RT11File(AbstractFile):
         """
         Read block(s) of data from the file
         """
+        if number_of_blocks == READ_FILE_FULL:
+            number_of_blocks = self.entry.length
         if self.closed or block_number < 0 or number_of_blocks < 0:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         if block_number + number_of_blocks > self.entry.length:
@@ -154,13 +156,13 @@ class RT11File(AbstractFile):
         """
         Get file size in bytes
         """
-        return self.size
+        return self.entry.get_size()
 
     def get_block_size(self) -> int:
         """
         Get file block size in bytes
         """
-        return BLOCK_SIZE
+        return self.entry.get_block_size()
 
     def close(self) -> None:
         """
@@ -247,6 +249,24 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
     def basename(self) -> str:
         return self.fullname
 
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
+        return self.length
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.length * self.get_block_size()
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
     @property
     def creation_date(self) -> Optional[date]:
         return rt11_to_date(self.raw_creation_date)
@@ -256,6 +276,12 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         self.clazz = self.clazz & ~E_PERM & ~E_TENT & ~E_READ & ~E_PROT | E_MPTY
         self.segment.compact()
         return True
+
+    def open(self, file_type: Optional[str] = None) -> RT11File:
+        """
+        Open a file
+        """
+        return RT11File(self)
 
     def __str__(self) -> str:
         return (
@@ -500,13 +526,7 @@ class RT11Filesystem(AbstractFilesystem):
                 return entry
         return None
 
-    def open_file(self, fullname: str) -> RT11File:
-        entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return RT11File(entry)
-
-    def read_bytes(self, fullname: str) -> bytes:  # fullname=filename+ext
+    def read_bytes(self, fullname: str, file_type: Optional[str] = None) -> bytes:  # fullname=filename+ext
         entry = self.get_file_entry(fullname)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -633,10 +653,6 @@ class RT11Filesystem(AbstractFilesystem):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def exists(self, fullname: str) -> bool:  # fullname=filename+ext
-        entry = self.get_file_entry(fullname)
-        return entry is not None
-
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         i = 0
         files = 0
@@ -686,13 +702,6 @@ class RT11Filesystem(AbstractFilesystem):
             sys.stdout.write("\n")
         sys.stdout.write(" %d Files, %d Blocks\n" % (files, blocks))
         sys.stdout.write(" %d Free blocks\n" % unused)
-
-    def dump(self, name_or_block: str) -> None:
-        if name_or_block.isnumeric():
-            data = self.read_block(int(name_or_block))
-        else:
-            data = self.read_bytes(name_or_block)
-        hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
         if name_or_block:

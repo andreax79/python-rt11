@@ -21,6 +21,7 @@
 import errno
 import glob
 import io
+import math
 import os
 import stat
 import sys
@@ -28,7 +29,7 @@ from datetime import date, datetime
 from typing import Dict, Iterator, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE
+from .commons import BLOCK_SIZE, READ_FILE_FULL
 from .rx import RX01_SECTOR_SIZE, RX01_SIZE, RX02_SECTOR_SIZE, RX02_SIZE, rxfactr
 
 __all__ = [
@@ -66,7 +67,10 @@ class NativeFile(AbstractFile):
         """
         Read block(s) of data from the file
         """
-        if block_number < 0 or number_of_blocks < 0:
+        if number_of_blocks == READ_FILE_FULL:
+            self.f.seek(0)  # not thread safe...
+            return self.f.read()
+        elif block_number < 0 or number_of_blocks < 0:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         elif self.sector_size == BLOCK_SIZE:
             position = rxfactr(block_number, self.sector_size)
@@ -160,12 +164,36 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
     def basename(self) -> str:
         return os.path.basename(self.native_fullname)
 
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
+        return int(math.ceil(self.get_size() / self.get_block_size()))
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.stat.st_size
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
     def delete(self) -> bool:
         try:
             os.unlink(self.native_fullname)
             return True
         except:
             return False
+
+    def open(self, file_type: Optional[str] = None) -> NativeFile:
+        """
+        Open a file
+        """
+        return NativeFile(self.fullname)
 
     def __str__(self) -> str:
         return f"{self.fullname:<11} {self.creation_date or '':<6} length: {self.length:>6}"
@@ -217,17 +245,6 @@ class NativeFilesystem(AbstractFilesystem):
             fullname = os.path.join(self.pwd, fullname)
         return NativeDirectoryEntry(fullname)
 
-    def open_file(self, fullname: str) -> NativeFile:
-        if not fullname.startswith("/") and not fullname.startswith("\\"):
-            fullname = os.path.join(self.pwd, fullname)
-        return NativeFile(fullname)
-
-    def read_bytes(self, fullname: str) -> bytes:
-        if not fullname.startswith("/") and not fullname.startswith("\\"):
-            fullname = os.path.join(self.pwd, fullname)
-        with open(fullname, "rb") as f:
-            return f.read()
-
     def write_bytes(
         self,
         fullname: str,
@@ -277,11 +294,6 @@ class NativeFilesystem(AbstractFilesystem):
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         return os.path.isdir(os.path.join(self.base, fullname))
-
-    def exists(self, fullname: str) -> bool:
-        if not fullname.startswith("/") and not fullname.startswith("\\"):
-            fullname = os.path.join(self.pwd, fullname)
-        return os.path.exists(os.path.join(self.base, fullname))
 
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("brief"):

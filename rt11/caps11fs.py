@@ -27,7 +27,7 @@ from datetime import date
 from typing import Dict, Iterator, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, filename_match, hex_dump
+from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
 from .rt11fs import rt11_canonical_filename
 from .tape import Tape
 
@@ -37,7 +37,6 @@ __all__ = [
     "CAPS11Filesystem",
 ]
 
-READ_FILE_FULL = -1
 HEADER_RECORD = ">6s3sBHBB6s12s"
 HEADER_RECORD_SIZE = 32
 RECORD_SIZE = 128
@@ -121,12 +120,12 @@ class CAPS11File(AbstractFile):
         Read block(s) of data from the file
         """
         if number_of_blocks == READ_FILE_FULL:
-            number_of_blocks = self.entry.length
+            number_of_blocks = self.entry.get_length()
         if (
             self.closed
             or block_number < 0
             or number_of_blocks < 0
-            or block_number + number_of_blocks > self.entry.length
+            or block_number + number_of_blocks > self.entry.get_length()
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         return self.content[block_number * BLOCK_SIZE : (block_number + number_of_blocks) * BLOCK_SIZE]
@@ -275,10 +274,23 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         if skip_file:
             self.fs.tape_skip_file()
 
-    @property
-    def length(self) -> int:
-        """Length in blocks"""
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
         return int(math.ceil(self.size / BLOCK_SIZE))
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.size
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
 
     @property
     def is_empty(self) -> bool:
@@ -317,6 +329,12 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.raw_creation_date = b""
         self.write()
         return True
+
+    def open(self, file_type: Optional[str] = None) -> CAPS11File:
+        """
+        Open a file
+        """
+        return CAPS11File(self)
 
     def __str__(self) -> str:
         file_type = self.file_type or f"{self.record_type:>4o}"
@@ -396,19 +414,6 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return next(self.filter_entries_list(fullname, wildcard=False), None)
 
-    def open_file(self, fullname: str) -> CAPS11File:
-        entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return CAPS11File(entry)
-
-    def read_bytes(self, fullname: str) -> bytes:
-        f = self.open_file(fullname)
-        try:
-            return f.read_block(0, READ_FILE_FULL)
-        finally:
-            f.close()
-
     def write_bytes(
         self,
         fullname: str,
@@ -469,10 +474,6 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def exists(self, fullname: str) -> bool:
-        entry = self.get_file_entry(fullname)
-        return entry is not None
-
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if not options.get("brief"):
             dt = date.today().strftime('%d-%B-%y').upper()
@@ -486,10 +487,6 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
             else:
                 creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or "--"
                 sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s} {creation_date:<9s}\n")
-
-    def dump(self, name: str) -> None:
-        data = self.read_bytes(name)
-        hex_dump(data)
 
     def examine(self, name: Optional[str]) -> None:
         if name:

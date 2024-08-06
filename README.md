@@ -13,6 +13,11 @@ Python-RT11 is an utility for transferring files between various file systems.
 | CAPS-11       | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 | Files-11      | :white_check_mark:|                   |                   |                   |
 | SOLO          | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| PDP-7 UNIX v0 | :white_check_mark:|                   |                   |                   |
+| UNIX v1       | :white_check_mark:|                   |                   |                   |
+| UNIX v5       | :white_check_mark:|                   |                   |                   |
+| UNIX v6       | :white_check_mark:|                   |                   |                   |
+| UNIX v7       |                   |                   |                   |                   |
 
 Commands
 --------
@@ -31,7 +36,8 @@ The following commands are availables:
 * DELETE          Removes files from a volume
 * DIR             Lists file directories
 * DISMOUNT        Disassociates a logical disk assignment from a file
-* EXAMINE         Examines disk/block/file structure
+* DUMP            Prints formatted data dumps of files or devices
+* EXAMINE         Examines disk structure
 * EXIT            Exit the shell
 * HELP            Displays commands help
 * INITIALIZE      Writes an empty device directory on the specified volume
@@ -139,3 +145,11 @@ Links
 * [XXDP File Structure Guide](https://raw.githubusercontent.com/rust11/xxdp/main/XXDP%2B%20File%20Structure.pdf)
 * [CAPS-11 User Guide](http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf)
 * [THE SOLO OPERATING SYSTEM: A CONCURRENT PASCAL PROGRAM PER BRINCH HANSEN](http://brinch-hansen.net/papers/1976b.pdf)
+* [PDP-7 UNIX version 0 fs man page](https://github.com/DoctorWkt/pdp7-unix/blob/master/man/fs.5)
+* [Unix on the PDP-7 from a scan of the original assembly code](https://github.com/DoctorWkt/pdp7-unix)
+* [UNIX version 1 fs man page](http://squoze.net/UNIX/v1man/man5/fs)
+* [UNIX version 2 fs man page](http://squoze.net/UNIX/v2man/man5/fs)
+* [UNIX version 3 fs man page](http://squoze.net/UNIX/v3man/man5/fs)
+* [UNIX version 4 fs man page](http://squoze.net/UNIX/v4man/man5/fs)
+* [UNIX version 5 fs man page](http://squoze.net/UNIX/v6man/man5/fs)
+* [UNIX version 6 fs man page](http://squoze.net/UNIX/v6man/man5/fs)

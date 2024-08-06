@@ -28,7 +28,7 @@ from datetime import date, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, bytes_to_word, filename_match, hex_dump
+from .commons import BLOCK_SIZE, READ_FILE_FULL, bytes_to_word, filename_match
 from .rad50 import asc_to_rad50_word, rad50_word_to_asc
 from .rt11fs import rt11_canonical_filename
 from .uic import ANY_UIC, DEFAULT_UIC, UIC
@@ -51,7 +51,6 @@ DECTAPE_MFD1_BLOCK = 0o100
 DECTAPE_MFD2_BLOCK = 0o101
 DECTAPE_UFD1_BLOCK = 0o102
 DECTAPE_UFD2_BLOCK = 0o103
-READ_FILE_FULL = -1
 DEFAULT_PROTECTION_CODE = 0o233
 
 MFD_BLOCK_FORMAT = "<HHH"
@@ -286,16 +285,14 @@ class DOS11Bitmap:
 class DOS11File(AbstractFile):
     entry: "DOS11DirectoryEntry"
     closed: bool
-    size: int
-    block_size: int
+    length: int  # Length in blocks
     contiguous: bool
 
     def __init__(self, entry: "DOS11DirectoryEntry"):
         self.entry = entry
         self.closed = False
         self.contiguous = entry.contiguous
-        self.block_size = BLOCK_SIZE if self.contiguous else LINKED_FILE_BLOCK_SIZE
-        self.size = entry.length * self.block_size
+        self.length = entry.length
 
     def read_block(
         self,
@@ -376,17 +373,23 @@ class DOS11File(AbstractFile):
                 next_block_number = bytes_to_word(t, 0)
                 seq += 1
 
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
+        return self.length
+
     def get_size(self) -> int:
         """
         Get file size in bytes
         """
-        return self.size
+        return self.get_length() * self.get_block_size()
 
     def get_block_size(self) -> int:
         """
         Get file block size in bytes
         """
-        return self.block_size
+        return BLOCK_SIZE if self.contiguous else LINKED_FILE_BLOCK_SIZE
 
     def close(self) -> None:
         """
@@ -510,6 +513,24 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     def basename(self) -> str:
         return f"{self.filename}.{self.extension}"
 
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
+        return self.length
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.length * self.get_block_size()
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE if self.contiguous else LINKED_FILE_BLOCK_SIZE
+
     @property
     def creation_date(self) -> Optional[date]:
         return dos11_to_date(self.raw_creation_date)
@@ -546,6 +567,12 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
                 next_block_number = bytes_to_word(t, 0)
         bitmap.write()
         return True
+
+    def open(self, file_type: Optional[str] = None) -> DOS11File:
+        """
+        Open a file
+        """
+        return DOS11File(self)
 
     def __str__(self) -> str:
         return (
@@ -896,25 +923,6 @@ class DOS11Filesystem(AbstractFilesystem):
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
         return next(self.filter_entries_list(basename, wildcard=False, uic=uic), None)
 
-    def open_file(self, fullname: str) -> DOS11File:
-        """
-        Open a file
-        """
-        entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return DOS11File(entry)
-
-    def read_bytes(self, fullname: str) -> bytes:
-        """
-        Get the content of a file
-        """
-        f = self.open_file(fullname)
-        try:
-            return f.read_block(0, READ_FILE_FULL)
-        finally:
-            f.close()
-
     def write_bytes(
         self,
         fullname: str,
@@ -1012,13 +1020,6 @@ class DOS11Filesystem(AbstractFilesystem):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def exists(self, fullname: str) -> bool:
-        """
-        Check if the given path exists
-        """
-        entry = self.get_file_entry(fullname)
-        return entry is not None
-
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
@@ -1061,13 +1062,6 @@ class DOS11Filesystem(AbstractFilesystem):
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
-
-    def dump(self, name_or_block: str) -> None:
-        if name_or_block.isnumeric():
-            data = self.read_block(int(name_or_block))
-        else:
-            data = self.read_bytes(name_or_block)
-        hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
         if name_or_block:

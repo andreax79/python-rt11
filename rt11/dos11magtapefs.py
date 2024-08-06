@@ -27,7 +27,7 @@ from datetime import date
 from typing import Dict, Iterator, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, filename_match, hex_dump
+from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
 from .dos11fs import (
     DEFAULT_PROTECTION_CODE,
     date_to_dos11,
@@ -45,7 +45,6 @@ __all__ = [
     "DOS11MagTapeFilesystem",
 ]
 
-READ_FILE_FULL = -1
 HEADER_RECORD = "<HHHHHHH"
 HEADER_RECORD_SIZE = 14
 RECORD_SIZE = 512
@@ -229,6 +228,24 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
     def basename(self) -> str:
         return f"{self.filename}.{self.extension}"
 
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
+        return int(math.ceil(self.size / BLOCK_SIZE))
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.size
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
     @property
     def creation_date(self) -> Optional[date]:
         return dos11_to_date(self.raw_creation_date)
@@ -244,6 +261,12 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         self.protection_code = 0
         self.write()
         return True
+
+    def open(self, file_type: Optional[str] = None) -> DOS11MagTapeFile:
+        """
+        Open a file
+        """
+        return DOS11MagTapeFile(self)
 
     def __str__(self) -> str:
         return (
@@ -351,19 +374,6 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
         return next(self.filter_entries_list(basename, uic=uic, wildcard=False), None)
 
-    def open_file(self, fullname: str) -> DOS11MagTapeFile:
-        entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return DOS11MagTapeFile(entry)
-
-    def read_bytes(self, fullname: str) -> bytes:
-        f = self.open_file(fullname)
-        try:
-            return f.read_block(0, READ_FILE_FULL)
-        finally:
-            f.close()
-
     def write_bytes(
         self,
         fullname: str,
@@ -435,10 +445,6 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def exists(self, fullname: str) -> bool:
-        entry = self.get_file_entry(fullname)
-        return entry is not None
-
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
@@ -477,10 +483,6 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
-
-    def dump(self, name: str) -> None:
-        data = self.read_bytes(name)
-        hex_dump(data)
 
     def examine(self, name: Optional[str]) -> None:
         if name:

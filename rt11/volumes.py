@@ -32,6 +32,7 @@ from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
 from .rt11fs import RT11Filesystem
 from .solofs import SOLOFilesystem
+from .unix0fs import UNIXFilesystem0
 from .unixfs import UNIXFilesystem
 
 __all__ = [
@@ -51,8 +52,9 @@ FILESYSTEMS = {
     "magtape": DOS11MagTapeFilesystem,
     "rt11": RT11Filesystem,
     "solo": SOLOFilesystem,
-    "unix0": lambda f: UNIXFilesystem(f, version=0),
+    "unix0": lambda f: UNIXFilesystem0(f),
     "unix1": lambda f: UNIXFilesystem(f, version=1),
+    "unix5": lambda f: UNIXFilesystem(f, version=5),
     "unix6": lambda f: UNIXFilesystem(f, version=6),
     "unix7": lambda f: UNIXFilesystem(f, version=7),
 }

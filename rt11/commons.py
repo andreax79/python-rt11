@@ -20,6 +20,9 @@
 
 __all__ = [
     "BLOCK_SIZE",
+    "ASCII",
+    "IMAGE",
+    "READ_FILE_FULL",
     "PartialMatching",
     "bytes_to_word",
     "date_to_rt11",
@@ -39,6 +42,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 BLOCK_SIZE = 512
 BYTES_PER_LINE = 16
+READ_FILE_FULL = -1
+ASCII = "ASCII"  # Copy in ASCII mode
+IMAGE = "IMAGE"  # Copy in image mode
 
 
 def bytes_to_word(val: bytes, position: int = 0) -> int:

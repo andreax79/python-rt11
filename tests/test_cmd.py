@@ -86,7 +86,7 @@ def test_cmds():
     shell.onecmd("DIR", batch=True)
     shell.onecmd("EXAMINE T:", batch=True)
     shell.onecmd("EXAMINE T:LICENSE", batch=True)
-    shell.onecmd("EXAMINE T:6", batch=True)
+    shell.onecmd("DUMP /start:6 /end:6 T:", batch=True)
     shell.onecmd("TYPE T:LICENSE", batch=True)
     # Delete the file
     shell.onecmd("DEL LICENSE", batch=True)

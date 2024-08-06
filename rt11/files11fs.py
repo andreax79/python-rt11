@@ -29,10 +29,10 @@ from typing import Dict, Iterator, List, Optional
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import (
     BLOCK_SIZE,
+    READ_FILE_FULL,
     bytes_to_word,
     dump_struct,
     filename_match,
-    hex_dump,
     swap_words,
 )
 from .dos11fs import dos11_split_fullname
@@ -50,7 +50,6 @@ INDEXF_SYS = 1  # The index file is the root of the Files-11
 BITMAP_SYS = 2  # Storage bitmap file
 BADBLK_SYS = 3  # Bad block file
 MFD_DIR = 4  # Volume master file directory (000000.DIR)
-READ_FILE_FULL = -1
 UC_CNB = 128  # Contiguous as possible flag
 SC_DIR = 0x80  # File is a directory
 
@@ -439,12 +438,32 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     def creation_date(self) -> Optional[date]:
         return files11_to_date(self.header.crdt, self.header.crti)
 
-    @property
-    def length(self) -> int:
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
         return self.header.length
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.get_length() * self.get_block_size()
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
 
     def delete(self) -> bool:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def open(self, file_type: Optional[str] = None) -> Files11File:
+        """
+        Open a file
+        """
+        return Files11File(self.header)
 
     def __str__(self) -> str:
         return f"File ID {'(' + self.file_id + ')':16} Name: {self.basename:12} Ver: {self.fver} FCHA: {self.header.fcha:04x} RTYP: {self.header.rtyp:1} Length: {self.header.length:9}"
@@ -635,19 +654,6 @@ class Files11Filesystem(AbstractFilesystem):
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
         return next(self.filter_entries_list(basename, wildcard=False, uic=uic), None)
 
-    def open_file(self, fullname: str) -> Files11File:
-        entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return Files11File(entry.header)
-
-    def read_bytes(self, fullname: str) -> bytes:
-        f = self.open_file(fullname)
-        try:
-            return f.read_block(0, READ_FILE_FULL)
-        finally:
-            f.close()
-
     def write_bytes(
         self,
         fullname: str,
@@ -668,10 +674,6 @@ class Files11Filesystem(AbstractFilesystem):
 
     def isdir(self, fullname: str) -> bool:
         return False
-
-    def exists(self, fullname: str) -> bool:
-        entry = self.get_file_entry(fullname)
-        return entry is not None
 
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         if options.get("uic"):
@@ -694,22 +696,15 @@ class Files11Filesystem(AbstractFilesystem):
                 continue
             date = x.creation_date and x.creation_date.strftime("%d-%b-%y %H:%M").upper() or ""
             attr = "C" if UC_CNB & x.header.fcha else ""
-            length = f"{x.length}."
+            length = f"{x.header.length}."
             sys.stdout.write(f"{fullname:<19s} {length:<7s} {attr:1}  {date:>9s}\n")
-            blocks += x.length
-            allocated += x.length
+            blocks += x.header.length
+            allocated += x.header.length
             files += 1
         if options.get("brief"):
             return
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTAL OF {blocks}./{allocated}. BLOCKS IN {files}. FILES\n")
-
-    def dump(self, name_or_block: str) -> None:
-        if name_or_block.isnumeric():
-            data = self.read_block(int(name_or_block))
-        else:
-            data = self.read_bytes(name_or_block)
-        hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
         uic = None

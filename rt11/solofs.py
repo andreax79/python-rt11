@@ -27,7 +27,7 @@ from datetime import date
 from typing import Dict, Iterator, List, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, filename_match, hex_dump
+from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
 
 __all__ = [
     "SOLOFile",
@@ -36,7 +36,6 @@ __all__ = [
     "solo_canonical_filename",
 ]
 
-READ_FILE_FULL = -1
 EM = b"\x19"  # End of Medium
 
 DISK_SIZE = 4800  # Disk size in blocks
@@ -151,8 +150,9 @@ class SOLOFile(AbstractFile):
     entry: "SOLODirectoryEntry"
     closed: bool
 
-    def __init__(self, entry: "SOLODirectoryEntry"):
+    def __init__(self, entry: "SOLODirectoryEntry", file_type: Optional[str] = None) -> None:
         self.entry = entry
+        self.file_type = file_type  # File type specified by open
         self.closed = False
 
     def read_block(
@@ -176,7 +176,10 @@ class SOLOFile(AbstractFile):
         for i in range(block_number, block_number + number_of_blocks):
             disk_block_number = self.entry.page_map[i]
             data.extend(self.entry.fs.read_block(disk_block_number))
-        return bytes(data)
+        if data and (not self.file_type or self.file_type == FILE_TYPES[ASCII]) and self.entry.file_type_id == ASCII:
+            return solo_to_ascii(bytes(data))
+        else:
+            return bytes(data)
 
     def write_block(
         self,
@@ -415,6 +418,24 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         """
         return len(self.page_map)
 
+    def get_length(self) -> int:
+        """
+        File length in blocks
+        """
+        return len(self.page_map)
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.length * self.get_block_size()
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
     @property
     def fs(self) -> "SOLOFilesystem":
         return self.cat_page.fs
@@ -437,6 +458,12 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         # Decrement the counter of files with the same key
         self.fs.update_searchlength(old_key, -1)
         return True
+
+    def open(self, file_type: Optional[str] = None) -> SOLOFile:
+        """
+        Open a file
+        """
+        return SOLOFile(self, file_type)
 
     def __str__(self) -> str:
         return f"{self.filename:<12}  \
@@ -486,8 +513,35 @@ class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         else:
             return SEGMENT_LENGTH
 
+    def get_length(self) -> int:
+        """
+        File length in blocks
+        """
+        if self.segment_addr == KERNEL_ADDR:
+            return KERNEL_LENGTH
+        else:
+            return SEGMENT_LENGTH
+
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.length * self.get_block_size()
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
     def delete(self) -> bool:
         return False
+
+    def open(self, file_type: Optional[str] = None) -> SOLOSegment:
+        """
+        Open a segment
+        """
+        return SOLOSegment(self)
 
     def __str__(self) -> str:
         return f"{self.filename:<12}  {self.file_type:<8}  Length: {self.length:>4}"
@@ -862,31 +916,6 @@ class SOLOFilesystem(AbstractFilesystem):
         # Fallback
         return next(self.filter_entries_list(fullname, wildcard=False), None)
 
-    def open_file(self, fullname: str) -> Union[SOLOFile, SOLOSegment]:
-        """
-        Open a file/segment
-        """
-        entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        elif isinstance(entry, SOLOSegmentDirectoryEntry):
-            return SOLOSegment(entry)
-        else:
-            return SOLOFile(entry)
-
-    def read_bytes(self, fullname: str, raw: bool = False) -> bytes:
-        """
-        Get the content of a file/segment
-        """
-        f = self.open_file(fullname)
-        try:
-            data = f.read_block(0, READ_FILE_FULL)
-        finally:
-            f.close()
-        if (not raw) and data and f.entry.file_type_id == ASCII:
-            data = solo_to_ascii(data)
-        return data
-
     def write_bytes(
         self,
         fullname: str,
@@ -981,13 +1010,6 @@ class SOLOFilesystem(AbstractFilesystem):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def exists(self, fullname: str) -> bool:
-        """
-        Check if the given path exists
-        """
-        entry = self.get_file_entry(fullname)
-        return entry is not None
-
     def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
         files = 0
         blocks = 0
@@ -1005,13 +1027,6 @@ class SOLOFilesystem(AbstractFilesystem):
         if options.get("brief"):
             return
         sys.stdout.write(f"{files:>5} ENTRIES\n{blocks:>5} PAGES\n")
-
-    def dump(self, name_or_block: str) -> None:
-        if name_or_block.isnumeric():
-            data = self.read_block(int(name_or_block))
-        else:
-            data = self.read_bytes(name_or_block, raw=True)
-        hex_dump(data)
 
     def examine(self, name_or_block: Optional[str]) -> None:
         if not name_or_block:
