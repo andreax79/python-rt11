@@ -17,7 +17,7 @@ Python-RT11 is an utility for transferring files between various file systems.
 | UNIX v1       | :white_check_mark:|                   |                   |                   |
 | UNIX v5       | :white_check_mark:|                   |                   |                   |
 | UNIX v6       | :white_check_mark:|                   |                   |                   |
-| UNIX v7       |                   |                   |                   |                   |
+| UNIX v7       | :white_check_mark:|                   |                   |                   |
 
 Commands
 --------

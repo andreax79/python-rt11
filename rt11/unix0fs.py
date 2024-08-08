@@ -133,6 +133,15 @@ class UNIXFile0(UNIXFile):
                     break
         return bytes(data)
 
+    def get_size(self) -> int:
+        """
+        Get file size in bytes
+        """
+        if self.file_type == ASCII:
+            return self.inode.size * 2  # 2 ASCII bytes per 18 bit word
+        else:
+            return self.inode.size * V0_IO_BYTES_PER_WORD
+
 
 class UNIXInode0(UNIXInode):
     """
@@ -155,6 +164,7 @@ class UNIXInode0(UNIXInode):
     """
 
     fs: "UNIXFilesystem0"
+    uniq: int  # Unique value assigned at creation
 
     @classmethod
     def read(cls, fs: "UNIXFilesystem0", inode_num: int, words: List[int], position: int = 0) -> "UNIXInode0":  # type: ignore
@@ -166,10 +176,26 @@ class UNIXInode0(UNIXInode):
             self.uid = -1  # 'system' (root) uid
         self.nlinks = V0_MAXINT - words[position + V0_NLINKS] + 1  # Link count
         self.size = words[position + V0_SIZE]  # Size (in words)
-        # uniq = words[position + V0_UNIQ]  # Unique value assigned at creation
+        self.uniq = words[position + V0_UNIQ]  # Unique value assigned at creation
         self.addr = words[position + V0_ADDR : position + V0_ADDR + V0_NUMBLKS]  # Indirect blocks or data blocks
-        self.gid = None
         return self
+
+    def blocks(self) -> Iterator[int]:
+        if self.is_large:
+            # Large file
+            for block_number in self.addr:
+                if block_number == 0:
+                    break
+                for n in self.fs.read_18bit_words_block(block_number):
+                    if n == 0:
+                        break
+                    yield n
+        else:
+            # Small file
+            for block_number in self.addr:
+                if block_number == 0:
+                    break
+                yield block_number
 
     @property
     def isdir(self) -> bool:
@@ -188,6 +214,9 @@ class UNIXInode0(UNIXInode):
         return (self.flags & V0_USED) != 0
 
     def read_words(self) -> List[int]:
+        """
+        Read inode data as 18bit words
+        """
         data = []
         for block_number in self.blocks():
             data.extend(self.fs.read_18bit_words_block(block_number))
@@ -195,7 +224,7 @@ class UNIXInode0(UNIXInode):
 
     def get_block_size(self) -> int:
         """
-        Get file block size in bytes
+        Get block size in bytes
         """
         return V0_BLOCK_SIZE
 
@@ -205,11 +234,17 @@ class UNIXInode0(UNIXInode):
         """
         return self.size * V0_IO_BYTES_PER_WORD
 
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
+        return len(list(self.blocks()))
+
     def __str__(self) -> str:
         if not self.is_allocated:
             return f"{self.inode_num:>4}# ---"
         else:
-            return f"{self.inode_num:>4}# uid: {self.uid:>3} nlinks: {self.nlinks:>3} size: {self.size:>5} flags: {self.flags:o}"
+            return f"{self.inode_num:>4}# uid: {self.uid:>3}  nlinks: {self.nlinks:>3}  size: {self.size:>5} words  flags: {self.flags:o}"
 
 
 class UNIXDirectoryEntry0(UNIXDirectoryEntry):
