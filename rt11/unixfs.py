@@ -817,27 +817,35 @@ class UNIXFilesystem(AbstractFilesystem):
         data = self.f.read(self.inode_size)
         return self.unix_inode_class.read(self, inode_num, data)
 
-    def get_inode(self, path: str, inode_num: int = -1) -> Optional["UNIXInode"]:
+    def get_inode(self, path: str) -> Optional["UNIXInode"]:
         """
         Get inode by path
         """
-        if inode_num == -1:
-            inode_num = self.root_inode
-        if path and path[0] == "/":
-            return self.get_inode(path.strip("/"))
-        inode = self.read_inode(inode_num)
-        if not path:
-            if inode.is_allocated:
-                inode.inode_num = inode_num
-                return inode
-            return None
-        if inode.isdir:
-            name, tail = path.split("/", 1) if "/" in path else (path, "")
-            for no, nm in self.list_dir(inode):
-                if nm != name:
-                    continue
-                return self.get_inode(tail, no)
-        return None
+        path = unix_join(self.pwd, path) if not path.startswith("/") else path
+        parts = path.split("/")
+        inode_num = self.root_inode
+
+        while True:
+            # Read inode
+            inode = self.read_inode(inode_num)
+            if not parts:
+                # No more parts, inode found
+                return inode if inode.is_allocated else None
+            elif not inode.isdir:
+                # More parts and not a directory, not found
+                return None
+            # Get next part
+            name = parts.pop(0)
+            if name:
+                # Search for the name in the directory
+                found = False
+                for no, nm in self.list_dir(inode):
+                    if nm == name:
+                        inode_num = no
+                        found = True
+                        break
+                if not found:
+                    return None
 
     def list_dir(self, inode: UNIXInode) -> List[Tuple[int, str]]:
         if not inode.isdir:
@@ -871,18 +879,16 @@ class UNIXFilesystem(AbstractFilesystem):
         wildcard: bool = True,
     ) -> Iterator["UNIXDirectoryEntry"]:
         if not pattern:
-            yield from self.read_dir_entries(self.pwd)
+            pattern = "*"
+        absolute_path = unix_join(self.pwd, pattern) if not pattern.startswith("/") else pattern
+        if self.isdir(absolute_path):
+            dirname = pattern
+            pattern = "*"
         else:
-            if not pattern.startswith("/"):
-                dirname = self.pwd
-            elif self.isdir(pattern):
-                dirname = pattern
-                pattern = "*"
-            else:
-                dirname, pattern = unix_split(pattern)
-            for entry in self.read_dir_entries(dirname):
-                if filename_match(entry.basename, pattern, wildcard):
-                    yield entry
+            dirname, pattern = unix_split(absolute_path)
+        for entry in self.read_dir_entries(dirname):
+            if filename_match(entry.basename, pattern, wildcard):
+                yield entry
 
     @property
     def entries_list(self) -> Iterator["UNIXDirectoryEntry"]:

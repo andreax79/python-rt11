@@ -1,5 +1,3 @@
-import pytest
-
 from rt11.shell import Shell
 from rt11.unixfs import UNIXFilesystem
 
