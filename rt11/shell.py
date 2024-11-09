@@ -590,6 +590,8 @@ MOUNT           Assigns a logical disk unit to a file
         Mount UNIX version 6 filesystem
    UNIX7
         Mount UNIX version 7 filesystem
+   RSTS
+        Mount RSTS filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
@@ -976,6 +978,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a UNIX v7 disk",
+    )
+    parser.add_argument(
+        "--rsts",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a RSTS disk",
     )
     parser.add_argument(
         "disk",

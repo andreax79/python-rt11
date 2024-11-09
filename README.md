@@ -18,6 +18,7 @@ Python-RT11 is an utility for transferring files between various file systems.
 | UNIX v5       | :white_check_mark:|                   |                   |                   |
 | UNIX v6       | :white_check_mark:|                   |                   |                   |
 | UNIX v7       | :white_check_mark:|                   |                   |                   |
+| RSTS/E        | :white_check_mark:|                   |                   |                   |
 
 Commands
 --------
@@ -136,15 +137,38 @@ TOTL FILES:   14
 ```
 
 Links
+=====
+
+RT-11
 -----
 
 * [RT-11 Software Support Manual](http://www.bitsavers.org/www.computer.museum.uq.edu.au/RT-11/DEC-11-ORPGA-A-D%20RT-11%20Software%20Support%20Manual.pdf)
 * [RT–11 Volume and File Formats Manual](http://bitsavers.trailing-edge.com/pdf/dec/pdp11/rt11/v5.6_Aug91/AA-PD6PA-TC_RT-11_Volume_and_File_Formats_Manual_Aug91.pdf)
+
+DOS-11
+------
+
 * [Disk Operating System Monitor - System Programmers Manual](http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf)
 * [DOS/BATCH File Utility Package](http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/dos-batch/V9/DEC-11-UPPA-A-D_PIP_Aug73.pdf)
+
+XXDP
+----
+
 * [XXDP File Structure Guide](https://raw.githubusercontent.com/rust11/xxdp/main/XXDP%2B%20File%20Structure.pdf)
+
+CAPS-11
+-------
+
 * [CAPS-11 User Guide](http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf)
+
+SOLO
+----
+
 * [THE SOLO OPERATING SYSTEM: A CONCURRENT PASCAL PROGRAM PER BRINCH HANSEN](http://brinch-hansen.net/papers/1976b.pdf)
+
+UNIX
+----
+
 * [PDP-7 UNIX version 0 fs man page](https://github.com/DoctorWkt/pdp7-unix/blob/master/man/fs.5)
 * [Unix on the PDP-7 from a scan of the original assembly code](https://github.com/DoctorWkt/pdp7-unix)
 * [UNIX version 1 fs man page](http://squoze.net/UNIX/v1man/man5/fs)
@@ -153,3 +177,9 @@ Links
 * [UNIX version 4 fs man page](http://squoze.net/UNIX/v4man/man5/fs)
 * [UNIX version 5 fs man page](http://squoze.net/UNIX/v6man/man5/fs)
 * [UNIX version 6 fs man page](http://squoze.net/UNIX/v6man/man5/fs)
+
+RSTS/E
+------
+
+* [RSTS/E Monitor Internals, Michael Mayfield](http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf)
+* [RSTS/E V8.0 Internals Manual](https://bitsavers.org/pdf/dec/pdp11/rsts_e/V08/AA-CL35A-TE_8.0intern_Sep84.pdf)

@@ -30,6 +30,7 @@ from .dos11fs import DOS11Filesystem
 from .dos11magtapefs import DOS11MagTapeFilesystem
 from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
+from .rstsfs import RSTSFilesystem
 from .rt11fs import RT11Filesystem
 from .solofs import SOLOFilesystem
 from .unix0fs import UNIXFilesystem0
@@ -57,6 +58,7 @@ FILESYSTEMS = {
     "unix5": lambda f: UNIXFilesystem(f, version=5),
     "unix6": lambda f: UNIXFilesystem(f, version=6),
     "unix7": lambda f: UNIXFilesystem(f, version=7),
+    "rsts": RSTSFilesystem,
 }
 
 
