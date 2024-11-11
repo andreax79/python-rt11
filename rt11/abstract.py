@@ -187,7 +187,7 @@ class AbstractDirectoryEntry(ABC):
         """Open a file"""
 
 
-class AbstractFilesystem(object):
+class AbstractFilesystem:
     """Abstract base class for filesystem implementations"""
 
     @abstractmethod

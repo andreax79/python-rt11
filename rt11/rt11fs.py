@@ -28,6 +28,7 @@ from datetime import date
 from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .block import BlockDevice
 from .commons import (
     BLOCK_SIZE,
     READ_FILE_FULL,
@@ -423,7 +424,7 @@ class RT11Segment(object):
         return buf.getvalue()
 
 
-class RT11Filesystem(AbstractFilesystem):
+class RT11Filesystem(AbstractFilesystem, BlockDevice):
     """
     RT-11 Filesystem
     """
@@ -440,23 +441,8 @@ class RT11Filesystem(AbstractFilesystem):
     sys_id: str = ""
 
     def __init__(self, file: "AbstractFile"):
-        self.f = file
+        super().__init__(file)
         self.read_home()
-
-    def read_block(
-        self,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> bytes:
-        return self.f.read_block(block_number, number_of_blocks)
-
-    def write_block(
-        self,
-        buffer: bytes,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> None:
-        self.f.write_block(buffer, block_number, number_of_blocks)
 
     def read_home(self) -> None:
         """Read home block"""

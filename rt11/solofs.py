@@ -27,6 +27,7 @@ from datetime import date
 from typing import Dict, Iterator, List, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .block import BlockDevice
 from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
 
 __all__ = [
@@ -755,7 +756,7 @@ class SOLOCatalogPage:
         return str(self)
 
 
-class SOLOFilesystem(AbstractFilesystem):
+class SOLOFilesystem(AbstractFilesystem, BlockDevice):
     """
     SOLO Filesystem
 
@@ -785,7 +786,7 @@ class SOLOFilesystem(AbstractFilesystem):
     catalog_length: int
 
     def __init__(self, file: "AbstractFile"):
-        self.f = file
+        super().__init__(file)
         # Get catalog length
         buffer = self.read_block(CAT_ADDR)
         self.catalog_length = struct.unpack_from("<H", buffer, 0)[0]

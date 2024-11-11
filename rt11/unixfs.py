@@ -29,6 +29,7 @@ from functools import reduce
 from typing import Dict, Iterator, List, Optional, Tuple, Type
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .block import BlockDevice
 from .commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match, swap_words
 
 __all__ = [
@@ -723,7 +724,7 @@ class UNIXDirectoryEntry(AbstractDirectoryEntry):
         return f"{self.inode_num:>5} {self.basename}"
 
 
-class UNIXFilesystem(AbstractFilesystem):
+class UNIXFilesystem(AbstractFilesystem, BlockDevice):
     """
     UNIX Filesystem
     """
@@ -739,7 +740,7 @@ class UNIXFilesystem(AbstractFilesystem):
     unix_inode_class: Type["UNIXInode"]
 
     def __init__(self, file: "AbstractFile", version: int):
-        self.f = file
+        super().__init__(file)
         self.version = version
         self.pwd = "/"
         if self.version in (1, 2, 3):
@@ -793,13 +794,6 @@ class UNIXFilesystem(AbstractFilesystem):
             # _ = superblock[7 + V7_NICINOD + V7_NICFREE]  # mounted read-only flag
             # _ = swap_words(superblock[8 + V7_NICINOD + V7_NICFREE]) # last super block update
             self.inodes = (self.inode_list_blocks - 1) * (BLOCK_SIZE // self.inode_size)
-
-    def read_block(
-        self,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> bytes:
-        return self.f.read_block(block_number, number_of_blocks)
 
     def write_block(
         self,

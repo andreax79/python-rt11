@@ -27,6 +27,7 @@ from datetime import date, datetime
 from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .block import BlockDevice
 from .commons import (
     BLOCK_SIZE,
     READ_FILE_FULL,
@@ -469,7 +470,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         return f"File ID {'(' + self.file_id + ')':16} Name: {self.basename:12} Ver: {self.fver} FCHA: {self.header.fcha:04x} RTYP: {self.header.rtyp:1} Length: {self.header.length:9}"
 
 
-class Files11Filesystem(AbstractFilesystem):
+class Files11Filesystem(AbstractFilesystem, BlockDevice):
     """
     Files-11 Filesystem
     """
@@ -501,7 +502,7 @@ class Files11Filesystem(AbstractFilesystem):
     chk2: int  #     2 bytes  Second Checksum
 
     def __init__(self, file: "AbstractFile"):
-        self.f = file
+        super().__init__(file)
         self.read_home()
         self.uic = DEFAULT_UIC
         self.read_home()
@@ -546,13 +547,6 @@ class Files11Filesystem(AbstractFilesystem):
         self.uic = UIC.from_word(self.vown)
         self.iblb = (iblb_h << 16) + iblb_l
         # print(f"{self.ibsz=} {self.iblb=}")
-
-    def read_block(
-        self,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> bytes:
-        return self.f.read_block(block_number, number_of_blocks)
 
     def write_block(
         self,

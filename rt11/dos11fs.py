@@ -28,6 +28,7 @@ from datetime import date, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .block import BlockDevice
 from .commons import BLOCK_SIZE, READ_FILE_FULL, bytes_to_word, filename_match
 from .rad50 import asc_to_rad50_word, rad50_word_to_asc
 from .rt11fs import rt11_canonical_filename
@@ -762,7 +763,7 @@ class MasterFileDirectoryEntry:
         return f"{self.uic} ufd_block={self.ufd_block} num_words={self.num_words} zero={self.zero}"
 
 
-class DOS11Filesystem(AbstractFilesystem):
+class DOS11Filesystem(AbstractFilesystem, BlockDevice):
     """
     DOS-11/XXDP+ Filesystem
 
@@ -804,23 +805,8 @@ class DOS11Filesystem(AbstractFilesystem):
     bitmap_start_block: int = 0
 
     def __init__(self, file: "AbstractFile"):
-        self.f = file
+        super().__init__(file)
         self.uic = DEFAULT_UIC
-
-    def read_block(
-        self,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> bytes:
-        return self.f.read_block(block_number, number_of_blocks)
-
-    def write_block(
-        self,
-        buffer: bytes,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> None:
-        self.f.write_block(buffer, block_number, number_of_blocks)
 
     def read_mfd_entries(
         self,

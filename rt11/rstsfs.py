@@ -26,6 +26,8 @@ from datetime import date, datetime, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .block import BlockDevice
+from .cache import BlockCache
 from .commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match
 from .rad50 import asc2rad, asc_to_rad50_word, rad2asc, rad50_word_to_asc
 from .uic import ANY_GROUP, ANY_USER, UIC
@@ -172,20 +174,16 @@ def rsts_split_fullname(ppn: PPN, fullname: Optional[str], wildcard: bool = True
     return ppn, fullname
 
 
-class BlockCache:
-    fs: "RSTSFilesystem"
-    cache: Dict[int, bytes]
+class RTFSBlockCache(BlockCache):
 
     def __init__(self, fs: "RSTSFilesystem"):
+        super().__init__(fs.f)
         self.fs = fs
-        self.cache = {}
 
     def read_block(self, block_number: int = 0, dcn: Optional[int] = None) -> bytes:
         if dcn is not None:
             block_number = self.fs.dcn_to_lbn(dcn)
-        if block_number not in self.cache:
-            self.cache[block_number] = self.fs.read_block(block_number)
-        return self.cache[block_number]
+        return super().read_block(block_number)
 
 
 class RSTSFile(AbstractFile):
@@ -213,7 +211,7 @@ class RSTSFile(AbstractFile):
             or block_number + number_of_blocks > self.ufd_name_entry.account_entry.usiz
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
-        cache = BlockCache(self.ufd_name_entry.fs)
+        cache = self.ufd_name_entry.fs.new_cache()
         cluster_dcns = self.ufd_name_entry.read_retrieval_entries(cache=cache)
         data = bytearray()
         for i in range(block_number, block_number + number_of_blocks):
@@ -469,7 +467,7 @@ class UFDNameEntry(AbstractDirectoryEntry):
             self.uar.ulnk,
         )
 
-    def read_retrieval_entries(self, cache: Optional[BlockCache] = None) -> List[int]:
+    def read_retrieval_entries(self, cache: Optional[RTFSBlockCache] = None) -> List[int]:
         """
             The retrieval entries provide the information necessary to locate the file blocks on the disk.
 
@@ -486,7 +484,7 @@ class UFDNameEntry(AbstractDirectoryEntry):
             http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 37
         """
         if cache is None:
-            cache = BlockCache(self.fs)
+            cache = self.fs.new_cache()
 
         # Read the UFD cluster map
         retrieval_entry_link = self.uar
@@ -640,9 +638,9 @@ class GFD:
         self.dcn = mfd.gfd_pointer_map[group]
 
     @classmethod
-    def read(cls, mfd: "MFD", group: int, cache: Optional[BlockCache] = None) -> "GFD":
+    def read(cls, mfd: "MFD", group: int, cache: Optional[RTFSBlockCache] = None) -> "GFD":
         if cache is None:
-            cache = BlockCache(mfd.fs)
+            cache = mfd.fs.new_cache()
         self = GFD(mfd, group)
         buffer = cache.read_block(dcn=self.dcn + LABEL_BLOCK_OFFSET)
         self.read_mfd_cluster_map(buffer)
@@ -674,9 +672,9 @@ class GFD:
         self.gfd_cluster_size = blockette[0]
         self.gfd_cluster_map = list(blockette[1:])
 
-    def read_gfd_name_entries(self, cache: Optional[BlockCache] = None) -> Iterator["MFDNameEntry"]:
+    def read_gfd_name_entries(self, cache: Optional[RTFSBlockCache] = None) -> Iterator["MFDNameEntry"]:
         if cache is None:
-            cache = BlockCache(self.fs)
+            cache = self.fs.new_cache()
         for user, link in enumerate(self.name_entry_pointer_map):
             if not link.is_null:
                 buffer = cache.read_block(link.to_lbn(self.gfd_cluster_map))
@@ -685,12 +683,12 @@ class GFD:
     def read_dir_entries(
         self,
         ppn: Optional[PPN] = None,
-        cache: Optional[BlockCache] = None,
+        cache: Optional[RTFSBlockCache] = None,
     ) -> Iterator["UFDNameEntry"]:
         if ppn is not None and ppn.group != ANY_GROUP and ppn.group != self.group:
             return
         if cache is None:
-            cache = BlockCache(self.fs)
+            cache = self.fs.new_cache()
         for user, ufd_pointer in enumerate(self.ufd_pointer_map):
             if ufd_pointer != 0 and (ppn is None or ppn.user == ANY_USER or ppn.user == user):
                 ufd_ppn = PPN(group=self.group, user=user)
@@ -727,18 +725,18 @@ class MFD:
         self.gfd_pointer_map = list(struct.unpack_from(GFD_POINTER_BLOCK_FORMAT, buffer, 0))
         return self
 
-    def read_gfds(self, ppn: Optional[PPN] = None, cache: Optional[BlockCache] = None) -> Iterator["GFD"]:
+    def read_gfds(self, ppn: Optional[PPN] = None, cache: Optional[RTFSBlockCache] = None) -> Iterator["GFD"]:
         """
         Read GFDs (Group File Directories)
         """
         if cache is None:
-            cache = BlockCache(self.fs)
+            cache = self.fs.new_cache()
         for group, dcn in enumerate(self.gfd_pointer_map):
             if dcn != 0 and (ppn is None or ppn.group == ANY_GROUP or ppn.group == group):
                 yield GFD.read(self, group, cache)
 
 
-class RSTSFilesystem(AbstractFilesystem):
+class RSTSFilesystem(AbstractFilesystem, BlockDevice):
     """
     RSTS/E Filesystem
 
@@ -793,9 +791,13 @@ class RSTSFilesystem(AbstractFilesystem):
     mfd: Optional[MFD] = None  # Master File Directory (RDS1.1 or later)
 
     def __init__(self, file: "AbstractFile"):
+        super().__init__(file)
         self.f = file
         self.read_disk_pack_label()
         self.ppn = DEFAULT_PPN
+
+    def new_cache(self) -> "RTFSBlockCache":
+        return RTFSBlockCache(self)
 
     def compute_dcs(self) -> int:
         """
@@ -890,13 +892,13 @@ class RSTSFilesystem(AbstractFilesystem):
         blockette = struct.unpack_from(BLOCKETTE_FORMAT, buffer, CLUSTER_MAP_POS)
         return list(blockette[1:])
 
-    def read_mfd_name_entries(self, cache: Optional[BlockCache] = None) -> Iterator["MFDNameEntry"]:
+    def read_mfd_name_entries(self, cache: Optional[RTFSBlockCache] = None) -> Iterator["MFDNameEntry"]:
         """
         Read MFD name entries
         http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 20
         """
         if cache is None:
-            cache = BlockCache(self)
+            cache = self.new_cache()
         if self.mfd is not None:  # RDS1.x
             for gfd in self.mfd.read_gfds(cache=cache):
                 yield from gfd.read_gfd_name_entries(cache=cache)
@@ -914,14 +916,14 @@ class RSTSFilesystem(AbstractFilesystem):
         link: Link,
         ufd_uar: int,
         ppn: PPN,
-        cache: Optional[BlockCache] = None,
+        cache: Optional[RTFSBlockCache] = None,
     ) -> Iterator["UFDNameEntry"]:
         """
         Read UFD name entries
         http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 20
         """
         if cache is None:
-            cache = BlockCache(self)
+            cache = self.new_cache()
         buffer = cache.read_block(link.block + ufd_uar)
         ufd_cluster_map = self.read_ufd_cluster_map(buffer)
         while not link.is_null:
@@ -948,7 +950,7 @@ class RSTSFilesystem(AbstractFilesystem):
     ) -> bytes:
         if dcn is not None:
             block_number = self.dcn_to_lbn(dcn)
-        return self.f.read_block(block_number, number_of_blocks)
+        return super().read_block(block_number, number_of_blocks)
 
     def write_block(
         self,
@@ -958,9 +960,9 @@ class RSTSFilesystem(AbstractFilesystem):
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def read_dir_entries(self, ppn: PPN, cache: Optional[BlockCache] = None) -> Iterator["UFDNameEntry"]:
+    def read_dir_entries(self, ppn: PPN, cache: Optional[RTFSBlockCache] = None) -> Iterator["UFDNameEntry"]:
         if cache is None:
-            cache = BlockCache(self)
+            cache = self.new_cache()
         if self.mfd is not None:  # RDS1.x
             for gfd in self.mfd.read_gfds(ppn=ppn, cache=cache):
                 yield from gfd.read_dir_entries(ppn=ppn, cache=cache)
