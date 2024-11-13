@@ -20,9 +20,9 @@
 
 import errno
 import os
+import typing as t
 from abc import ABC, abstractmethod
 from datetime import date
-from typing import Dict, Iterator, Optional
 
 from .commons import ASCII, IMAGE, READ_FILE_FULL, hex_dump
 
@@ -67,7 +67,7 @@ class AbstractFile(ABC):
     def close(self) -> None:
         """Close the file"""
 
-    def read(self, size: Optional[int] = None) -> bytes:
+    def read(self, size: t.Optional[int] = None) -> bytes:
         """Read bytes from the file, starting at the current position"""
         data = bytearray()
         while size is None or len(data) < size:
@@ -135,7 +135,7 @@ class AbstractFile(ABC):
         """Get current file position"""
         return self.current_position
 
-    def truncate(self, size: Optional[int] = None) -> None:
+    def truncate(self, size: t.Optional[int] = None) -> None:
         """
         Resize the file to the given number of bytes.
         If the size is not specified, the current position will be used.
@@ -157,12 +157,12 @@ class AbstractDirectoryEntry(ABC):
         """Final path component"""
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> t.Optional[date]:
         """Creation date"""
         return None
 
     @property
-    def file_type(self) -> Optional[str]:
+    def file_type(self) -> t.Optional[str]:
         """File type"""
         return None
 
@@ -183,8 +183,21 @@ class AbstractDirectoryEntry(ABC):
         """Delete the file"""
 
     @abstractmethod
-    def open(self, file_type: Optional[str] = None) -> AbstractFile:
-        """Open a file"""
+    def open(self, file_type: t.Optional[str] = None) -> AbstractFile:
+        """Open the file"""
+
+    def read_bytes(self, file_type: t.Optional[str] = None) -> bytes:
+        """Get the content of the file"""
+        f = self.open(file_type)
+        try:
+            return f.read_block(0, READ_FILE_FULL)[: f.get_size()]
+        finally:
+            f.close()
+
+    def read_text(self, encoding: str = "ascii", errors: str = "ignore", file_type: str = ASCII) -> str:
+        """Get the content of the file as text"""
+        data = self.read_bytes(file_type)
+        return data.decode(encoding, errors)
 
 
 class AbstractFilesystem:
@@ -192,17 +205,17 @@ class AbstractFilesystem:
 
     @abstractmethod
     def filter_entries_list(
-        self, pattern: Optional[str], include_all: bool = False
-    ) -> Iterator["AbstractDirectoryEntry"]:
+        self, pattern: t.Optional[str], include_all: bool = False
+    ) -> t.Iterator["AbstractDirectoryEntry"]:
         """Filter directory entries based on a pattern"""
 
     @property
     @abstractmethod
-    def entries_list(self) -> Iterator["AbstractDirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["AbstractDirectoryEntry"]:
         """Property to get an iterator of directory entries"""
 
     @abstractmethod
-    def get_file_entry(self, fullname: str) -> Optional["AbstractDirectoryEntry"]:
+    def get_file_entry(self, fullname: str) -> t.Optional["AbstractDirectoryEntry"]:
         """Get the directory entry for a file"""
 
     @abstractmethod
@@ -210,8 +223,8 @@ class AbstractFilesystem:
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
     ) -> None:
         """Write content to a file"""
 
@@ -220,9 +233,9 @@ class AbstractFilesystem:
         self,
         fullname: str,
         length: int,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
-    ) -> Optional["AbstractDirectoryEntry"]:
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
+    ) -> t.Optional["AbstractDirectoryEntry"]:
         """Create a new file with a given length in number of blocks"""
 
     @abstractmethod
@@ -234,11 +247,11 @@ class AbstractFilesystem:
         """Check if the given path is a directory"""
 
     @abstractmethod
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         """List directory contents"""
 
     @abstractmethod
-    def examine(self, block: Optional[str]) -> None:
+    def examine(self, block: t.Optional[str]) -> None:
         """Examine the filesystem"""
 
     @abstractmethod
@@ -262,14 +275,14 @@ class AbstractFilesystem:
         entry = self.get_file_entry(fullname)
         return entry is not None
 
-    def open_file(self, fullname: str, file_type: Optional[str] = None) -> "AbstractFile":
+    def open_file(self, fullname: str, file_type: t.Optional[str] = None) -> "AbstractFile":
         """Open a file"""
         entry = self.get_file_entry(fullname)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return entry.open(file_type)
 
-    def read_bytes(self, fullname: str, file_type: Optional[str] = None) -> bytes:
+    def read_bytes(self, fullname: str, file_type: t.Optional[str] = None) -> bytes:
         """Get the content of a file"""
         f = self.open_file(fullname, file_type)
         try:
@@ -282,7 +295,7 @@ class AbstractFilesystem:
         data = self.read_bytes(fullname, file_type)
         return data.decode(encoding, errors)
 
-    def dump(self, fullname: Optional[str], start: Optional[int] = None, end: Optional[int] = None) -> None:
+    def dump(self, fullname: t.Optional[str], start: t.Optional[int] = None, end: t.Optional[int] = None) -> None:
         """Dump the content of a file or a range of blocks"""
         # TODO: Check block range
         if fullname:
@@ -304,6 +317,11 @@ class AbstractFilesystem:
         else:
             if start is None:
                 start = 0
+            if end is None:
+                if start == 0:
+                    end = self.get_size() - 1
+                else:
+                    end = start
             for block_number in range(start, end + 1):
                 data = self.read_block(block_number)
                 print(f"\nBLOCK NUMBER   {block_number:08}")

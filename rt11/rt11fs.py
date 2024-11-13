@@ -273,9 +273,13 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         return rt11_to_date(self.raw_creation_date)
 
     def delete(self) -> bool:
+        """
+        Delete the file
+        """
         # unset E_PROT,E_TENT,E_READ,E_PROT flasgs, set E_MPTY flag
         self.clazz = self.clazz & ~E_PERM & ~E_TENT & ~E_READ & ~E_PROT | E_MPTY
         self.segment.compact()
+        self.segment.write()
         return True
 
     def open(self, file_type: Optional[str] = None) -> RT11File:
@@ -394,7 +398,6 @@ class RT11Segment(object):
                 if entry.is_end_of_segment:
                     prev_empty_entry.clazz = prev_empty_entry.clazz | E_EOS
         self.entries_list = new_entries_list
-        self.write()
 
     def insert_entry_after(self, entry: "RT11DirectoryEntry", entry_number: int, length: int) -> None:
         if entry.length == length:

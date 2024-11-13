@@ -30,7 +30,6 @@ from typing import Dict, Iterator, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, READ_FILE_FULL
-from .rx import RX01_SECTOR_SIZE, RX01_SIZE, RX02_SECTOR_SIZE, RX02_SIZE, rxfactr
 
 __all__ = [
     "NativeFile",
@@ -52,12 +51,6 @@ class NativeFile(AbstractFile):
             self.f = open(filename, mode="rb")
             self.readonly = True
         self.size = os.path.getsize(filename)
-        if self.size == RX01_SIZE:
-            self.sector_size = RX01_SECTOR_SIZE
-        elif self.size == RX02_SIZE:
-            self.sector_size = RX02_SECTOR_SIZE
-        else:
-            self.sector_size = BLOCK_SIZE
 
     def read_block(
         self,
@@ -72,19 +65,10 @@ class NativeFile(AbstractFile):
             return self.f.read()
         elif block_number < 0 or number_of_blocks < 0:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
-        elif self.sector_size == BLOCK_SIZE:
-            position = rxfactr(block_number, self.sector_size)
-            self.f.seek(position)  # not thread safe...
-            return self.f.read(number_of_blocks * self.sector_size)
         else:
-            ret = []
-            start_sector = block_number * BLOCK_SIZE // self.sector_size
-            for i in range(0, number_of_blocks * BLOCK_SIZE // self.sector_size):
-                blkno = start_sector + i
-                position = rxfactr(blkno, self.sector_size)
-                self.f.seek(position)  # not thread safe...
-                ret.append(self.f.read(self.sector_size))
-            return b"".join(ret)
+            position = block_number * BLOCK_SIZE
+            self.f.seek(position)  # not thread safe...
+            return self.f.read(number_of_blocks * BLOCK_SIZE)
 
     def write_block(
         self,
@@ -99,16 +83,9 @@ class NativeFile(AbstractFile):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         elif self.readonly:
             raise OSError(errno.EROFS, os.strerror(errno.EROFS))
-        elif self.sector_size == BLOCK_SIZE:
+        else:
             self.f.seek(block_number * BLOCK_SIZE)  # not thread safe...
             self.f.write(buffer[0 : number_of_blocks * BLOCK_SIZE])
-        else:
-            start_sector = block_number * BLOCK_SIZE // self.sector_size
-            for i in range(0, number_of_blocks * BLOCK_SIZE // self.sector_size):
-                blkno = start_sector + i
-                position = rxfactr(blkno, self.sector_size)
-                self.f.seek(position)  # not thread safe...
-                self.f.write(buffer[i * self.sector_size : (i + 1) * self.sector_size])
 
     def truncate(self, size: Optional[int] = None) -> None:
         """

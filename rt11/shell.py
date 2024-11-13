@@ -118,7 +118,7 @@ def copy_file(
     if not file_type:
         file_type = from_entry.file_type
     try:
-        content = from_fs.read_bytes(from_entry.fullname, file_type)
+        content = from_entry.read_bytes(file_type)
         to_fs.write_bytes(to_path, content, from_entry.creation_date, file_type)
     except Exception:
         if verbose:
@@ -312,7 +312,7 @@ DIR             Lists file directories
    FULL
         Lists the entire directory, including unused areas
    UIC
-        Lists all UIC on a device (only for DOS-11)
+        Lists all UIC on a device (DOS-11, RSTS/E)
 
   EXAMPLES
         DIR A:*.SAV
@@ -359,10 +359,9 @@ TYPE            Outputs files to the terminal
         volume_id, pattern = splitdrive(args[0])
         fs = self.volumes.get(volume_id, cmd="TYPE")
         match = False
-        for x in fs.filter_entries_list(pattern):
+        for entry in fs.filter_entries_list(pattern):
             match = True
-            # content = fs.read_bytes(x.fullname)
-            content = fs.read_bytes(x.fullname, file_type=ASCII)
+            content = entry.read_bytes(file_type=ASCII)
             if content is not None:
                 os.write(sys.stdout.fileno(), content)
                 sys.stdout.write("\n")
@@ -592,6 +591,8 @@ MOUNT           Assigns a logical disk unit to a file
         Mount UNIX version 7 filesystem
    RSTS
         Mount RSTS filesystem
+   OS8
+        Mount OS/8 filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
@@ -985,6 +986,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a RSTS disk",
+    )
+    parser.add_argument(
+        "--os8",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a OS/8 disk",
     )
     parser.add_argument(
         "disk",
