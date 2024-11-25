@@ -3,23 +3,24 @@ Python-RT11
 
 Python-RT11 is an utility for transferring files between various file systems.
 
-| Fs / Features | Read file         | Write file        | Delete file       | Initialize        |
-| ------------- | ----------------- | ----------------- | ----------------- | ----------------- |
-| RT-11         | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| DOS-11        | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
-| DOS-11 DecTape| :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
-| DOS-11 MagTape| :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| XXDP          | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
-| CAPS-11       | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| Files-11      | :white_check_mark:|                   |                   |                   |
-| SOLO          | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| PDP-7 UNIX v0 | :white_check_mark:|                   |                   |                   |
-| UNIX v1       | :white_check_mark:|                   |                   |                   |
-| UNIX v5       | :white_check_mark:|                   |                   |                   |
-| UNIX v6       | :white_check_mark:|                   |                   |                   |
-| UNIX v7       | :white_check_mark:|                   |                   |                   |
-| RSTS/E        | :white_check_mark:|                   |                   |                   |
-| OS/8          | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| Fs / Features   | Read file         | Write file        | Delete file       | Initialize        |
+| --------------- | ----------------- | ----------------- | ----------------- | ----------------- |
+| RT-11           | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| DOS-11          | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
+| DOS-11 DecTape  | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
+| DOS-11 MagTape  | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| XXDP            | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
+| CAPS-11         | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| Files-11        | :white_check_mark:|                   |                   |                   |
+| SOLO            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| PDP-7 UNIX v0   | :white_check_mark:|                   |                   |                   |
+| UNIX v1         | :white_check_mark:|                   |                   |                   |
+| UNIX v5         | :white_check_mark:|                   |                   |                   |
+| UNIX v6         | :white_check_mark:|                   |                   |                   |
+| UNIX v7         | :white_check_mark:|                   |                   |                   |
+| RSTS/E          | :white_check_mark:|                   |                   |                   |
+| OS/8            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| 4k Disk Monitor | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 
 Commands
 --------
@@ -185,7 +186,13 @@ RSTS/E
 * [RSTS/E Monitor Internals, Michael Mayfield](http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf)
 * [RSTS/E V8.0 Internals Manual](https://bitsavers.org/pdf/dec/pdp11/rsts_e/V08/AA-CL35A-TE_8.0intern_Sep84.pdf)
 
-OS/8
-----
+PDP-8 OS/8
+----------
 
 * [OS/8 Software Support Manual](https://www.bitsavers.org/pdf/dec/pdp8/os8/DEC-S8-OSSMB-A-D_OS8_v3ssup.pdf)
+
+PDP-8 4k Disk Monitor
+---------------------
+
+* [PDP-8 4K Disk Monitor System](https://svn.so-much-stuff.com/svn/trunk/pdp8/src/dec/dec-08-odsma/dec-08-odsma-a-d.pdf)
+* [PDP-8 Disc System Builder](https://svn.so-much-stuff.com/svn/trunk/pdp8/src/dec/dec-d8-sba/dec-d8-sbab-d.pdf)

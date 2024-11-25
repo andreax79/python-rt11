@@ -593,6 +593,8 @@ MOUNT           Assigns a logical disk unit to a file
         Mount RSTS filesystem
    OS8
         Mount OS/8 filesystem
+   DMS
+        Mount PDP-8 4k Disk Monitor System filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
@@ -993,6 +995,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a OS/8 disk",
+    )
+    parser.add_argument(
+        "--dms",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount a PDP-8 4k Disk Monitor System disk",
     )
     parser.add_argument(
         "disk",

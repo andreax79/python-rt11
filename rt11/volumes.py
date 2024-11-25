@@ -26,6 +26,7 @@ from typing import Dict, Optional
 from .abstract import AbstractFilesystem
 from .caps11fs import CAPS11Filesystem
 from .commons import splitdrive
+from .dmsfs import DMSFilesystem
 from .dos11fs import DOS11Filesystem
 from .dos11magtapefs import DOS11MagTapeFilesystem
 from .files11fs import Files11Filesystem
@@ -61,6 +62,7 @@ FILESYSTEMS = {
     "unix7": lambda f: UNIXFilesystem(f, version=7),
     "rsts": RSTSFilesystem,
     "os8": OS8Filesystem,
+    "dms": DMSFilesystem,
 }
 
 

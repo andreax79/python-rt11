@@ -29,7 +29,7 @@ from datetime import date
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .block import BlockDevice12Bit
-from .commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL, filename_match, hex_dump
+from .commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL, filename_match
 from .rad50 import asc2rad, rad2asc
 from .rx import RX_SECTOR_TRACK
 
@@ -197,6 +197,17 @@ def asc_to_rad50_word12(val: str) -> int:
     if c2 < 0o100:
         c2 += 0o100
     return ((c1 & 0o77) << 6) | (c2 & 0o77)
+
+
+def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
+    """
+    Display contents in octal
+    """
+    for i in range(0, len(words), words_per_line):
+        line = words[i : i + words_per_line]
+        ascii_str = "".join([chr(x) if 32 <= x <= 126 else "." for x in from_12bit_words_to_bytes(line)])
+        oct_str = " ".join([f"{x:04o}" for x in line])
+        sys.stdout.write(f"{i:08o}   {oct_str.ljust(5 * words_per_line)}  {ascii_str}\n")
 
 
 class OS8File(AbstractFile):
@@ -881,12 +892,13 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
     ) -> None:
         length = int(math.ceil(len(content) * 1.0 / OS8_BLOCK_SIZE_BYTES))
         entry = self.create_file(fullname, length, creation_date, file_type)
-        if not entry:
-            return
-        content = content + (b"\0" * OS8_BLOCK_SIZE_BYTES)
-        f = entry.open(file_type)
-        f.write_block(content, block_number=0, number_of_blocks=entry.length)
-        f.close()
+        if entry is not None:
+            content = content + (b"\0" * OS8_BLOCK_SIZE_BYTES)
+            f = entry.open(file_type)
+            try:
+                f.write_block(content, block_number=0, number_of_blocks=entry.length)
+            finally:
+                f.close()
 
     def create_file(
         self,
@@ -911,7 +923,7 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, partition_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         i = 0
         files = 0
         blocks = 0
@@ -947,46 +959,45 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
             sys.stdout.write("\n")
         sys.stdout.write(f"\n{files:>4} FILES IN {blocks:>4} BLOCKS - {unused:>4} FREE BLOCKS\n")
 
-    def examine(self, name_or_block: t.Optional[str]) -> None:
-        sys.stdout.write(f"Number of partitions:     {self.num_of_partitions}\n")
-        sys.stdout.write(f"Size of each partition:   {self.partition_size}\n")
-        for partition in self.partitions:
-            sys.stdout.write(f"{partition}\n")
-            for segment in partition.read_dir_segments():
-                sys.stdout.write(f"{segment}\n")
+    def examine(self, pattern: t.Optional[str]) -> None:
+        if pattern:
+            sys.stdout.write("File        Type  Date       Length  Block\n\n")
+            for entry in self.filter_entries_list(pattern, include_all=True):
+                sys.stdout.write(f"{entry}\n")
+        else:
+            sys.stdout.write(f"Number of partitions:     {self.num_of_partitions}\n")
+            sys.stdout.write(f"Size of each partition:   {self.partition_size}\n")
+            for partition in self.partitions:
+                sys.stdout.write(f"{partition}\n")
+                for segment in partition.read_dir_segments():
+                    sys.stdout.write(f"{segment}\n")
 
     def dump(self, fullname: t.Optional[str], start: t.Optional[int] = None, end: t.Optional[int] = None) -> None:
         """Dump the content of a file or a range of blocks"""
-        # TODO: Check block range
         if fullname:
+            entry = self.get_file_entry(fullname)
+            if not entry:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
             if start is None:
                 start = 0
-            if end is None:
-                entry = self.get_file_entry(fullname)
-                if not entry:
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+            if end is None or end > entry.get_length() - 1:
                 end = entry.get_length() - 1
-            f = self.open_file(fullname, file_type=IMAGE)
-            try:
-                for block_number in range(start, end + 1):
-                    data = f.read_block(block_number)
-                    print(f"\nBLOCK NUMBER   {block_number:08}")
-                    hex_dump(data)
-            finally:
-                f.close()
+            for block_number in range(start, end + 1):
+                words = self.read_12bit_words_block(entry.file_position + block_number)
+                print(f"\nBLOCK NUMBER   {block_number:08}")
+                oct_dump(words)
         else:
             if start is None:
                 start = 0
             if end is None:
                 if start == 0:
-                    end = self.get_size() - 1
+                    end = self.get_size() // BLOCK_SIZE - 1
                 else:
                     end = start
             for block_number in range(start, end + 1):
                 words = self.read_12bit_words_block(block_number)
-                data = from_12bit_words_to_bytes(words)
                 print(f"\nBLOCK NUMBER   {block_number:08}")
-                hex_dump(data)
+                oct_dump(words)
 
     def initialize(self) -> None:
         """

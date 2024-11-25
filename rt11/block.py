@@ -119,7 +119,7 @@ class BlockDevice12Bit(BlockDevice):
         """
         Read a block as 256 12bit words
         """
-        if self.sector_size in (RX01_SECTOR_SIZE, RX02_SECTOR_SIZE):
+        if self.is_rx_12bit and self.sector_size in (RX01_SECTOR_SIZE, RX02_SECTOR_SIZE):
             # Read the sectors
             result = []
             for position in rxfactr_12bit(block_number, self.sector_size):
