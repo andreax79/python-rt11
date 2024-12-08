@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 
 import errno
+import io
 import os
 import struct
 import sys
@@ -165,6 +166,12 @@ class UNIXInode0(UNIXInode):
 
     fs: "UNIXFilesystem0"
     uniq: int  # Unique value assigned at creation
+    inode_num: int  # Inode number
+    flags: int  # Flags
+    uid: int  # Owner user id
+    nlinks: int  # Link count
+    size: int  # Size (in words)
+    addr: List[int]  # Indirect blocks or data blocks
 
     @classmethod
     def read(cls, fs: "UNIXFilesystem0", inode_num: int, words: List[int], position: int = 0) -> "UNIXInode0":  # type: ignore
@@ -200,6 +207,10 @@ class UNIXInode0(UNIXInode):
     @property
     def isdir(self) -> bool:
         return (self.flags & V0_DIR) == V0_DIR
+
+    @property
+    def is_special_file(self) -> bool:
+        return (self.flags & V0_SPECIAL) == V0_SPECIAL
 
     @property
     def is_regular_file(self) -> bool:
@@ -239,6 +250,28 @@ class UNIXInode0(UNIXInode):
         Get the length in blocks
         """
         return len(list(self.blocks()))
+
+    def examine(self) -> str:
+        buf = io.StringIO()
+        buf.write("\n*Inode\n")
+        buf.write(f"Inode number:          {self.inode_num:>6}\n")
+        buf.write(f"Uniq:                  {self.uniq:>6}\n")
+        buf.write(f"Flags:                 {self.flags:>06o}\n")
+        if self.isdir:
+            buf.write("Type:               directory\n")
+        elif self.is_special_file:
+            buf.write("Type:            special file\n")
+        elif self.is_large:
+            buf.write("Type:              large file\n")
+        else:
+            buf.write("Type:                    file\n")
+        buf.write(f"Owner user id:         {self.uid:>6}\n")
+        buf.write(f"Link count:            {self.nlinks:>6}\n")
+        buf.write(f"Size (words):          {self.size:>6}\n")
+        if self.is_large:
+            buf.write(f"Indirect blocks:       {self.addr}\n")
+        buf.write(f"Blocks:                {list(self.blocks())}\n")
+        return buf.getvalue()
 
     def __str__(self) -> str:
         if not self.is_allocated:

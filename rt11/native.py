@@ -25,8 +25,8 @@ import math
 import os
 import stat
 import sys
+import typing as t
 from datetime import date, datetime
-from typing import Dict, Iterator, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, READ_FILE_FULL
@@ -40,7 +40,7 @@ __all__ = [
 
 class NativeFile(AbstractFile):
 
-    f: Union[io.BufferedReader, io.BufferedRandom]
+    f: t.Union[io.BufferedReader, io.BufferedRandom]
 
     def __init__(self, filename: str):
         self.filename = os.path.abspath(filename)
@@ -87,7 +87,7 @@ class NativeFile(AbstractFile):
             self.f.seek(block_number * BLOCK_SIZE)  # not thread safe...
             self.f.write(buffer[0 : number_of_blocks * BLOCK_SIZE])
 
-    def truncate(self, size: Optional[int] = None) -> None:
+    def truncate(self, size: t.Optional[int] = None) -> None:
         """
         Resize the file to the given number of bytes.
         If the size is not specified, the current position will be used.
@@ -166,7 +166,7 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
         except:
             return False
 
-    def open(self, file_type: Optional[str] = None) -> NativeFile:
+    def open(self, file_type: t.Optional[str] = None) -> NativeFile:
         """
         Open a file
         """
@@ -178,7 +178,7 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
 
 class NativeFilesystem(AbstractFilesystem):
 
-    def __init__(self, base: Optional[str] = None):
+    def __init__(self, base: t.Optional[str] = None):
         self.base = base or "/"
         if not base:
             self.pwd = os.getcwd()
@@ -188,8 +188,11 @@ class NativeFilesystem(AbstractFilesystem):
             self.pwd = os.path.sep
 
     def filter_entries_list(
-        self, pattern: Optional[str], include_all: bool = False
-    ) -> Iterator["NativeDirectoryEntry"]:
+        self,
+        pattern: t.Optional[str],
+        include_all: bool = False,
+        expand: bool = True,
+    ) -> t.Iterator["NativeDirectoryEntry"]:
         if not pattern:
             for filename in os.listdir(os.path.join(self.base, self.pwd)):
                 try:
@@ -202,6 +205,9 @@ class NativeFilesystem(AbstractFilesystem):
             if not pattern.startswith("/") and not pattern.startswith("\\"):
                 pattern = os.path.join(self.base, self.pwd, pattern)
             if os.path.isdir(pattern):
+                if not expand:  # dont't expand directories
+                    yield NativeDirectoryEntry(pattern)
+                    return
                 pattern = os.path.join(pattern, "*")
             for filename in glob.glob(pattern):
                 try:
@@ -212,12 +218,12 @@ class NativeFilesystem(AbstractFilesystem):
                     yield v
 
     @property
-    def entries_list(self) -> Iterator["NativeDirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["NativeDirectoryEntry"]:
         dir = self.pwd
         for filename in os.listdir(dir):
             yield NativeDirectoryEntry(os.path.join(dir, filename))
 
-    def get_file_entry(self, fullname: str) -> Optional[NativeDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Optional[NativeDirectoryEntry]:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         return NativeDirectoryEntry(fullname)
@@ -226,8 +232,8 @@ class NativeFilesystem(AbstractFilesystem):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
     ) -> None:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
@@ -241,14 +247,14 @@ class NativeFilesystem(AbstractFilesystem):
     def create_file(
         self,
         fullname: str,
-        length: int,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
-    ) -> Optional[NativeDirectoryEntry]:
+        number_of_blocks: int,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
+    ) -> t.Optional[NativeDirectoryEntry]:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)
         with open(fullname, "wb") as f:
-            f.truncate(length * BLOCK_SIZE)
+            f.truncate(number_of_blocks * BLOCK_SIZE)
         if creation_date:
             # Set the creation and modification date of the file
             ts = datetime.combine(creation_date, datetime.min.time()).timestamp()
@@ -272,7 +278,7 @@ class NativeFilesystem(AbstractFilesystem):
             fullname = os.path.join(self.pwd, fullname)
         return os.path.isdir(os.path.join(self.base, fullname))
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         if options.get("brief"):
             # Lists only file names and file types
             for x in self.filter_entries_list(pattern):
@@ -305,7 +311,7 @@ class NativeFilesystem(AbstractFilesystem):
                 )
             )
 
-    def examine(self, block: Optional[str]) -> None:
+    def examine(self, block: t.Optional[str]) -> None:
         pass
 
     def get_size(self) -> int:
@@ -315,7 +321,7 @@ class NativeFilesystem(AbstractFilesystem):
         stat = os.statvfs(self.base)
         return stat.f_frsize * stat.f_blocks
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         pass
 
     def close(self) -> None:

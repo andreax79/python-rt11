@@ -24,7 +24,7 @@ import typing as t
 from abc import ABC, abstractmethod
 from datetime import date
 
-from .commons import ASCII, IMAGE, READ_FILE_FULL, hex_dump
+from .commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL, hex_dump
 
 __all__ = [
     "AbstractFile",
@@ -205,7 +205,7 @@ class AbstractFilesystem:
 
     @abstractmethod
     def filter_entries_list(
-        self, pattern: t.Optional[str], include_all: bool = False
+        self, pattern: t.Optional[str], include_all: bool = False, expand: bool = True
     ) -> t.Iterator["AbstractDirectoryEntry"]:
         """Filter directory entries based on a pattern"""
 
@@ -232,11 +232,19 @@ class AbstractFilesystem:
     def create_file(
         self,
         fullname: str,
-        length: int,
+        number_of_blocks: int,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
     ) -> t.Optional["AbstractDirectoryEntry"]:
         """Create a new file with a given length in number of blocks"""
+
+    def create_directory(
+        self,
+        fullname: str,
+        options: t.Dict[str, t.Union[str, bool]],
+    ) -> t.Optional["AbstractDirectoryEntry"]:
+        """Create a new directory"""
+        raise OSError(errno.ENOSYS, os.strerror(errno.ENOSYS))
 
     @abstractmethod
     def chdir(self, fullname: str) -> bool:
@@ -259,7 +267,7 @@ class AbstractFilesystem:
         """Get filesystem size in bytes"""
 
     @abstractmethod
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         """Initialize the filesytem"""
 
     @abstractmethod
@@ -319,7 +327,7 @@ class AbstractFilesystem:
                 start = 0
             if end is None:
                 if start == 0:
-                    end = self.get_size() - 1
+                    end = self.get_size() // BLOCK_SIZE
                 else:
                     end = start
             for block_number in range(start, end + 1):

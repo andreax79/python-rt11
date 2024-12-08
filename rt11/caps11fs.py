@@ -23,8 +23,8 @@ import math
 import os
 import struct
 import sys
+import typing as t
 from datetime import date
-from typing import Dict, Iterator, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
@@ -71,7 +71,7 @@ STANDARD_FILE_TYPES = {
 }
 
 
-def caps11_to_date(val: bytes) -> Optional[date]:
+def caps11_to_date(val: bytes) -> t.Optional[date]:
     """
     Translate CAPS-11 date to Python date
     """
@@ -85,7 +85,7 @@ def caps11_to_date(val: bytes) -> Optional[date]:
         return None
 
 
-def date_to_caps11(d: Optional[date]) -> bytes:
+def date_to_caps11(d: t.Optional[date]) -> bytes:
     """
     Translate Python date to CAPS-11 date
     """
@@ -201,7 +201,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         tape_pos: int,
         filename: str,
         extension: str,
-        creation_date: Optional[date] = None,  # optional creation date
+        creation_date: t.Optional[date] = None,  # optional creation date
         record_type: int = FILE_TYPE_BIN,
     ) -> "CAPS11DirectoryEntry":
         self = CAPS11DirectoryEntry(fs)
@@ -309,11 +309,11 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         return f"{self.filename}.{self.extension}"
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> t.Optional[date]:
         return caps11_to_date(self.raw_creation_date)
 
     @property
-    def file_type(self) -> Optional[str]:
+    def file_type(self) -> t.Optional[str]:
         return STANDARD_FILE_TYPES.get(self.record_type)
 
     def delete(self) -> bool:
@@ -330,7 +330,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.write()
         return True
 
-    def open(self, file_type: Optional[str] = None) -> CAPS11File:
+    def open(self, file_type: t.Optional[str] = None) -> CAPS11File:
         """
         Open a file
         """
@@ -374,7 +374,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
     http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
     """
 
-    def read_file_headers(self, include_eot: bool = False) -> Iterator["CAPS11DirectoryEntry"]:
+    def read_file_headers(self, include_eot: bool = False) -> t.Iterator["CAPS11DirectoryEntry"]:
         """Read file headers"""
         self.tape_rewind()
         try:
@@ -392,23 +392,24 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
-    ) -> Iterator["CAPS11DirectoryEntry"]:
+    ) -> t.Iterator["CAPS11DirectoryEntry"]:
         if pattern:
-            pattern = rt11_canonical_filename(pattern, wildcard=True)
+            pattern = rt11_canonical_filename(pattern, wildcard=wildcard)
         for entry in self.read_file_headers():
             if filename_match(entry.basename, pattern, wildcard) and (include_all or not entry.is_empty):
                 yield entry
 
     @property
-    def entries_list(self) -> Iterator["CAPS11DirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["CAPS11DirectoryEntry"]:
         for entry in self.read_file_headers():
             if not entry.is_empty:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> Optional[CAPS11DirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Optional[CAPS11DirectoryEntry]:
         fullname = rt11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -418,23 +419,23 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
     ) -> None:
         """
         Write content to a file
         """
-        length = int(math.ceil(len(content) * 1.0 / RECORD_SIZE))
-        self.create_file(fullname, length, creation_date, content=content)
+        number_of_blocks = int(math.ceil(len(content) * 1.0 / RECORD_SIZE))
+        self.create_file(fullname, number_of_blocks, creation_date, content=content)
 
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
-        content: Optional[bytes] = None,
-    ) -> Optional[CAPS11DirectoryEntry]:
+        number_of_blocks: int,  # length in blocks
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
+        content: t.Optional[bytes] = None,
+    ) -> t.Optional[CAPS11DirectoryEntry]:
         """
         Create a new file with a given length in number of blocks
         """
@@ -457,7 +458,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         entry.write(skip_file=False)
         # Write the file
         empty_record = b"\0" * RECORD_SIZE
-        for i in range(0, length):
+        for i in range(0, number_of_blocks):
             if content is not None:
                 record = content[i * RECORD_SIZE : (i + 1) * RECORD_SIZE]
                 if len(record) < RECORD_SIZE:
@@ -474,7 +475,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         if not options.get("brief"):
             dt = date.today().strftime('%d-%B-%y').upper()
             sys.stdout.write(f" {dt}\n\n")
@@ -488,7 +489,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
                 creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or "--"
                 sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s} {creation_date:<9s}\n")
 
-    def examine(self, name: Optional[str]) -> None:
+    def examine(self, name: t.Optional[str]) -> None:
         if name:
             self.dump(name)
         else:
@@ -502,7 +503,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         """
         Initialize the filesytem
         """

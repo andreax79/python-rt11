@@ -1,4 +1,4 @@
-# Copyright (C) 2414 Andrea Bonomi <andrea.bonomi@gmail.com>
+# Copyright (C) 2014 Andrea Bonomi <andrea.bonomi@gmail.com>
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to
@@ -22,9 +22,9 @@ import errno
 import os
 import struct
 import sys
+import typing as t
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .block import BlockDevice
@@ -65,7 +65,7 @@ IDENT_AREA_FORMAT = '<HHHHHH7s6s7s6s7sB'
 MAP_AREA_FORMAT = '<BBHHBBBB'
 
 
-def files11_to_date(val: bytes, tim: Optional[bytes] = None) -> Optional[date]:
+def files11_to_date(val: bytes, tim: t.Optional[bytes] = None) -> t.Optional[date]:
     """
     Translate Files-11 date to Python date
     """
@@ -84,7 +84,7 @@ def files11_to_date(val: bytes, tim: Optional[bytes] = None) -> Optional[date]:
     return datetime(year, month, day, hour, minute, second)
 
 
-def files11_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> str:
+def files11_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) -> str:
     """
     Generate the canonical Files-11 name
     """
@@ -102,7 +102,7 @@ def files11_canonical_filename(fullname: Optional[str], wildcard: bool = False) 
 def files11_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
     try:
         if "[" in fullname:
-            uic: Optional[UIC] = UIC.from_str(fullname)
+            uic: t.Optional[UIC] = UIC.from_str(fullname)
             fullname = fullname.split("]", 1)[1]
         else:
             uic = None
@@ -242,7 +242,7 @@ class Files11FileHeader:
     lbsz: int  # LBN Field Size
     use: int  # Map Words in Use
     max: int  # Map Words Available
-    retrieval_pointers: List[RetrievalPointer]  # Retrieval Pointers
+    retrieval_pointers: t.List[RetrievalPointer]  # Retrieval Pointers
     # FCS File Attribute Block Layout
     rtyp: int  # Record Type
     ratt: int  # Record Attributes
@@ -379,7 +379,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     """
 
     fs: "Files11Filesystem"
-    _header: Optional["Files11FileHeader"]
+    _header: t.Optional["Files11FileHeader"]
 
     fnum: int  # File Number
     fseq: int  # File Sequence Number
@@ -436,7 +436,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         return f"{self.filename}.{self.extension}"
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> t.Optional[date]:
         return files11_to_date(self.header.crdt, self.header.crti)
 
     def get_length(self) -> int:
@@ -460,7 +460,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     def delete(self) -> bool:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def open(self, file_type: Optional[str] = None) -> Files11File:
+    def open(self, file_type: t.Optional[str] = None) -> Files11File:
         """
         Open a file
         """
@@ -575,7 +575,7 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         assert file_header.flev == 0o401
         return file_header
 
-    def read_directory(self, file_number: int, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
+    def read_directory(self, file_number: int, uic: UIC) -> t.Iterator["Files11DirectoryEntry"]:
         """
         Read directory by file number
         """
@@ -591,7 +591,7 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         finally:
             f.close()
 
-    def read_dir_entries(self, uic: UIC) -> Iterator["Files11DirectoryEntry"]:
+    def read_dir_entries(self, uic: UIC) -> t.Iterator["Files11DirectoryEntry"]:
         if uic == MFD_UIC:
             # Master File Directory
             yield from self.read_directory(MFD_DIR, MFD_UIC)
@@ -624,11 +624,12 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
-        uic: Optional[UIC] = None,
-    ) -> Iterator["Files11DirectoryEntry"]:
+        uic: t.Optional[UIC] = None,
+    ) -> t.Iterator["Files11DirectoryEntry"]:
         if uic is None:
             uic = self.uic
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
@@ -637,11 +638,11 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
                 yield entry
 
     @property
-    def entries_list(self) -> Iterator["Files11DirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["Files11DirectoryEntry"]:
         for entry in self.read_dir_entries(uic=self.uic):
             yield entry
 
-    def get_file_entry(self, fullname: str) -> Optional[Files11DirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Optional[Files11DirectoryEntry]:
         fullname = files11_canonical_fullname(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -652,24 +653,24 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
-    ) -> Optional[Files11DirectoryEntry]:
+        number_of_blocks: int,  # length in blocks
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
+    ) -> t.Optional[Files11DirectoryEntry]:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
             pattern = "[0,0]*.DIR"
@@ -700,7 +701,7 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTAL OF {blocks}./{allocated}. BLOCKS IN {files}. FILES\n")
 
-    def examine(self, name_or_block: Optional[str]) -> None:
+    def examine(self, name_or_block: t.Optional[str]) -> None:
         uic = None
         if name_or_block and "[" in name_or_block:
             try:
@@ -735,7 +736,7 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def close(self) -> None:

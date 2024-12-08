@@ -46,7 +46,7 @@ def test_cmds():
     assert f.size == len(t)
     f.close()
     # Create ad initialize the RT-11 filesystem
-    shell.onecmd("CREATE test0.dsk 500", batch=True)
+    shell.onecmd("CREATE test0.dsk /allocate:500", batch=True)
     shell.onecmd("MOUNT T: test0.dsk", batch=True)
     shell.onecmd("INITIALIZE T:", batch=True)
     fs = shell.volumes.get('T')
@@ -70,8 +70,8 @@ def test_cmds():
     shell.onecmd("T:", batch=True)
     shell.onecmd("EXAMINE", batch=True)
     with pytest.raises(OSError):
-        shell.onecmd("CREATE test1.dsk 1000", batch=True)
-    shell.onecmd("CREATE test1.dsk 100", batch=True)
+        shell.onecmd("CREATE /file test1.dsk /allocate:1000", batch=True)
+    shell.onecmd("CREATE /file test1.dsk /allocate:100", batch=True)
     shell.onecmd("EXAMINE", batch=True)
     shell.onecmd("MOUNT T1: test1.dsk", batch=True)
     shell.onecmd("INITIALIZE T1:", batch=True)

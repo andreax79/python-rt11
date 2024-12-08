@@ -23,8 +23,8 @@ import math
 import os
 import struct
 import sys
+import typing as t
 from datetime import date
-from typing import Dict, Iterator, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
@@ -155,7 +155,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         uic: UIC,
         filename: str,
         extension: str,
-        creation_date: Optional[date] = None,  # optional creation date
+        creation_date: t.Optional[date] = None,  # optional creation date
         protection_code: int = DEFAULT_PROTECTION_CODE,
         size: int = 0,
     ) -> "DOS11MagTapeDirectoryEntry":
@@ -247,7 +247,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         return BLOCK_SIZE
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> t.Optional[date]:
         return dos11_to_date(self.raw_creation_date)
 
     def delete(self) -> bool:
@@ -262,7 +262,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         self.write()
         return True
 
-    def open(self, file_type: Optional[str] = None) -> DOS11MagTapeFile:
+    def open(self, file_type: t.Optional[str] = None) -> DOS11MagTapeFile:
         """
         Open a file
         """
@@ -305,7 +305,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
 
     uic: UIC = DEFAULT_UIC  # current User Identification Code
 
-    def read_magtape(self) -> Iterator[bytes]:
+    def read_magtape(self) -> t.Iterator[bytes]:
         rc = 0
         data = bytearray()
         self.f.seek(0, 0)
@@ -332,7 +332,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
                     data.clear()
                 rc = 0
 
-    def read_file_headers(self, uic: UIC = ANY_UIC) -> Iterator["DOS11MagTapeDirectoryEntry"]:
+    def read_file_headers(self, uic: UIC = ANY_UIC) -> t.Iterator["DOS11MagTapeDirectoryEntry"]:
         """Read file headers"""
         self.tape_rewind()
         try:
@@ -348,11 +348,12 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
-        uic: Optional[UIC] = None,
-    ) -> Iterator["DOS11MagTapeDirectoryEntry"]:
+        uic: t.Optional[UIC] = None,
+    ) -> t.Iterator["DOS11MagTapeDirectoryEntry"]:
         if uic is None:
             uic = self.uic
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
@@ -362,12 +363,12 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
                     yield entry
 
     @property
-    def entries_list(self) -> Iterator["DOS11MagTapeDirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["DOS11MagTapeDirectoryEntry"]:
         for entry in self.read_file_headers(uic=self.uic):
             if not entry.is_empty:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> Optional[DOS11MagTapeDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Optional[DOS11MagTapeDirectoryEntry]:
         fullname = dos11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -378,17 +379,17 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> None:
         """
         Write content to a file
         """
-        length = int(math.ceil(len(content) * 1.0 / RECORD_SIZE))
+        number_of_blocks = int(math.ceil(len(content) * 1.0 / RECORD_SIZE))
         self.create_file(
             fullname=fullname,
-            length=length,
+            number_of_blocks=number_of_blocks,
             creation_date=creation_date,
             content=content,
             protection_code=protection_code,
@@ -397,12 +398,12 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
-        content: Optional[bytes] = None,
+        number_of_blocks: int,  # length in blocks
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
+        content: t.Optional[bytes] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
-    ) -> Optional[DOS11MagTapeDirectoryEntry]:
+    ) -> t.Optional[DOS11MagTapeDirectoryEntry]:
         """
         Create a new file with a given length in number of blocks
         """
@@ -428,7 +429,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         entry.write(skip_file=False)
         # Write the file
         empty_record = b"\0" * RECORD_SIZE
-        for i in range(0, length):
+        for i in range(0, number_of_blocks):
             if content is not None:
                 record = content[i * RECORD_SIZE : (i + 1) * RECORD_SIZE]
                 if len(record) < RECORD_SIZE:
@@ -445,7 +446,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
             sys.stdout.write(f"{volume_id}:\n\n")
@@ -484,7 +485,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
 
-    def examine(self, name: Optional[str]) -> None:
+    def examine(self, name: t.Optional[str]) -> None:
         if name:
             self.dump(name)
         else:
@@ -497,7 +498,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         """
         Initialize the filesytem
         """

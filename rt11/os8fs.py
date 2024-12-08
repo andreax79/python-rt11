@@ -770,16 +770,16 @@ class OS8Partition:
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
+        number_of_blocks: int,  # length in blocks
         creation_date: t.Optional[date] = None,  # t.optional creation date
         file_type: t.Optional[str] = None,
     ) -> t.Optional[OS8DirectoryEntry]:
         entry: t.Optional[OS8DirectoryEntry] = self.get_file_entry(fullname)
         if entry is not None:
             entry.delete()
-        return self.allocate_space(fullname, length, creation_date)
+        return self.allocate_space(fullname, number_of_blocks, creation_date)
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         """
         Create an empty OS/8 partition
         """
@@ -855,6 +855,7 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         self,
         pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
     ) -> t.Iterator["OS8DirectoryEntry"]:
         partition = self.current_partition
@@ -876,7 +877,7 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
     def get_file_entry(self, fullname: str) -> t.Optional[OS8DirectoryEntry]:  # fullname=filename+ext
         partition = self.current_partition
         if fullname:
-            partition, fullname = os8_split_fullname(partition, fullname)
+            partition, fullname = os8_split_fullname(partition, fullname)  # type: ignore
         for segment in self.get_partition(partition).read_dir_segments():
             for entry in segment.entries_list:
                 if entry.fullname == fullname and entry.is_permanent:
@@ -890,8 +891,8 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
     ) -> None:
-        length = int(math.ceil(len(content) * 1.0 / OS8_BLOCK_SIZE_BYTES))
-        entry = self.create_file(fullname, length, creation_date, file_type)
+        number_of_blocks = int(math.ceil(len(content) / OS8_BLOCK_SIZE_BYTES))
+        entry = self.create_file(fullname, number_of_blocks, creation_date, file_type)
         if entry is not None:
             content = content + (b"\0" * OS8_BLOCK_SIZE_BYTES)
             f = entry.open(file_type)
@@ -907,7 +908,7 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         creation_date: t.Optional[date] = None,  # optional creation date
         file_type: t.Optional[str] = None,
     ) -> t.Optional[OS8DirectoryEntry]:
-        partition, fullname = os8_split_fullname(self.current_partition, fullname, wildcard=False)
+        partition, fullname = os8_split_fullname(self.current_partition, fullname, wildcard=False)  # type: ignore
         return self.get_partition(partition).create_file(fullname, length, creation_date, file_type)
 
     def chdir(self, fullname: str) -> bool:
@@ -999,12 +1000,12 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
                 print(f"\nBLOCK NUMBER   {block_number:08}")
                 oct_dump(words)
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         """
         Create an empty OS/8 filesystem
         """
         for partition in self.partitions:
-            partition.initialize()
+            partition.initialize(**kwargs)
 
     def get_size(self) -> int:
         """

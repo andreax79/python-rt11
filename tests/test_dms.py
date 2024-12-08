@@ -329,7 +329,7 @@ def test_dms():
     assert e1.low_core_addr == 0o777
     assert e1.high_core_addr == 0
     assert e1.entry_point == 0o5555
-    
+
     x1 = fs.read_bytes("aaaa.user")
     assert b"abcdefghijklmnopqrstuvwxyz" in x1
 

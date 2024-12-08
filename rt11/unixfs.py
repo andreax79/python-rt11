@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 
 import errno
+import io
 import math
 import os
 import struct
@@ -649,6 +650,28 @@ class UNIXInode7(UNIXInode):
                                         rem -= self.get_block_size()
                                         yield n
 
+    def examine(self) -> str:
+        buf = io.StringIO()
+        buf.write("\n*Inode\n")
+        buf.write(f"Inode number:          {self.inode_num:>6}\n")
+        buf.write(f"Flags:                 {self.flags:>06o}\n")
+        if self.isdir:
+            buf.write("Type:               directory\n")
+        # elif self.is_special_file:
+        #     buf.write("Type:            special file\n")
+        # elif self.is_large:
+        #     buf.write("Type:              large file\n")
+        else:
+            buf.write("Type:                    file\n")
+        buf.write(f"Owner user id:         {self.uid:>6}\n")
+        buf.write(f"Group user id:         {self.gid:>6}\n")
+        buf.write(f"Link count:            {self.nlinks:>6}\n")
+        buf.write(f"Size:                  {self.size:>6}\n")
+        # if self.is_large:
+        #     buf.write(f"Indirect blocks:       {self.addr}\n")
+        buf.write(f"Blocks:                {list(self.blocks())}\n")
+        return buf.getvalue()
+
     def __str__(self) -> str:
         if not self.is_allocated:
             return f"{self.inode_num:>4}# ---"
@@ -870,12 +893,19 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         self,
         pattern: Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
     ) -> Iterator["UNIXDirectoryEntry"]:
-        if not pattern:
+        if not pattern and expand:
             pattern = "*"
-        absolute_path = unix_join(self.pwd, pattern) if not pattern.startswith("/") else pattern
+        if pattern and pattern.startswith("/"):
+            absolute_path = pattern
+        else:
+            absolute_path = unix_join(self.pwd, pattern or "")
         if self.isdir(absolute_path):
+            if not expand:
+                yield self.get_file_entry(absolute_path)
+                return
             dirname = pattern
             pattern = "*"
         else:
@@ -906,7 +936,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
+        number_of_blocks: int,  # length in blocks
         creation_date: Optional[date] = None,  # optional creation date
         file_type: Optional[str] = None,
     ) -> Optional[UNIXDirectoryEntry]:
@@ -980,7 +1010,10 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
                 # Dump the inode by path
                 inode = self.get_inode(arg)
             if inode:
-                sys.stdout.write(dump_struct(inode.__dict__) + "\n")
+                if hasattr(inode, "examine"):
+                    sys.stdout.write(inode.examine())
+                else:
+                    sys.stdout.write(dump_struct(inode.__dict__) + "\n")
                 if inode.isdir:
                     # Dump the directory entries
                     sys.stdout.write("Directory entries:\n")
@@ -1001,7 +1034,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: str) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def close(self) -> None:

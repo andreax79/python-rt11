@@ -32,6 +32,7 @@ from .dos11magtapefs import DOS11MagTapeFilesystem
 from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
 from .os8fs import OS8Filesystem
+from .prodosfs import ProDOSFilesystem
 from .rstsfs import RSTSFilesystem
 from .rt11fs import RT11Filesystem
 from .solofs import SOLOFilesystem
@@ -63,6 +64,7 @@ FILESYSTEMS = {
     "rsts": RSTSFilesystem,
     "os8": OS8Filesystem,
     "dms": DMSFilesystem,
+    "prodos": ProDOSFilesystem,
 }
 
 

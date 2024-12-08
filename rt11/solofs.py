@@ -23,8 +23,8 @@ import math
 import os
 import struct
 import sys
+import typing as t
 from datetime import date
-from typing import Dict, Iterator, List, Optional, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .block import BlockDevice
@@ -89,7 +89,7 @@ FILE_TYPES = {
 }
 
 
-def get_file_type_id(file_type: Optional[str], default: int = ASCII) -> int:
+def get_file_type_id(file_type: t.Optional[str], default: int = ASCII) -> int:
     """
     Get the file type id from a string
     """
@@ -113,7 +113,7 @@ def filename_hash(filename: str, catalog_length: int) -> int:
     return key
 
 
-def solo_canonical_filename(fullname: Optional[str], wildcard: bool = False, segment: bool = False) -> str:
+def solo_canonical_filename(fullname: t.Optional[str], wildcard: bool = False, segment: bool = False) -> str:
     """
     Generate the canonical SOLO name
     """
@@ -151,7 +151,7 @@ class SOLOFile(AbstractFile):
     entry: "SOLODirectoryEntry"
     closed: bool
 
-    def __init__(self, entry: "SOLODirectoryEntry", file_type: Optional[str] = None) -> None:
+    def __init__(self, entry: "SOLODirectoryEntry", file_type: t.Optional[str] = None) -> None:
         self.entry = entry
         self.file_type = file_type  # File type specified by open
         self.closed = False
@@ -342,7 +342,7 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
     spare: bytes = b""
     hash_key: int = 0  # Filename hash
     searchlength: int = 0  # Number of files with the same key
-    page_map: List[int]  # Map file blocks to disk blocks
+    page_map: t.List[int]  # Map file blocks to disk blocks
 
     def __init__(self, cat_page: "SOLOCatalogPage"):
         self.cat_page = cat_page
@@ -354,7 +354,7 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         filename: str,
         file_type_id: int,
         page_map_block_number: int,
-        page_map: List[int],
+        page_map: t.List[int],
         protected: bool,
         searchlength: int,
     ) -> "SOLODirectoryEntry":
@@ -460,7 +460,7 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         self.fs.update_searchlength(old_key, -1)
         return True
 
-    def open(self, file_type: Optional[str] = None) -> SOLOFile:
+    def open(self, file_type: t.Optional[str] = None) -> SOLOFile:
         """
         Open a file
         """
@@ -487,7 +487,7 @@ class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
     protected: bool = True
     is_empty: bool = False
     file_type: str = "SEGMENT"
-    creation_date: Optional[date] = None
+    creation_date: t.Optional[date] = None
 
     def __init__(self, fs: "SOLOFilesystem", filename: str):
         self.fs = fs
@@ -538,7 +538,7 @@ class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
     def delete(self) -> bool:
         return False
 
-    def open(self, file_type: Optional[str] = None) -> SOLOSegment:
+    def open(self, file_type: t.Optional[str] = None) -> SOLOSegment:
         """
         Open a segment
         """
@@ -554,7 +554,7 @@ class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
 class SOLOBitmap:
 
     fs: "SOLOFilesystem"
-    bitmaps: List[int]  # 2(blocks) x 30(groups) x 120bit integer
+    bitmaps: t.List[int]  # 2(blocks) x 30(groups) x 120bit integer
 
     def __init__(self, fs: "SOLOFilesystem"):
         self.fs = fs
@@ -632,7 +632,7 @@ class SOLOBitmap:
         bit_position = block_number % GROUP_LENGTH
         self.bitmaps[int_index] &= ~(1 << bit_position)
 
-    def allocate(self, size: int) -> List[int]:
+    def allocate(self, size: int) -> t.List[int]:
         """
         Allocate blocks
         """
@@ -688,7 +688,7 @@ class SOLOCatalogPage:
 
     fs: "SOLOFilesystem"
     block_number: int  # Catalog block number
-    entries: List["SOLODirectoryEntry"]  # Directory entries
+    entries: t.List["SOLODirectoryEntry"]  # Directory entries
 
     def __init__(self, fs: "SOLOFilesystem", block_number: int):
         self.fs = fs
@@ -717,12 +717,12 @@ class SOLOCatalogPage:
     def create_entry(
         self,
         filename: str,
-        file_type: Optional[str],
+        file_type: t.Optional[str],
         page_map_block_number: int,
-        page_map: List[int],
-        search_key: Optional[int] = None,
+        page_map: t.List[int],
+        search_key: t.Optional[int] = None,
         protected: bool = False,
-    ) -> Optional["SOLODirectoryEntry"]:
+    ) -> t.Optional["SOLODirectoryEntry"]:
         """
         Create a new entry in this catalog page.
         If search_key is not None, put the new entry in the first position after the search_key
@@ -807,7 +807,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
     ) -> None:
         self.f.write_block(buffer, block_number, number_of_blocks)
 
-    def read_page_map(self, block_number: int) -> List[int]:
+    def read_page_map(self, block_number: int) -> t.List[int]:
         """
         Read a page map
         """
@@ -816,7 +816,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
         length = words[0]
         return list(words[1 : length + 1])
 
-    def write_page_map(self, page_map: List[int], block_number: int) -> None:
+    def write_page_map(self, page_map: t.List[int], block_number: int) -> None:
         """
         Write a page map
         """
@@ -832,11 +832,12 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = True,
+        expand: bool = True,
         wildcard: bool = True,
-    ) -> Iterator[Union["SOLODirectoryEntry", "SOLOSegmentDirectoryEntry"]]:
-        file_type_id: Optional[int] = None
+    ) -> t.Iterator[t.Union["SOLODirectoryEntry", "SOLOSegmentDirectoryEntry"]]:
+        file_type_id: t.Optional[int] = None
         if pattern:
             if ";" in pattern:
                 pattern, file_type = pattern.split(";", 1)
@@ -854,7 +855,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
                     yield entry
 
     @property
-    def entries_list(self) -> Iterator["SOLODirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["SOLODirectoryEntry"]:
         """
         Read the catalog
         """
@@ -884,7 +885,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
             entry.searchlength = 0
         catalog_page.write()
 
-    def get_first_file_entry_for_hash(self, hash_key: int) -> Optional[SOLODirectoryEntry]:
+    def get_first_file_entry_for_hash(self, hash_key: int) -> t.Optional[SOLODirectoryEntry]:
         page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1
         pages = self.read_page_map(CAT_ADDR)
         block_number = pages[page_num - 1]
@@ -894,7 +895,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
                 return entry
         return None
 
-    def get_file_entry(self, fullname: str) -> Union[None, SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Union[None, SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
         """
         Get the directory entry for a file
         """
@@ -921,22 +922,24 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
         protected: bool = False,
     ) -> None:
         """
         Write content to a file/segment
         """
-        length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
-        if length > MAX_FILE_SIZE:
+        number_of_blocks = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
+        if number_of_blocks > MAX_FILE_SIZE:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         if get_file_type_id(file_type) == ASCII:
             content = ascii_to_solo(content)
 
-        entry = self.create_file(fullname=fullname, length=length, file_type=file_type, protected=protected)
+        entry = self.create_file(
+            fullname=fullname, number_of_blocks=number_of_blocks, file_type=file_type, protected=protected
+        )
         if isinstance(entry, SOLOSegmentDirectoryEntry):
-            f: Union[SOLOSegment, SOLOFile] = SOLOSegment(entry)
+            f: t.Union[SOLOSegment, SOLOFile] = SOLOSegment(entry)
         else:
             f = SOLOFile(entry)
         try:
@@ -947,15 +950,15 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
+        number_of_blocks: int,  # length in blocks
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
         protected: bool = False,
-    ) -> Union[SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
+    ) -> t.Union[SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
         """
         Create a new file with a given length in number of blocks
         """
-        if length > MAX_FILE_SIZE:
+        if number_of_blocks > MAX_FILE_SIZE:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         # Delete the existing file
         fullname = solo_canonical_filename(fullname, segment=True)
@@ -966,7 +969,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
             old_entry.delete()
         # Allocate the space for the page map and the the file
         bitmap = SOLOBitmap.read(self)
-        blocks = bitmap.allocate(length + 1)
+        blocks = bitmap.allocate(number_of_blocks + 1)
         page_map_block_number = blocks[0]
         file_blocks = blocks[1:]
         self.write_page_map(file_blocks, page_map_block_number)
@@ -1011,7 +1014,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         files = 0
         blocks = 0
         if not options.get("brief"):
@@ -1029,7 +1032,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
             return
         sys.stdout.write(f"{files:>5} ENTRIES\n{blocks:>5} PAGES\n")
 
-    def examine(self, name_or_block: Optional[str]) -> None:
+    def examine(self, name_or_block: t.Optional[str]) -> None:
         if not name_or_block:
             for segment in SEGMENTS.values():
                 segment_entry = SOLOSegmentDirectoryEntry(self, segment)
@@ -1055,7 +1058,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         # Zero disk
         empty_block = b"\0" * BLOCK_SIZE
         for block_number in range(0, DISK_SIZE):
@@ -1077,7 +1080,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
             catalog_page = SOLOCatalogPage.read(self, block_number)
             catalog_page.write()
         # Create NEXT
-        self.create_file(fullname="NEXT", length=255, file_type="SCRATCH", protected=True)
+        self.create_file(fullname="NEXT", number_of_blocks=255, file_type="SCRATCH", protected=True)
 
     def close(self) -> None:
         self.f.close()

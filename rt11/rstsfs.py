@@ -22,8 +22,8 @@ import errno
 import os
 import struct
 import sys
+import typing as t
 from datetime import date, datetime, timedelta
-from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .block import BlockDevice
@@ -132,7 +132,7 @@ def rsts_to_date(udc: int, utc: int) -> datetime:
     return full_datetime
 
 
-def rsts_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> str:
+def rsts_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) -> str:
     """
     Generate the canonical RSTS/E name
     """
@@ -150,7 +150,7 @@ def rsts_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> 
 def rsts_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
     try:
         if "[" in fullname:
-            ppn: Optional[PPN] = PPN.from_str(fullname)
+            ppn: t.Optional[PPN] = PPN.from_str(fullname)
             fullname = fullname.split("]", 1)[1]
         else:
             ppn = None
@@ -161,7 +161,7 @@ def rsts_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
     return f"{ppn or ''}{fullname}"
 
 
-def rsts_split_fullname(ppn: PPN, fullname: Optional[str], wildcard: bool = True) -> Tuple[PPN, Optional[str]]:
+def rsts_split_fullname(ppn: PPN, fullname: t.Optional[str], wildcard: bool = True) -> t.Tuple[PPN, t.Optional[str]]:
     if fullname:
         if "[" in fullname:
             try:
@@ -180,7 +180,7 @@ class RTFSBlockCache(BlockCache):
         super().__init__(fs.f)
         self.fs = fs
 
-    def read_block(self, block_number: int = 0, dcn: Optional[int] = None) -> bytes:
+    def read_block(self, block_number: int = 0, dcn: t.Optional[int] = None) -> bytes:
         if dcn is not None:
             block_number = self.fs.dcn_to_lbn(dcn)
         return super().read_block(block_number)
@@ -289,7 +289,7 @@ class Link:
     def is_null(self) -> bool:
         return self.ulnk == 0
 
-    def to_lbn(self, cluster_map: List[int]) -> int:
+    def to_lbn(self, cluster_map: t.List[int]) -> int:
         """
         Translate the link to a Logical Block Number according to the provided cluster map
         """
@@ -467,7 +467,7 @@ class UFDNameEntry(AbstractDirectoryEntry):
             self.uar.ulnk,
         )
 
-    def read_retrieval_entries(self, cache: Optional[RTFSBlockCache] = None) -> List[int]:
+    def read_retrieval_entries(self, cache: t.Optional[RTFSBlockCache] = None) -> t.List[int]:
         """
             The retrieval entries provide the information necessary to locate the file blocks on the disk.
 
@@ -492,7 +492,7 @@ class UFDNameEntry(AbstractDirectoryEntry):
         ufd_cluster_map = self.fs.read_ufd_cluster_map(buffer)
 
         # Read the retrieval entries
-        cluster_dcns: List[int] = []
+        cluster_dcns: t.List[int] = []
         while not retrieval_entry_link.is_null:
             buffer = cache.read_block(retrieval_entry_link.to_lbn(ufd_cluster_map))
             blockette = struct.unpack_from(BLOCKETTE_FORMAT, buffer, UFD_ENTRY_LEN * retrieval_entry_link.entry)
@@ -533,7 +533,7 @@ class UFDNameEntry(AbstractDirectoryEntry):
     def delete(self) -> bool:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def open(self, file_type: Optional[str] = None) -> RSTSFile:
+    def open(self, file_type: t.Optional[str] = None) -> RSTSFile:
         """
         Open a file
         """
@@ -627,9 +627,9 @@ class GFD:
     group: int  # Group number
     dcn: int  # DCN of GFD
     gfd_cluster_size: int  # MFD cluster size
-    gfd_cluster_map: List[int]  # MFD cluster map (DCN of MFD clusters 0 - 6)
-    ufd_pointer_map: List[int]  # Pointers to User File Directories
-    name_entry_pointer_map: List[Link]  # Links to name entries
+    gfd_cluster_map: t.List[int]  # MFD cluster map (DCN of MFD clusters 0 - 6)
+    ufd_pointer_map: t.List[int]  # Pointers to User File Directories
+    name_entry_pointer_map: t.List[Link]  # Links to name entries
 
     def __init__(self, mfd: "MFD", group: int):
         self.fs = mfd.fs
@@ -638,7 +638,7 @@ class GFD:
         self.dcn = mfd.gfd_pointer_map[group]
 
     @classmethod
-    def read(cls, mfd: "MFD", group: int, cache: Optional[RTFSBlockCache] = None) -> "GFD":
+    def read(cls, mfd: "MFD", group: int, cache: t.Optional[RTFSBlockCache] = None) -> "GFD":
         if cache is None:
             cache = mfd.fs.new_cache()
         self = GFD(mfd, group)
@@ -672,7 +672,7 @@ class GFD:
         self.gfd_cluster_size = blockette[0]
         self.gfd_cluster_map = list(blockette[1:])
 
-    def read_gfd_name_entries(self, cache: Optional[RTFSBlockCache] = None) -> Iterator["MFDNameEntry"]:
+    def read_gfd_name_entries(self, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["MFDNameEntry"]:
         if cache is None:
             cache = self.fs.new_cache()
         for user, link in enumerate(self.name_entry_pointer_map):
@@ -682,9 +682,9 @@ class GFD:
 
     def read_dir_entries(
         self,
-        ppn: Optional[PPN] = None,
-        cache: Optional[RTFSBlockCache] = None,
-    ) -> Iterator["UFDNameEntry"]:
+        ppn: t.Optional[PPN] = None,
+        cache: t.Optional[RTFSBlockCache] = None,
+    ) -> t.Iterator["UFDNameEntry"]:
         if ppn is not None and ppn.group != ANY_GROUP and ppn.group != self.group:
             return
         if cache is None:
@@ -705,7 +705,7 @@ class MFD:
     """
 
     fs: "RSTSFilesystem"
-    gfd_pointer_map: List[int]  # Pointers to Group File Directories (RDS1.1)
+    gfd_pointer_map: t.List[int]  # Pointers to Group File Directories (RDS1.1)
     mdcn: int  # DCN of MFD
 
     def __init__(self, fs: "RSTSFilesystem"):
@@ -725,7 +725,7 @@ class MFD:
         self.gfd_pointer_map = list(struct.unpack_from(GFD_POINTER_BLOCK_FORMAT, buffer, 0))
         return self
 
-    def read_gfds(self, ppn: Optional[PPN] = None, cache: Optional[RTFSBlockCache] = None) -> Iterator["GFD"]:
+    def read_gfds(self, ppn: t.Optional[PPN] = None, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["GFD"]:
         """
         Read GFDs (Group File Directories)
         """
@@ -786,9 +786,9 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
     pckid: str  # Pack ID
     structure_level: str  # RDS level
     mfd_cluster_size: int  # MFD cluster size
-    mfd_cluster_map: List[int]  # MFD cluster map (DCN of MFD clusters 0 - 6)
+    mfd_cluster_map: t.List[int]  # MFD cluster map (DCN of MFD clusters 0 - 6)
     mfd_first_name_entry: Link  # Link to first name entry in MFD (RDS0)
-    mfd: Optional[MFD] = None  # Master File Directory (RDS1.1 or later)
+    mfd: t.Optional[MFD] = None  # Master File Directory (RDS1.1 or later)
 
     def __init__(self, file: "AbstractFile"):
         super().__init__(file)
@@ -871,7 +871,7 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         self.mfd_cluster_size = blockette[0]
         self.mfd_cluster_map = list(blockette[1:])
 
-    def read_ufd_cluster_map(self, buffer: bytes) -> List[int]:
+    def read_ufd_cluster_map(self, buffer: bytes) -> t.List[int]:
         """
             Read UFD cluster map.
             The UFD cluster map contains pointer to each cluster in the UFD.
@@ -892,7 +892,7 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         blockette = struct.unpack_from(BLOCKETTE_FORMAT, buffer, CLUSTER_MAP_POS)
         return list(blockette[1:])
 
-    def read_mfd_name_entries(self, cache: Optional[RTFSBlockCache] = None) -> Iterator["MFDNameEntry"]:
+    def read_mfd_name_entries(self, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["MFDNameEntry"]:
         """
         Read MFD name entries
         http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 20
@@ -916,8 +916,8 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         link: Link,
         ufd_uar: int,
         ppn: PPN,
-        cache: Optional[RTFSBlockCache] = None,
-    ) -> Iterator["UFDNameEntry"]:
+        cache: t.Optional[RTFSBlockCache] = None,
+    ) -> t.Iterator["UFDNameEntry"]:
         """
         Read UFD name entries
         http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 20
@@ -946,7 +946,7 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         self,
         block_number: int = 0,
         number_of_blocks: int = 1,
-        dcn: Optional[int] = None,
+        dcn: t.Optional[int] = None,
     ) -> bytes:
         if dcn is not None:
             block_number = self.dcn_to_lbn(dcn)
@@ -960,7 +960,7 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def read_dir_entries(self, ppn: PPN, cache: Optional[RTFSBlockCache] = None) -> Iterator["UFDNameEntry"]:
+    def read_dir_entries(self, ppn: PPN, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["UFDNameEntry"]:
         if cache is None:
             cache = self.new_cache()
         if self.mfd is not None:  # RDS1.x
@@ -991,11 +991,12 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
-        ppn: Optional[PPN] = None,
-    ) -> Iterator["UFDNameEntry"]:
+        ppn: t.Optional[PPN] = None,
+    ) -> t.Iterator["UFDNameEntry"]:
         if ppn is None:
             ppn = self.ppn
         ppn, pattern = rsts_split_fullname(fullname=pattern, wildcard=wildcard, ppn=ppn)
@@ -1004,10 +1005,10 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
                 yield entry
 
     @property
-    def entries_list(self) -> Iterator[UFDNameEntry]:
+    def entries_list(self) -> t.Iterator[UFDNameEntry]:
         yield from self.read_dir_entries(ppn=self.ppn)
 
-    def get_file_entry(self, fullname: str) -> Optional[UFDNameEntry]:
+    def get_file_entry(self, fullname: str) -> t.Optional[UFDNameEntry]:
         fullname = rsts_canonical_fullname(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -1018,24 +1019,24 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
-    ) -> Optional[UFDNameEntry]:
+        number_of_blocks: int,  # length in blocks
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
+    ) -> t.Optional[UFDNameEntry]:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all PPN
             for mfd_entry in self.read_mfd_name_entries():
@@ -1062,7 +1063,7 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write("\n")
         sys.stdout.write(f" Total of {blocks} blocks in {files} files in {volume_id}:{ppn}\n")
 
-    def examine(self, name_or_block: Optional[str]) -> None:
+    def examine(self, name_or_block: t.Optional[str]) -> None:
         ppn = None
         if name_or_block and "[" in name_or_block:
             try:
@@ -1113,7 +1114,7 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def close(self) -> None:

@@ -24,8 +24,8 @@ import io
 import math
 import os
 import sys
+import typing as t
 from datetime import date
-from typing import Dict, Iterator, List, Optional
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .block import BlockDevice
@@ -66,7 +66,7 @@ E_READ = 64  # Protected from write
 E_PROT = 128  # Protected permanent file
 
 
-def rt11_to_date(val: int) -> Optional[date]:
+def rt11_to_date(val: int) -> t.Optional[date]:
     """
     Translate RT-11 date to Python date
     """
@@ -87,7 +87,7 @@ def rt11_to_date(val: int) -> Optional[date]:
         return None
 
 
-def rt11_canonical_filename(fullname: Optional[str], wildcard: bool = False) -> str:
+def rt11_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) -> str:
     """
     Generate the canonical RT11 name
     """
@@ -269,7 +269,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         return BLOCK_SIZE
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> t.Optional[date]:
         return rt11_to_date(self.raw_creation_date)
 
     def delete(self) -> bool:
@@ -282,7 +282,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         self.segment.write()
         return True
 
-    def open(self, file_type: Optional[str] = None) -> RT11File:
+    def open(self, file_type: t.Optional[str] = None) -> RT11File:
         """
         Open a file
         """
@@ -331,7 +331,7 @@ class RT11Segment(object):
     # Max directory entires
     max_entries = 0
     # Directory entries
-    entries_list: List["RT11DirectoryEntry"] = []
+    entries_list: t.List["RT11DirectoryEntry"] = []
 
     def __init__(self, fs: "RT11Filesystem"):
         self.fs = fs
@@ -478,7 +478,7 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         # Write the block
         self.write_block(home_block, HOMEBLK)
 
-    def read_dir_segments(self) -> Iterator["RT11Segment"]:
+    def read_dir_segments(self) -> t.Iterator["RT11Segment"]:
         """Read directory segments"""
         next_block_number = self.dir_segment
         while next_block_number != 0:
@@ -489,10 +489,11 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
-    ) -> Iterator["RT11DirectoryEntry"]:
+    ) -> t.Iterator["RT11DirectoryEntry"]:
         if pattern:
             pattern = rt11_canonical_filename(pattern, wildcard=wildcard)
         for segment in self.read_dir_segments():
@@ -503,19 +504,19 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
                     yield entry
 
     @property
-    def entries_list(self) -> Iterator["RT11DirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["RT11DirectoryEntry"]:
         for segment in self.read_dir_segments():
             for entry in segment.entries_list:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> Optional[RT11DirectoryEntry]:  # fullname=filename+ext
+    def get_file_entry(self, fullname: str) -> t.Optional[RT11DirectoryEntry]:  # fullname=filename+ext
         fullname = rt11_canonical_filename(fullname)
         for entry in self.entries_list:
             if entry.fullname == fullname and entry.is_permanent:
                 return entry
         return None
 
-    def read_bytes(self, fullname: str, file_type: Optional[str] = None) -> bytes:  # fullname=filename+ext
+    def read_bytes(self, fullname: str, file_type: t.Optional[str] = None) -> bytes:  # fullname=filename+ext
         entry = self.get_file_entry(fullname)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -525,11 +526,11 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
     ) -> None:
-        length = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
-        entry = self.create_file(fullname, length, creation_date, file_type)
+        number_of_blocks = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
+        entry = self.create_file(fullname, number_of_blocks, creation_date, file_type)
         if not entry:
             return
         content = content + (b"\0" * BLOCK_SIZE)
@@ -538,15 +539,15 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
-    ) -> Optional[RT11DirectoryEntry]:
+        number_of_blocks: int,  # length in blocks
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
+    ) -> t.Optional[RT11DirectoryEntry]:
         fullname = os.path.basename(fullname)
-        entry: Optional[RT11DirectoryEntry] = self.get_file_entry(fullname)
+        entry: t.Optional[RT11DirectoryEntry] = self.get_file_entry(fullname)
         if entry is not None:
             entry.delete()
-        return self.allocate_space(fullname, length, creation_date)
+        return self.allocate_space(fullname, number_of_blocks, creation_date)
 
     def split_segment(self, entry: RT11DirectoryEntry) -> bool:
         # entry is the last entry of the old_segment, new new segment will contain all the entries after that
@@ -596,12 +597,12 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,  # fullname=filename+ext, length in blocks
         length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
+        creation_date: t.Optional[date] = None,  # optional creation date
     ) -> RT11DirectoryEntry:
         """
         Allocate space for a new file
         """
-        entry: Optional[RT11DirectoryEntry] = None
+        entry: t.Optional[RT11DirectoryEntry] = None
         entry_number: int = -1
         # Search for an empty entry to be splitted
         for segment in self.read_dir_segments():
@@ -642,7 +643,7 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         i = 0
         files = 0
         blocks = 0
@@ -692,7 +693,7 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write(" %d Files, %d Blocks\n" % (files, blocks))
         sys.stdout.write(" %d Free blocks\n" % unused)
 
-    def examine(self, name_or_block: Optional[str]) -> None:
+    def examine(self, name_or_block: t.Optional[str]) -> None:
         if name_or_block:
             self.dump(name_or_block)
         else:
@@ -710,7 +711,7 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         """Write an RT–11 empty device directory"""
         size = self.f.get_size()
         # Adjust the size for RX01/RX02 (skip track 0)

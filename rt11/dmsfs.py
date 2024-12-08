@@ -949,10 +949,11 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
         self,
         pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
         sam: t.Optional["StorageAllocationMap"] = None,
     ) -> t.Iterator["DMSDirectoryEntry"]:
-        dms_filename = DMSFilename(pattern, wildcard=True) if pattern else None
+        dms_filename = DMSFilename(pattern, wildcard=wildcard) if pattern else None
         for dn in self.read_directory_name_blocks(sam):
             for entry in dn.entries_list:
                 if dms_filename is None or dms_filename.match(entry):
@@ -1020,8 +1021,8 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
             # Convert IMAGE => words
             words = from_bytes_to_12bit_words(content, file_type=IMAGE)
         # Allocate space
-        length = int(math.ceil(len(words) * 1.0 / DATA_BLOCK_SIZE_WORD))
-        entry = self.create_file(fullname, length, creation_date, file_type)
+        number_of_blocks = int(math.ceil(len(words) * 1.0 / DATA_BLOCK_SIZE_WORD))
+        entry = self.create_file(fullname, number_of_blocks, creation_date, file_type)
         # Write blocks
         if entry is not None:
             blocks = entry.get_blocks()
@@ -1035,7 +1036,7 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
+        number_of_blocks: int,  # length in blocks
         creation_date: t.Optional[date] = None,  # optional creation date
         file_type: t.Optional[str] = None,
     ) -> t.Optional[DMSDirectoryEntry]:
@@ -1049,7 +1050,7 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
             entry.delete()
         # Allocate space
         sam = StorageAllocationMap.read(self)
-        file_number = sam.allocate_space(fullname, length)
+        file_number = sam.allocate_space(fullname, number_of_blocks)
         # Create entry
         entry = None
         for dn in self.read_directory_name_blocks():
@@ -1158,7 +1159,7 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
                 print(f"\nBLOCK NUMBER   {block_number:08}")
                 oct_dump(words)
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         """
         Create an empty PDP-8 4k Disk Monitor filesystem
         """

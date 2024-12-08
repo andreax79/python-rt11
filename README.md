@@ -21,6 +21,7 @@ Python-RT11 is an utility for transferring files between various file systems.
 | RSTS/E          | :white_check_mark:|                   |                   |                   |
 | OS/8            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 | 4k Disk Monitor | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| Apple II ProDOS | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 
 Commands
 --------
@@ -34,7 +35,7 @@ The following commands are availables:
 * ASSIGN          Associates a logical device name with a device
 * CD              Changes or displays the current working drive and directory
 * COPY            Copies files
-* CREATE          Creates a file with a specific name and size
+* CREATE          Creates files or directories
 * DEASSIGN        Removes logical device name assignments
 * DELETE          Removes files from a volume
 * DIR             Lists file directories
@@ -196,3 +197,9 @@ PDP-8 4k Disk Monitor
 
 * [PDP-8 4K Disk Monitor System](https://svn.so-much-stuff.com/svn/trunk/pdp8/src/dec/dec-08-odsma/dec-08-odsma-a-d.pdf)
 * [PDP-8 Disc System Builder](https://svn.so-much-stuff.com/svn/trunk/pdp8/src/dec/dec-d8-sba/dec-d8-sbab-d.pdf)
+    
+Apple II ProDOS / Apple III SOS (Sophisticated Operating System)
+----------------------------------------------------------------
+
+* [ProDOS 8 Technical Reference Manual](http://www.easy68k.com/paulrsm/6502/PDOS8TRM.HTM)
+* [Apple III SOS Reference Manual Volume 1 - How SOS Works.PDF](https://apple3.org/Documents/Manuals/Apple%20III%20SOS%20Reference%20Manual%20Volume%201%20-%20How%20SOS%20Works.PDF)

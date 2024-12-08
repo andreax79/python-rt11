@@ -464,7 +464,7 @@ DELETE          Removes files from a volume
         volume_id, pattern = splitdrive(args[0])
         fs = self.volumes.get(volume_id, cmd="DEL")
         match = False
-        for x in fs.filter_entries_list(pattern):
+        for x in fs.filter_entries_list(pattern, expand=False):  # don't expand directiories
             match = True
             if not x.delete():
                 sys.stdout.write("?DEL-F-Error deleting %s\n" % x.fullname)
@@ -521,40 +521,64 @@ DUMP            Prints formatted data dumps of files or devices
     def do_create(self, line: str) -> None:
         # fmt: off
         """
-CREATE          Creates a file with a specific name and size
+CREATE          Creates files or directories
 
   SYNTAX
-        CREATE [volume:]filespec size
+        CREATE [/options] [volume:]filespec
 
   SEMANTICS
-        Filespec is the device name, file name, and file type
-        of the file to create.
-        The size specifies the number of blocks to allocate.
+        This command creates a file or directory on the volume you specify.
+        The default option is to create a file.
+
+  OPTIONS
+   FILE
+        Creates a file with a specific name and size
+   DIRECTORY
+        Creates a directory
+   ALLOCATE:size
+        Specifies the number of blocks to allocate to the created file
+   TYPE:type
+        Specifies the file type
 
   EXAMPLES
-        CREATE NEW.DSK 200
+        CREATE NEW.DSK /ALLOCATE:200
 
         """
         # fmt: on
-        args = shlex.split(line)
-        if len(args) > 2:
+        args, options = extract_options(line, "/file", "/directory", "/uic", "/allocate", "/type")
+        if len(args) > 1:
             sys.stdout.write("?CREATE-F-Too many arguments\n")
             return
+        if "file" in options:
+            kind = "file"
+        if "directory" in options:
+            kind = "directory"
+        else:
+            kind = "file"
         path = len(args) > 0 and args[0]
-        size = len(args) > 1 and args[1]
         if not path:
             path = ask("File? ")
-        if not size:
-            size = ask("Size? ")
-        try:
-            length = int(size)
-            if length < 0:
-                raise ValueError
-        except ValueError:
-            raise Exception("?KMON-F-Invalid value specified with option")
         volume_id, fullname = splitdrive(path)
         fs = self.volumes.get(volume_id, cmd="CREATE")
-        fs.create_file(fullname, length)
+        if kind == "directory":
+            # Create a directory
+            fs.create_directory(fullname, options)
+        else:
+            # Create a file
+            allocate = options.get("allocate")
+            if not allocate:
+                allocate = ask("Size? ")
+            try:
+                number_of_blocks = int(allocate)
+                if number_of_blocks < 0:
+                    raise ValueError
+            except:
+                raise Exception("?KMON-F-Invalid value specified with option")
+            fs.create_file(
+                fullname,
+                number_of_blocks=number_of_blocks,
+                file_type=options.get("type") if isinstance(options.get("type"), str) else None,  # type: ignore
+            )
 
     @flgtxt("MO_UNT")
     def do_mount(self, line: str) -> None:
@@ -595,6 +619,8 @@ MOUNT           Assigns a logical disk unit to a file
         Mount OS/8 filesystem
    DMS
         Mount PDP-8 4k Disk Monitor System filesystem
+   PRODOS
+        Mount Apple II ProDOS filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
@@ -712,14 +738,27 @@ DEASSIGN        Removes logical device name assignments
 INITIALIZE      Writes an empty device directory on the specified volume
 
   SYNTAX
-        INITIALIZE volume:
+        INITIALIZE [/options] volume:
+
+  SEMANTICS
+        Initializes the specified filesystem on the volume.
+        Any data on the volume is lost.
+
+  OPTIONS
+   NAME:name
+        Specifies the volume name
 
         """
         # fmt: on
-        if not line:
-            line = ask("Volume? ")
-        fs = self.volumes.get(line)
-        fs.initialize()
+        args, options = extract_options(line, "/name")
+        if len(args) > 1:
+            sys.stdout.write("?INITIALIZE-F-Too many arguments\n")
+            return
+        volume = len(args) > 0 and args[0]
+        if not volume:
+            volume = ask("Volume? ")
+        fs = self.volumes.get(volume)
+        fs.initialize(**options)
 
     def do_cd(self, line: str) -> None:
         # fmt: off
@@ -798,7 +837,7 @@ SHOW            Displays the volume assignment
         for k, v in self.volumes.volumes.items():
             label = f"{k}:"
             sys.stdout.write(f"{label:<6} {v}\n")
-        for k, v in self.volumes.logical.items():
+        for k, v in self.volumes.logical.items():  # type: ignore
             label = f"{k}:"
             sys.stdout.write(f"{label:<4} = {v}:\n")
 
@@ -1002,6 +1041,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount a PDP-8 4k Disk Monitor System disk",
+    )
+    parser.add_argument(
+        "--prodos",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount an Apple II ProDOS disk",
     )
     parser.add_argument(
         "disk",

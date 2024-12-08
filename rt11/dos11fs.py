@@ -24,8 +24,8 @@ import math
 import os
 import struct
 import sys
+import typing as t
 from datetime import date, timedelta
-from typing import Dict, Iterator, List, Optional, Tuple
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .block import BlockDevice
@@ -71,7 +71,7 @@ FILE_TYPES = {
 }
 
 
-def dos11_get_file_type_id(file_type: Optional[str], default: int = LINKED_FILE_TYPE) -> int:
+def dos11_get_file_type_id(file_type: t.Optional[str], default: int = LINKED_FILE_TYPE) -> int:
     """
     Get the file type id from a string
     """
@@ -84,7 +84,7 @@ def dos11_get_file_type_id(file_type: Optional[str], default: int = LINKED_FILE_
     raise Exception("?KMON-F-Invalid file type specified with option")
 
 
-def dos11_to_date(val: int) -> Optional[date]:
+def dos11_to_date(val: int) -> t.Optional[date]:
     """
     Translate DOS-11 date to Python date
     """
@@ -116,7 +116,7 @@ def date_to_dos11(val: date) -> int:
 def dos11_canonical_filename(fullname: str, wildcard: bool = False) -> str:
     try:
         if "[" in fullname:
-            uic: Optional[UIC] = UIC.from_str(fullname)
+            uic: t.Optional[UIC] = UIC.from_str(fullname)
             fullname = fullname.split("]", 1)[1]
         else:
             uic = None
@@ -127,7 +127,7 @@ def dos11_canonical_filename(fullname: str, wildcard: bool = False) -> str:
     return f"{uic or ''}{fullname}"
 
 
-def dos11_split_fullname(uic: UIC, fullname: Optional[str], wildcard: bool = True) -> Tuple[UIC, Optional[str]]:
+def dos11_split_fullname(uic: UIC, fullname: t.Optional[str], wildcard: bool = True) -> t.Tuple[UIC, t.Optional[str]]:
     if fullname:
         if "[" in fullname:
             try:
@@ -143,8 +143,8 @@ def dos11_split_fullname(uic: UIC, fullname: Optional[str], wildcard: bool = Tru
 class DOS11Bitmap:
 
     fs: "DOS11Filesystem"
-    blocks: List[int]
-    bitmaps: List[int]
+    blocks: t.List[int]
+    bitmaps: t.List[int]
     num_of_words: int
     first_bitmap_block: int
 
@@ -246,7 +246,7 @@ class DOS11Bitmap:
                 current_run = 0
         raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
 
-    def allocate(self, size: int, contiguous: bool = False) -> List[int]:
+    def allocate(self, size: int, contiguous: bool = False) -> t.List[int]:
         """
         Allocate contiguous or sparse blocks
         """
@@ -533,7 +533,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         return BLOCK_SIZE if self.contiguous else LINKED_FILE_BLOCK_SIZE
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> t.Optional[date]:
         return dos11_to_date(self.raw_creation_date)
 
     def delete(self) -> bool:
@@ -569,7 +569,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         bitmap.write()
         return True
 
-    def open(self, file_type: Optional[str] = None) -> DOS11File:
+    def open(self, file_type: t.Optional[str] = None) -> DOS11File:
         """
         Open a file
         """
@@ -627,7 +627,7 @@ class UserFileDirectoryBlock(object):
     # User Identification Code
     uic: UIC = DEFAULT_UIC
     # User File Directory Block entries
-    entries_list: List["DOS11DirectoryEntry"] = []
+    entries_list: t.List["DOS11DirectoryEntry"] = []
 
     def __init__(self, fs: "DOS11Filesystem", uic: UIC = DEFAULT_UIC):
         self.fs = fs
@@ -678,7 +678,7 @@ class UserFileDirectoryBlock(object):
         # Write the buffer to the disk
         self.fs.write_block(buffer, self.block_number, 2)
 
-    def get_empty_entry(self) -> Optional["DOS11DirectoryEntry"]:
+    def get_empty_entry(self) -> t.Optional["DOS11DirectoryEntry"]:
         """
         Get the first empty directory entry
         """
@@ -751,7 +751,7 @@ class MasterFileDirectoryEntry:
         ) = struct.unpack_from(MFD_ENTRY_FORMAT, buffer, position)
         self.uic = UIC.from_word(mfd_uic)
 
-    def read_ufd_blocks(self) -> Iterator["UserFileDirectoryBlock"]:
+    def read_ufd_blocks(self) -> t.Iterator["UserFileDirectoryBlock"]:
         """Read User File Directory blocks"""
         next_block_number = self.ufd_block
         while next_block_number != 0:
@@ -812,7 +812,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         self,
         mfd_block: int = MFD_BLOCK,
         uic: UIC = ANY_UIC,
-    ) -> Iterator["MasterFileDirectoryEntry"]:
+    ) -> t.Iterator["MasterFileDirectoryEntry"]:
         """Read master file directory"""
 
         # Check DECtape format
@@ -876,11 +876,12 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = False,
+        expand: bool = True,
         wildcard: bool = True,
-        uic: Optional[UIC] = None,
-    ) -> Iterator["DOS11DirectoryEntry"]:
+        uic: t.Optional[UIC] = None,
+    ) -> t.Iterator["DOS11DirectoryEntry"]:
         if uic is None:
             uic = self.uic
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
@@ -892,14 +893,14 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
                             yield entry
 
     @property
-    def entries_list(self) -> Iterator["DOS11DirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["DOS11DirectoryEntry"]:
         for mfd in self.read_mfd_entries(uic=self.uic):
             for ufd_block in mfd.read_ufd_blocks():
                 for entry in ufd_block.entries_list:
                     if not entry.is_empty:
                         yield entry
 
-    def get_file_entry(self, fullname: str) -> Optional[DOS11DirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Optional[DOS11DirectoryEntry]:
         """
         Get the directory entry for a file
         """
@@ -913,18 +914,18 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> None:
         """
         Write content to a file
         """
         block_size = BLOCK_SIZE if dos11_get_file_type_id(file_type) == CONTIGUOUS_FILE_TYPE else LINKED_FILE_BLOCK_SIZE
-        length = int(math.ceil(len(content) * 1.0 / block_size))
+        number_of_blocks = int(math.ceil(len(content) * 1.0 / block_size))
         entry = self.create_file(
             fullname=fullname,
-            length=length,
+            number_of_blocks=number_of_blocks,
             creation_date=creation_date,
             file_type=file_type,
             protection_code=protection_code,
@@ -939,11 +940,11 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
     def create_file(
         self,
         fullname: str,
-        length: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
+        number_of_blocks: int,  # length in blocks
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
-    ) -> Optional[DOS11DirectoryEntry]:
+    ) -> t.Optional[DOS11DirectoryEntry]:
         """
         Create a new file with a given length in number of blocks
         """
@@ -960,7 +961,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
             raise NotADirectoryError
         # Allocate the space for the file
         bitmap = self.read_bitmap()
-        blocks = bitmap.allocate(length, contiguous)
+        blocks = bitmap.allocate(number_of_blocks, contiguous)
         # Create the directory entry
         new_entry = None
         for ufd_block in mfd.read_ufd_blocks():
@@ -987,7 +988,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         new_entry.extension = extension
         new_entry.raw_creation_date = date_to_dos11(creation_date or date.today())
         new_entry.start_block = blocks[0]
-        new_entry.length = length
+        new_entry.length = number_of_blocks
         new_entry.end_block = blocks[-1]
         new_entry.contiguous = contiguous
         new_entry.protection_code = protection_code
@@ -1006,7 +1007,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
     def isdir(self, fullname: str) -> bool:
         return False
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         if options.get("uic"):
             # Listing of all UIC
             sys.stdout.write(f"{volume_id}:\n\n")
@@ -1049,7 +1050,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
 
-    def examine(self, name_or_block: Optional[str]) -> None:
+    def examine(self, name_or_block: t.Optional[str]) -> None:
         if name_or_block:
             self.dump(name_or_block)
         else:
@@ -1063,7 +1064,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         """
         return self.f.get_size()
 
-    def initialize(self) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def close(self) -> None:
