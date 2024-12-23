@@ -1214,5 +1214,17 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
     def get_pwd(self) -> str:
         return ""
 
+    def get_types(self) -> t.List[str]:
+        """
+        Get the list of the supported file types
+        """
+        return [
+            EXT_SYS,
+            EXT_USER,
+            EXT_ASCII,
+            EXT_BINARY,
+            EXT_FTC_BIN,
+        ]
+
     def __str__(self) -> str:
         return str(self.f)

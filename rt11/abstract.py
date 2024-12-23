@@ -334,3 +334,9 @@ class AbstractFilesystem:
                 data = self.read_block(block_number)
                 print(f"\nBLOCK NUMBER   {block_number:08}")
                 hex_dump(data)
+
+    def get_types(self) -> t.List[str]:
+        """
+        Get the list of the supported file types
+        """
+        return []

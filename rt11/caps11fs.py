@@ -528,5 +528,11 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
     def get_pwd(self) -> str:
         return ""
 
+    def get_types(self) -> t.List[str]:
+        """
+        Get the list of the supported file types
+        """
+        return list(STANDARD_FILE_TYPES.values())
+
     def __str__(self) -> str:
         return str(self.f)

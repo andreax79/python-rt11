@@ -621,6 +621,8 @@ MOUNT           Assigns a logical disk unit to a file
         Mount PDP-8 4k Disk Monitor System filesystem
    PRODOS
         Mount Apple II ProDOS filesystem
+   PASCAL
+        Mount Apple II Pascal filesystem
 
   EXAMPLES
         MOUNT AB: SY:AB.DSK
@@ -832,14 +834,30 @@ SHOW            Displays the volume assignment
 
         """
         # fmt: on
-        sys.stdout.write("Volumes\n")
-        sys.stdout.write("-------\n")
-        for k, v in self.volumes.volumes.items():
-            label = f"{k}:"
-            sys.stdout.write(f"{label:<6} {v}\n")
-        for k, v in self.volumes.logical.items():  # type: ignore
-            label = f"{k}:"
-            sys.stdout.write(f"{label:<4} = {v}:\n")
+        args = shlex.split(line) or ["VOLUMES"]
+        action = args[0].upper()
+        if action == "TYPES":
+            if len(args) == 1:
+                volume_id = ask("Volume? ")
+            else:
+                volume_id = args[1]
+            fs = self.volumes.get(volume_id)
+            sys.stdout.write("File Types\n")
+            sys.stdout.write("----------\n")
+            for item in fs.get_types():
+                sys.stdout.write(f"{item}\n")
+            return
+        elif action == "VOLUMES":
+            sys.stdout.write("Volumes\n")
+            sys.stdout.write("-------\n")
+            for k, v in self.volumes.volumes.items():
+                label = f"{k}:"
+                sys.stdout.write(f"{label:<6} {v}\n")
+            for k, v in self.volumes.logical.items():  # type: ignore
+                label = f"{k}:"
+                sys.stdout.write(f"{label:<4} = {v}:\n")
+        else:
+            sys.stdout.write("?SHOW-F-Too many arguments\n")
 
     def do_exit(self, line: str) -> None:
         # fmt: off
@@ -1048,6 +1066,13 @@ def main() -> None:
         dest="image",
         action=CustomAction,
         help="mount an Apple II ProDOS disk",
+    )
+    parser.add_argument(
+        "--pascal",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount an Apple II Pascal disk",
     )
     parser.add_argument(
         "disk",

@@ -24,6 +24,8 @@ import traceback
 from typing import Dict, Optional
 
 from .abstract import AbstractFilesystem
+from .apple2.pascalfs import PascalFilesystem
+from .apple2.prodosfs import ProDOSFilesystem
 from .caps11fs import CAPS11Filesystem
 from .commons import splitdrive
 from .dmsfs import DMSFilesystem
@@ -32,7 +34,6 @@ from .dos11magtapefs import DOS11MagTapeFilesystem
 from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
 from .os8fs import OS8Filesystem
-from .prodosfs import ProDOSFilesystem
 from .rstsfs import RSTSFilesystem
 from .rt11fs import RT11Filesystem
 from .solofs import SOLOFilesystem
@@ -65,6 +66,7 @@ FILESYSTEMS = {
     "os8": OS8Filesystem,
     "dms": DMSFilesystem,
     "prodos": ProDOSFilesystem,
+    "pascal": PascalFilesystem,
 }
 
 

@@ -27,9 +27,9 @@ import typing as t
 from abc import abstractmethod
 from datetime import date, datetime
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice
-from .commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match
+from .disk import AppleDisk
 
 __all__ = [
     "ProDOSFile",
@@ -61,12 +61,6 @@ EXTENDED_FILE_STORAGE_TYPE = 0x5  # Extended file
 DIRECTORY_FILE_SOURCE_TYPE = 0xD  # Directory file
 SUBDIRECTORY_HEADER_STORAGE_TYPE = 0xE  # Subdirectory
 VOLUME_DIRECTORY_HEADER_STORAGE_TYPE = 0xF  # volume directory header
-
-SECTOR_SIZE = 256  # Sector size in bytes
-SECTORS_PER_TRACK = 16  # Number of sectors per track
-BLOCKS_PER_TRACK = SECTOR_SIZE * SECTORS_PER_TRACK // BLOCK_SIZE  # Number of blocks per track
-BYTES_PER_TRACK = BLOCKS_PER_TRACK * BLOCK_SIZE  # Number of bytes per track
-DOS_SECTOR_ORDER = [0, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 15]
 
 PASCAL_VOLUME_HEADER_FORMAT = "<HH4s"
 PASCAL_VOLUME_INFO_FORMAT = "<HHBBH"
@@ -1646,72 +1640,6 @@ class ProDOSBitmap:
         return free
 
 
-class AppleDisk(BlockDevice):
-    """
-    Apple II disk image DOS / ProDOS format
-    """
-
-    prodos_order: bool = False
-
-    def read_block(
-        self,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> bytes:
-        """
-        Read block(s) of data from the file
-        """
-        if self.prodos_order:
-            position = block_number * BLOCK_SIZE
-            self.f.seek(position)  # not thread safe...
-            return self.f.read(number_of_blocks * BLOCK_SIZE)
-        elif number_of_blocks > 1:
-            # DOS 3.x order - multiple blocks
-            return b"".join([self.read_block(i) for i in range(block_number, block_number + number_of_blocks)])
-        else:
-            # DOS 3.x order
-            # Each ProDOS block spans two DOS 3.x sectors
-            track = block_number // BLOCKS_PER_TRACK
-            chunk = (block_number % BLOCKS_PER_TRACK) * 2
-            offset_1 = 256 * DOS_SECTOR_ORDER[chunk] + BYTES_PER_TRACK * track
-            offset_2 = 256 * DOS_SECTOR_ORDER[chunk + 1] + BYTES_PER_TRACK * track
-            # Read the data
-            self.f.seek(offset_1)
-            data_1 = self.f.read(BLOCK_SIZE // 2)
-            self.f.seek(offset_2)
-            data_2 = self.f.read(BLOCK_SIZE // 2)
-            return data_1 + data_2
-
-    def write_block(
-        self,
-        buffer: bytes,
-        block_number: int,
-        number_of_blocks: int = 1,
-    ) -> None:
-        if block_number < 0 or number_of_blocks < 0:
-            raise OSError(errno.EIO, os.strerror(errno.EIO))
-        if self.prodos_order:
-            position = block_number * BLOCK_SIZE
-            self.f.seek(position)
-            self.f.write(buffer)
-        elif number_of_blocks > 1:
-            # DOS 3.x order - multiple blocks
-            for i in range(number_of_blocks):
-                self.write_block(buffer[BLOCK_SIZE * i : BLOCK_SIZE * (i + 1)], block_number * i)
-        else:
-            # DOS 3.x order
-            # Each ProDOS block spans two DOS 3.x sectors
-            track = block_number // BLOCKS_PER_TRACK
-            chunk = (block_number % BLOCKS_PER_TRACK) * 2
-            offset_1 = 256 * DOS_SECTOR_ORDER[chunk] + BYTES_PER_TRACK * track
-            offset_2 = 256 * DOS_SECTOR_ORDER[chunk + 1] + BYTES_PER_TRACK * track
-            # Write the data
-            self.f.seek(offset_1)
-            self.f.write(buffer[: BLOCK_SIZE // 2])
-            self.f.seek(offset_2)
-            self.f.write(buffer[BLOCK_SIZE // 2 :])
-
-
 class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
     """
     Apple II ProDOSo (Professional Disk Operating System)
@@ -2043,3 +1971,9 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
         Get the current directory
         """
         return self.pwd
+
+    def get_types(self) -> t.List[str]:
+        """
+        Get the list of the supported file types
+        """
+        return list(FILE_TYPES.values())

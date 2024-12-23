@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from rt11.prodosfs import ProDOSFilesystem, date_to_prodos, prodos_to_date
+from rt11.apple2.prodosfs import ProDOSFilesystem, date_to_prodos, prodos_to_date
 from rt11.shell import Shell
 
 DSK = "tests/dsk/prodos.dsk"

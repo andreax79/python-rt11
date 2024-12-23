@@ -1091,5 +1091,11 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
     def get_pwd(self) -> str:
         return ""
 
+    def get_types(self) -> t.List[str]:
+        """
+        Get the list of the supported file types
+        """
+        return list(FILE_TYPES.values())
+
     def __str__(self) -> str:
         return str(self.f)

@@ -1086,5 +1086,11 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         """
         return str(self.uic)
 
+    def get_types(self) -> t.List[str]:
+        """
+        Get the list of the supported file types
+        """
+        return list(FILE_TYPES.values())
+
     def __str__(self) -> str:
         return str(self.f)
