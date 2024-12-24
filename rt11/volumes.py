@@ -24,6 +24,7 @@ import traceback
 from typing import Dict, Optional
 
 from .abstract import AbstractFilesystem
+from .apple2.appledosfs import AppleDOSFilesystem
 from .apple2.pascalfs import PascalFilesystem
 from .apple2.prodosfs import ProDOSFilesystem
 from .caps11fs import CAPS11Filesystem
@@ -67,6 +68,7 @@ FILESYSTEMS = {
     "dms": DMSFilesystem,
     "prodos": ProDOSFilesystem,
     "pascal": PascalFilesystem,
+    "appledos": AppleDOSFilesystem,
 }
 
 

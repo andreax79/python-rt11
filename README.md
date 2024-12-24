@@ -22,6 +22,8 @@ Python-RT11 is an utility for transferring files between various file systems.
 | OS/8            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 | 4k Disk Monitor | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 | Apple II ProDOS | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| Apple II Pascal | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| Apple DOS 3.x   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 
 Commands
 --------

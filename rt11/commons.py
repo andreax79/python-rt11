@@ -105,10 +105,10 @@ def hex_dump(data: bytes, bytes_per_line: int = BYTES_PER_LINE) -> None:
         sys.stdout.write(f"{i:08x}   {hex_str.ljust(3 * bytes_per_line)}  {ascii_str}\n")
 
 
-def dump_struct(d: Dict[str, Any]) -> str:
+def dump_struct(d: Dict[str, Any], exclude: List[str] = [], include: List[str] = []) -> str:
     result: List[str] = []
     for k, v in d.items():
-        if type(v) in (int, str, bytes, list):
+        if (type(v) in (int, str, bytes, list, bool) or k in include) and k not in exclude:
             if len(k) < 6:
                 label = k.upper() + ":"
             else:

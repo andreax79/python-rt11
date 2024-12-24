@@ -1075,6 +1075,13 @@ def main() -> None:
         help="mount an Apple II Pascal disk",
     )
     parser.add_argument(
+        "--appledos",
+        nargs=1,
+        dest="image",
+        action=CustomAction,
+        help="mount an Apple II DOS disk",
+    )
+    parser.add_argument(
         "disk",
         nargs="*",
         help="disk to be mounted",
