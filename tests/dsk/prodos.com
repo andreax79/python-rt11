@@ -14,4 +14,5 @@ COPY/TYPE:TXT data/100.txt pr:medium
 COPY/TYPE:TXT data/200.txt pr:medium
 COPY/TYPE:TXT data/500.txt pr:medium
 COPY/TYPE:TXT data/1000.txt pr:
-DIR pr:small
+COPY ciao.apple2 pr:
+DIR pr:

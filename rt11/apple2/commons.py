@@ -69,6 +69,14 @@ class ProDOSFileInfo:
             self.aux_type,
         )
 
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, ProDOSFileInfo)
+            and self.access == other.access
+            and self.file_type == other.file_type
+            and self.aux_type == other.aux_type
+        )
+
     def __str__(self) -> str:
         return f"Access: {self.access:04X} File type: {self.file_type:04X} Aux type: {self.aux_type:08X}"
 
@@ -76,6 +84,8 @@ class ProDOSFileInfo:
 def decode_apple_single(content: bytes) -> t.Tuple[bytes, t.Optional[bytes], t.Optional[ProDOSFileInfo]]:
     """
     Extract data fork and metadata from an AppleSingle file
+
+    assert parse_file_aux_type("$99") == (0x99, 0)
 
     https://nulib.com/library/AppleSingle_AppleDouble.pdf
     """
