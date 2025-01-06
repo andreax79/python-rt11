@@ -2,7 +2,7 @@ import random
 import string
 
 from rt11.commons import ASCII, IMAGE
-from rt11.dmsfs import (
+from rt11.pdp8.dmsfs import (
     FILE_TYPE_ASCII,
     FILE_TYPE_SYS_USER,
     DirectorNameBlock,

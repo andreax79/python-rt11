@@ -535,14 +535,16 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
 
     volume_name: str = ""  # Volume name
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file, rx_device_support=False)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file, rx_device_support=False)
         # Read volume dir
         volume_dir = VolumeDirectory.read(self)
         if not volume_dir.volume_name:
             self.prodos_order = True
             volume_dir = VolumeDirectory.read(self)
         self.volume_name = volume_dir.volume_name
+        return self
 
     def filter_entries_list(
         self,

@@ -26,14 +26,14 @@ import sys
 from functools import reduce
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from .abstract import AbstractFile
+from .abstract import AbstractFile, AbstractFilesystem
 from .commons import ASCII, IMAGE, READ_FILE_FULL
 from .unixfs import UNIXDirectoryEntry, UNIXFile, UNIXFilesystem, UNIXInode, unix_join
 
 __all__ = [
     "UNIXFile0",
     "UNIXDirectoryEntry0",
-    "UNIXFilesystem0",
+    "UNIX0Filesystem",
 ]
 
 V0_BYTES_PER_WORD = 4  # Each word is encoded in 4 bytes
@@ -164,7 +164,7 @@ class UNIXInode0(UNIXInode):
     https://github.com/DoctorWkt/pdp7-unix/blob/master/man/fs.5
     """
 
-    fs: "UNIXFilesystem0"
+    fs: "UNIX0Filesystem"
     uniq: int  # Unique value assigned at creation
     inode_num: int  # Inode number
     flags: int  # Flags
@@ -174,7 +174,7 @@ class UNIXInode0(UNIXInode):
     addr: List[int]  # Indirect blocks or data blocks
 
     @classmethod
-    def read(cls, fs: "UNIXFilesystem0", inode_num: int, words: List[int], position: int = 0) -> "UNIXInode0":  # type: ignore
+    def read(cls, fs: "UNIX0Filesystem", inode_num: int, words: List[int], position: int = 0) -> "UNIXInode0":  # type: ignore
         self = UNIXInode0(fs)
         self.inode_num = inode_num
         self.flags = words[position + V0_FLAGS]
@@ -290,18 +290,22 @@ class UNIXDirectoryEntry0(UNIXDirectoryEntry):
         return UNIXFile0(self.inode, file_type)
 
 
-class UNIXFilesystem0(UNIXFilesystem):
+class UNIX0Filesystem(UNIXFilesystem):
     """
-    UNIX Filesystem
+    UNIX version 0 Filesystem
     """
 
-    def __init__(self, file: "AbstractFile"):
-        self.f = file
+    version: int = 0
+
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         self.version = 0
         self.pwd = "/"
         self.inode_size = V0_INODE_SIZE
         self.root_inode = V0_ROOT_INODE
         self.read_superblock()
+        return self
 
     def read_superblock(self) -> None:
         """Read superblock"""

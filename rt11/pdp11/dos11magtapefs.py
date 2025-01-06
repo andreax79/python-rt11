@@ -26,8 +26,10 @@ import sys
 import typing as t
 from datetime import date
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
+from ..tape import Tape
+from ..uic import ANY_UIC, DEFAULT_UIC, UIC
 from .dos11fs import (
     DEFAULT_PROTECTION_CODE,
     date_to_dos11,
@@ -36,8 +38,6 @@ from .dos11fs import (
     dos11_to_date,
 )
 from .rad50 import asc_to_rad50_word, rad50_word_to_asc
-from .tape import Tape
-from .uic import ANY_UIC, DEFAULT_UIC, UIC
 
 __all__ = [
     "DOS11MagTapeFile",
@@ -304,6 +304,11 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
     """
 
     uic: UIC = DEFAULT_UIC  # current User Identification Code
+
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
+        return self
 
     def read_magtape(self) -> t.Iterator[bytes]:
         rc = 0

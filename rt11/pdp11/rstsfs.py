@@ -25,12 +25,12 @@ import sys
 import typing as t
 from datetime import date, datetime, timedelta
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice
-from .cache import BlockCache
-from .commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..block import BlockDevice
+from ..cache import BlockCache
+from ..commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match
+from ..uic import ANY_GROUP, ANY_USER, UIC
 from .rad50 import asc2rad, asc_to_rad50_word, rad2asc, rad50_word_to_asc
-from .uic import ANY_GROUP, ANY_USER, UIC
 
 __all__ = [
     "RSTSFile",
@@ -790,11 +790,12 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
     mfd_first_name_entry: Link  # Link to first name entry in MFD (RDS0)
     mfd: t.Optional[MFD] = None  # Master File Directory (RDS1.1 or later)
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file)
-        self.f = file
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         self.read_disk_pack_label()
         self.ppn = DEFAULT_PPN
+        return self
 
     def new_cache(self) -> "RTFSBlockCache":
         return RTFSBlockCache(self)

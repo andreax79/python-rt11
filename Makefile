@@ -40,3 +40,7 @@ venv:
 	python3 -m venv .
 	. bin/activate; pip install -Ur requirements.txt
 	. bin/activate; pip install -Ur requirements-dev.txt
+
+.PHONY: readme-preview
+readme-preview:
+	@. bin/activate; grip 0.0.0.0:8080

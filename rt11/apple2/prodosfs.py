@@ -1767,8 +1767,9 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
     bit_map_pointer: int  # Volume bitmap pointer
     root: "DirectoryFileEntry"  # Root directory entry
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file, rx_device_support=False)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file, rx_device_support=False)
         self.pwd = "/"
         # Dummy root directory entry
         self.root = VolumeDirectoryFileEntry(self, parent=None)
@@ -1777,6 +1778,7 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
             # Try ProDOS order
             self.prodos_order = True
             self.read_volume_directory_header()
+        return self
 
     def read_volume_directory_header(self) -> bool:
         """

@@ -203,6 +203,11 @@ class AbstractDirectoryEntry(ABC):
 class AbstractFilesystem:
     """Abstract base class for filesystem implementations"""
 
+    @classmethod
+    @abstractmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        pass
+
     @abstractmethod
     def filter_entries_list(
         self, pattern: t.Optional[str], include_all: bool = False, expand: bool = True

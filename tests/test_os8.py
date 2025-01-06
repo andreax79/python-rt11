@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from rt11.os8fs import (
+from rt11.pdp8.os8fs import (
     OS8DirectoryEntry,
     OS8Filesystem,
     OS8Segment,

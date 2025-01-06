@@ -29,9 +29,9 @@ import sys
 import typing as t
 from datetime import date
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice12Bit
-from .commons import ASCII, IMAGE, READ_FILE_FULL
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..block import BlockDevice12Bit
+from ..commons import ASCII, IMAGE, READ_FILE_FULL
 
 __all__ = [
     "DMSFile",
@@ -910,8 +910,9 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
     first_scratch_block_number: int  # First scratch block number
     first_sam_block_number: int  # First SAM block number
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         self.is_rx_12bit = False
         self.is_rx = False
         # Read the first Directory Name block
@@ -919,6 +920,7 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
         self.first_scratch_block_number = dn.first_scratch_block_number
         self.first_sam_block_number = dn.first_sam_block_number
         self.version_string = sixbit_word12_to_asc(dn.version_number)
+        return self
 
     def read_12bit_words_block(self, block_number: int) -> t.List[int]:
         """

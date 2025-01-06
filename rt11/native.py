@@ -178,6 +178,11 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
 
 class NativeFilesystem(AbstractFilesystem):
 
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        assert isinstance(file, NativeFile)
+        return cls(base=file.filename)
+
     def __init__(self, base: t.Optional[str] = None):
         self.base = base or "/"
         if not base:

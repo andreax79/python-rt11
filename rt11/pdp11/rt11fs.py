@@ -27,9 +27,9 @@ import sys
 import typing as t
 from datetime import date
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice
-from .commons import (
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..block import BlockDevice
+from ..commons import (
     BLOCK_SIZE,
     READ_FILE_FULL,
     bytes_to_word,
@@ -37,14 +37,14 @@ from .commons import (
     filename_match,
     word_to_bytes,
 )
-from .rad50 import asc2rad, rad2asc
-from .rx import (
+from ..rx import (
     RX01_SECTOR_SIZE,
     RX01_SIZE,
     RX02_SECTOR_SIZE,
     RX02_SIZE,
     RX_SECTOR_TRACK,
 )
+from .rad50 import asc2rad, rad2asc
 
 __all__ = [
     "RT11File",
@@ -192,7 +192,16 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
     def __init__(self, segment: "RT11Segment"):
         self.segment = segment
 
-    def read(self, buffer: bytes, position: int, file_position: int, extra_bytes: int) -> None:
+    @classmethod
+    def read(
+        cls,
+        segment: "RT11Segment",
+        buffer: bytes,
+        position: int,
+        file_position: int,
+        extra_bytes: int,
+    ) -> "RT11DirectoryEntry":
+        self = cls(segment)
         self.type = buffer[position]
         self.clazz = buffer[position + 1]
         self.filename = rad2asc(buffer, position + 2) + rad2asc(buffer, position + 4)  # 6 RAD50 chars
@@ -203,6 +212,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         self.raw_creation_date = bytes_to_word(buffer, position + 12)
         self.extra_bytes = buffer[position + 14 : position + 14 + extra_bytes]
         self.file_position = file_position
+        return self
 
     def to_bytes(self) -> bytes:
         out = bytearray()
@@ -336,10 +346,12 @@ class RT11Segment(object):
     def __init__(self, fs: "RT11Filesystem"):
         self.fs = fs
 
-    def read(self, block_number: int) -> None:
+    @classmethod
+    def read(cls, fs: "RT11Filesystem", block_number: int) -> "RT11Segment":
         """
         Read a Volume Directory Segment from disk
         """
+        self = cls(fs)
         self.block_number = block_number
         t = self.fs.read_block(self.block_number, 2)
         self.num_of_segments = bytes_to_word(t, 0)
@@ -353,12 +365,12 @@ class RT11Segment(object):
         dir_entry_size = DIR_ENTRY_SIZE + self.extra_bytes
         self.max_entries = (DIRECTORY_SEGMENT_SIZE - DIRECTORY_SEGMENT_HEADER_SIZE) // dir_entry_size
         for position in range(DIRECTORY_SEGMENT_HEADER_SIZE, DIRECTORY_SEGMENT_SIZE - dir_entry_size, dir_entry_size):
-            dir_entry = RT11DirectoryEntry(self)
-            dir_entry.read(t, position, file_position, self.extra_bytes)
+            dir_entry = RT11DirectoryEntry.read(self, t, position, file_position, self.extra_bytes)
             file_position = file_position + dir_entry.length
             self.entries_list.append(dir_entry)
             if dir_entry.is_end_of_segment:
                 break
+        return self
 
     def to_bytes(self) -> bytes:
         out = bytearray()
@@ -443,9 +455,11 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
     # System Identification
     sys_id: str = ""
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         self.read_home()
+        return self
 
     def read_home(self) -> None:
         """Read home block"""
@@ -482,8 +496,7 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         """Read directory segments"""
         next_block_number = self.dir_segment
         while next_block_number != 0:
-            segment = RT11Segment(self)
-            segment.read(next_block_number)
+            segment = RT11Segment.read(self, next_block_number)
             next_block_number = segment.next_block_number
             yield segment
 

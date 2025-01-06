@@ -21,25 +21,25 @@
 import os
 import sys
 import traceback
-from typing import Dict, Optional
+import typing as t
 
 from .abstract import AbstractFilesystem
 from .apple2.appledosfs import AppleDOSFilesystem
 from .apple2.pascalfs import PascalFilesystem
 from .apple2.prodosfs import ProDOSFilesystem
-from .caps11fs import CAPS11Filesystem
 from .commons import splitdrive
-from .dmsfs import DMSFilesystem
-from .dos11fs import DOS11Filesystem
-from .dos11magtapefs import DOS11MagTapeFilesystem
-from .files11fs import Files11Filesystem
 from .native import NativeFilesystem
-from .os8fs import OS8Filesystem
-from .rstsfs import RSTSFilesystem
-from .rt11fs import RT11Filesystem
-from .solofs import SOLOFilesystem
-from .unix0fs import UNIXFilesystem0
-from .unixfs import UNIXFilesystem
+from .pdp8.dmsfs import DMSFilesystem
+from .pdp8.os8fs import OS8Filesystem
+from .pdp11.caps11fs import CAPS11Filesystem
+from .pdp11.dos11fs import DOS11Filesystem
+from .pdp11.dos11magtapefs import DOS11MagTapeFilesystem
+from .pdp11.files11fs import Files11Filesystem
+from .pdp11.rstsfs import RSTSFilesystem
+from .pdp11.rt11fs import RT11Filesystem
+from .pdp11.solofs import SOLOFilesystem
+from .unix0fs import UNIX0Filesystem
+from .unixfs import UNIX1Filesystem, UNIX5Filesystem, UNIX6Filesystem, UNIX7Filesystem
 
 __all__ = [
     "Volumes",
@@ -49,7 +49,7 @@ __all__ = [
 
 DEFAULT_VOLUME = "DK"
 SYSTEM_VOLUME = "SY"
-FILESYSTEMS = {
+FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "caps11": CAPS11Filesystem,
     "dos": DOS11Filesystem,
     "dos11": DOS11Filesystem,
@@ -58,11 +58,11 @@ FILESYSTEMS = {
     "magtape": DOS11MagTapeFilesystem,
     "rt11": RT11Filesystem,
     "solo": SOLOFilesystem,
-    "unix0": lambda f: UNIXFilesystem0(f),
-    "unix1": lambda f: UNIXFilesystem(f, version=1),
-    "unix5": lambda f: UNIXFilesystem(f, version=5),
-    "unix6": lambda f: UNIXFilesystem(f, version=6),
-    "unix7": lambda f: UNIXFilesystem(f, version=7),
+    "unix0": UNIX0Filesystem,
+    "unix1": UNIX1Filesystem,
+    "unix5": UNIX5Filesystem,
+    "unix6": UNIX6Filesystem,
+    "unix7": UNIX7Filesystem,
     "rsts": RSTSFilesystem,
     "os8": OS8Filesystem,
     "dms": DMSFilesystem,
@@ -80,13 +80,13 @@ class Volumes(object):
     DK: Default storage volume (initially the same as SY:)
     """
 
-    volumes: Dict[str, AbstractFilesystem]  # volume id -> fs
-    logical: Dict[str, str]  # local id -> volume id
+    volumes: t.Dict[str, AbstractFilesystem]  # volume id -> fs
+    logical: t.Dict[str, str]  # local id -> volume id
     defdev: str  # Default device, DK
 
     def __init__(self) -> None:
-        self.volumes: Dict[str, AbstractFilesystem] = {}
-        self.logical: Dict[str, str] = {}
+        self.volumes: t.Dict[str, AbstractFilesystem] = {}
+        self.logical: t.Dict[str, str] = {}
         if self._drive_letters():
             # windows
             for letter in self._drive_letters():
@@ -201,7 +201,7 @@ class Volumes(object):
         self,
         path: str,
         logical: str,
-        fstype: Optional[str] = None,
+        fstype: t.Optional[str] = None,
         verbose: bool = False,
         cmd: str = "MOUNT",
     ) -> None:
@@ -215,7 +215,7 @@ class Volumes(object):
         fs = self.get(volume_id, cmd=cmd)
         try:
             filesystem = FILESYSTEMS.get(fstype or "rt11", RT11Filesystem)
-            self.volumes[logical] = filesystem(fs.open_file(fullname))
+            self.volumes[logical] = filesystem.mount(fs.open_file(fullname))
             sys.stdout.write(f"?{cmd}-I-Disk {path} mounted to {logical}:\n")
         except Exception:
             if verbose:

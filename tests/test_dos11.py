@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from rt11.dos11fs import (
+from rt11.pdp11.dos11fs import (
     DOS11Filesystem,
     UserFileDirectoryBlock,
     date_to_dos11,

@@ -26,9 +26,9 @@ import typing as t
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice
-from .commons import (
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..block import BlockDevice
+from ..commons import (
     BLOCK_SIZE,
     READ_FILE_FULL,
     bytes_to_word,
@@ -36,9 +36,9 @@ from .commons import (
     filename_match,
     swap_words,
 )
+from ..uic import ANY_GROUP, ANY_USER, DEFAULT_UIC, UIC
 from .dos11fs import dos11_split_fullname
 from .rad50 import asc2rad, rad2asc, rad50_word_to_asc
-from .uic import ANY_GROUP, ANY_USER, DEFAULT_UIC, UIC
 
 __all__ = [
     "Files11File",
@@ -181,7 +181,19 @@ class Files11File(AbstractFile):
         """
         Write block(s) of data to the file
         """
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        if (
+            self.closed
+            or block_number < 0
+            or number_of_blocks < 0
+            or block_number + number_of_blocks > self.header.length
+        ):
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        for i in range(block_number, block_number + number_of_blocks):
+            lbn = self.header.map_block(i)
+            t = buffer[i * BLOCK_SIZE : (i + 1) * BLOCK_SIZE]
+            if len(t) < BLOCK_SIZE:
+                t = t + bytes([0] * (BLOCK_SIZE - len(t)))  # Pad with zeros
+            self.header.fs.write_block(t, lbn)
 
     def get_size(self) -> int:
         """
@@ -254,7 +266,9 @@ class Files11FileHeader:
     def __init__(self, fs: "Files11Filesystem"):
         self.fs = fs
 
-    def read(self, buffer: bytes, position: int = 0) -> None:
+    @classmethod
+    def read(cls, fs: "Files11Filesystem", buffer: bytes, position: int = 0) -> "Files11FileHeader":
+        self = cls(fs)
         (
             self.idof,  # 1 byte Ident Area Offset
             self.mpof,  # 1 byte Map Area Offset
@@ -312,6 +326,7 @@ class Files11FileHeader:
         self.hibk = swap_words(self.hibk)
         self.efbk = swap_words(self.efbk)
         self.parse_map(buffer, position)
+        return self
 
     def parse_map(self, buffer: bytes, position: int = 0) -> None:
         """
@@ -394,7 +409,9 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         self.uic = uic
         self._header = None
 
-    def read(self, buffer: bytes, position: int = 0) -> None:
+    @classmethod
+    def read(cls, fs: "Files11Filesystem", buffer: bytes, position: int, uic: UIC) -> "Files11DirectoryEntry":
+        self = cls(fs, uic)
         (
             self.fnum,  # 1 word File Number
             self.fseq,  # 1 word File Sequence Number
@@ -407,6 +424,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         ) = struct.unpack_from(DIRECTORY_FILE_ENTRY_FORMAT, buffer, position)
         self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
         self.extension = rad50_word_to_asc(ftyp)
+        return self
 
     @property
     def header(self) -> "Files11FileHeader":
@@ -501,11 +519,13 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
     indf: bytes  #  12 bytes  Format Type  - DECFILE11A
     chk2: int  #     2 bytes  Second Checksum
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         self.read_home()
         self.uic = DEFAULT_UIC
         self.read_home()
+        return self
 
     def read_home(self) -> None:
         """Read home block"""
@@ -570,8 +590,7 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
             indexfs = self.read_file_header(INDEXF_SYS)
             block_number = indexfs.map_block(file_number)
         buffer = self.read_block(block_number)
-        file_header = Files11FileHeader(self)
-        file_header.read(buffer)
+        file_header = Files11FileHeader.read(self, buffer)
         assert file_header.flev == 0o401
         return file_header
 
@@ -584,8 +603,7 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
             f = Files11File(header)
             buffer = f.read_block(0, READ_FILE_FULL)
             for pos in range(0, len(buffer), DIRECTORY_FILE_ENTRY_LEN):
-                entry = Files11DirectoryEntry(self, uic)
-                entry.read(buffer, position=pos)
+                entry = Files11DirectoryEntry.read(self, buffer, position=pos, uic=uic)
                 if not entry.is_empty:
                     yield entry
         finally:

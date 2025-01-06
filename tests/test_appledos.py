@@ -57,7 +57,7 @@ def test_appledos_init():
 
 def test_appledos_init_non_standard():
     shell = Shell(verbose=True)
-    shell.onecmd(f"create {DSK}.mo /allocate:500", batch=True)
+    shell.onecmd(f"create {DSK}.mo /allocate:505", batch=True)
     shell.onecmd(f"mount ou: /appledos {DSK}.mo", batch=True)
     shell.onecmd("init ou:", batch=True)
 

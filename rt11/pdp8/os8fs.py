@@ -27,11 +27,10 @@ import sys
 import typing as t
 from datetime import date
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice12Bit
-from .commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL, filename_match
-from .rad50 import asc2rad, rad2asc
-from .rx import RX_SECTOR_TRACK
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..block import BlockDevice12Bit
+from ..commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL, filename_match
+from ..rx import RX_SECTOR_TRACK
 
 __all__ = [
     "OS8File",
@@ -109,8 +108,10 @@ def os8_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) ->
     except Exception:
         filename = fullname
         extension = "*" if wildcard else ""
-    filename = rad2asc(asc2rad(filename[0:3])) + rad2asc(asc2rad(filename[3:6]))
-    extension = rad2asc(asc2rad(extension))
+    filename = rad50_word12_to_asc(asc_to_rad50_word12(filename[0:3])) + rad50_word12_to_asc(
+        asc_to_rad50_word12(filename[3:6])
+    )
+    extension = rad50_word12_to_asc(asc_to_rad50_word12(extension))
     return f"{filename}.{extension}"
 
 
@@ -828,20 +829,21 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
     http://www.bitsavers.org/pdf/dec/pdp8/os8/DEC-S8-OSSMB-A-D_OS8_v3ssup.pdf Pag 62
     """
 
-    # Number of partitions
-    num_of_partitions: int
-    # Size of each partition
-    partition_size: int
-    # Current partition
-    current_partition: int
+    current_partition: int  # Current partition
+    number_of_blocks: int  # Number of blocks
+    num_of_partitions: int  # Number of partitions
+    partition_size: int  # Size of each partition
+    partitions: t.List[OS8Partition]  # Partitions
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         self.current_partition = 0
         self.number_of_blocks = self.f.get_size() // BLOCK_SIZE
         self.num_of_partitions = 1 + (self.number_of_blocks - 1) // 0o10000
         self.partition_size = self.number_of_blocks // self.num_of_partitions
         self.partitions = [OS8Partition(self, x) for x in range(0, self.num_of_partitions)]
+        return self
 
     def get_partition(self, partition: int) -> OS8Partition:
         try:

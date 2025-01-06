@@ -1,4 +1,4 @@
-from rt11.caps11fs import CAPS11Filesystem
+from rt11.pdp11.caps11fs import CAPS11Filesystem
 from rt11.shell import Shell
 
 DSK = "tests/dsk/caps11.t60"

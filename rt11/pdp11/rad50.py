@@ -26,7 +26,7 @@ __all__ = [
     "asc2rad",
 ]
 
-from .commons import bytes_to_word, word_to_bytes
+from ..commons import bytes_to_word, word_to_bytes
 
 RAD50_ALT = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$.%0123456789:"
 RAD50 = "\0ABCDEFGHIJKLMNOPQRSTUVWXYZ$%*0123456789:"

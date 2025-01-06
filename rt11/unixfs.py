@@ -24,10 +24,10 @@ import math
 import os
 import struct
 import sys
+import typing as t
 from abc import ABC, abstractmethod
 from datetime import date, datetime, timedelta
 from functools import reduce
-from typing import Dict, Iterator, List, Optional, Tuple, Type
 
 from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from .block import BlockDevice
@@ -37,6 +37,11 @@ __all__ = [
     "UNIXFile",
     "UNIXDirectoryEntry",
     "UNIXFilesystem",
+    "UNIX1Filesystem",
+    "UNIX4Filesystem",
+    "UNIX5Filesystem",
+    "UNIX6Filesystem",
+    "UNIX7Filesystem",
 ]
 
 # ==================================================================
@@ -190,7 +195,7 @@ def unix_join(a: str, *p: str) -> str:
     return path
 
 
-def unix_split(p: str) -> Tuple[str, str]:
+def unix_split(p: str) -> t.Tuple[str, str]:
     """
     Split a pathname
     """
@@ -201,18 +206,18 @@ def unix_split(p: str) -> Tuple[str, str]:
     return head, tail
 
 
-def l3tol(data: bytes, n: int) -> List[int]:
+def l3tol(data: bytes, n: int) -> t.List[int]:
     """
     Convert 3-byte integers
     """
-    result: List[int] = []
+    result: t.List[int] = []
     for i in range(0, n * 3, 3):
-        t = (data[i + 1] << 0) + (data[i + 2] << 8) + (data[i + 0] << 16)
-        result.append(t)
+        tmp = (data[i + 1] << 0) + (data[i + 2] << 8) + (data[i + 0] << 16)
+        result.append(tmp)
     return result
 
 
-def iterate_words(data: bytes) -> Iterator[int]:
+def iterate_words(data: bytes) -> t.Iterator[int]:
     """
     Iterate over words in a byte array
     """
@@ -220,7 +225,7 @@ def iterate_words(data: bytes) -> Iterator[int]:
         yield struct.unpack("H", data[i : i + 2])[0]
 
 
-def iterate_long(data: bytes) -> Iterator[int]:
+def iterate_long(data: bytes) -> t.Iterator[int]:
     """
     Iterate over longs in a byte array
     """
@@ -281,8 +286,8 @@ class UNIXFile(AbstractFile):
         data = bytearray()
         for i, next_block_number in enumerate(self.inode.blocks()):
             if i >= block_number:
-                t = self.inode.fs.read_block(next_block_number)
-                data.extend(t)
+                tmp = self.inode.fs.read_block(next_block_number)
+                data.extend(tmp)
                 number_of_blocks -= 1
                 if number_of_blocks == 0:
                     break
@@ -328,9 +333,9 @@ class UNIXInode(ABC):
     flags: int  #          flags
     nlinks: int  #         number of links to file
     uid: int  #            user ID of owner
-    gid: Optional[int]  # group ID of owner
+    gid: t.Optional[int]  # group ID of owner
     size: int  #           size
-    addr: List[int]  #     block numbers or device numbers
+    addr: t.List[int]  #     block numbers or device numbers
     atime: int = 0  #      time of last access
     mtime: int = 0  #      time of last modification
     ctime: int = 0  #      time of last change to the inode
@@ -344,7 +349,7 @@ class UNIXInode(ABC):
         pass
 
     @abstractmethod
-    def blocks(self) -> Iterator[int]:
+    def blocks(self) -> t.Iterator[int]:
         pass
 
     @property
@@ -405,7 +410,7 @@ class UNIXInode1(UNIXInode):
         self.mtime = swap_words(self.mtime)
         return self
 
-    def blocks(self) -> Iterator[int]:
+    def blocks(self) -> t.Iterator[int]:
         if self.is_large:
             # Large file
             for block_number in self.addr:
@@ -470,7 +475,7 @@ class UNIXInode4(UNIXInode):
         self.mtime = swap_words(self.mtime)
         return self
 
-    def blocks(self) -> Iterator[int]:
+    def blocks(self) -> t.Iterator[int]:
         if self.is_large:
             # Large file
             for block_number in self.addr:
@@ -542,7 +547,7 @@ class UNIXInode6(UNIXInode4):
         """
         return self.is_large and (self.addr[V4_NADDR - 1] != 0)
 
-    def blocks(self) -> Iterator[int]:
+    def blocks(self) -> t.Iterator[int]:
         if self.is_huge:
             # Huge file
             for index, block_number in enumerate(self.addr):
@@ -606,7 +611,7 @@ class UNIXInode7(UNIXInode):
     def is_allocated(self) -> bool:
         return self.flags != 0
 
-    def blocks(self) -> Iterator[int]:
+    def blocks(self) -> t.Iterator[int]:
         rem = self.get_size()
         for block_number in self.addr[:-3]:
             if block_number == 0:
@@ -683,12 +688,12 @@ class UNIXInode7(UNIXInode):
 class UNIXDirectoryEntry(AbstractDirectoryEntry):
 
     fs: "UNIXFilesystem"
-    _inode: Optional["UNIXInode"]
+    _inode: t.Optional["UNIXInode"]
     inode_num: int  # Inode number
     filename: str  # File name
     dirname: str  # Parent directory name
 
-    def __init__(self, fs: "UNIXFilesystem", fullname: str, inode_num: int, inode: Optional["UNIXInode"] = None):
+    def __init__(self, fs: "UNIXFilesystem", fullname: str, inode_num: int, inode: t.Optional["UNIXInode"] = None):
         self.fs = fs
         self.dirname, self.filename = unix_split(fullname)
         self.inode_num = inode_num
@@ -725,13 +730,13 @@ class UNIXDirectoryEntry(AbstractDirectoryEntry):
         return self.inode.get_block_size()
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> t.Optional[date]:
         return datetime.fromtimestamp(self.inode.mtime)
 
     def delete(self) -> bool:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def open(self, file_type: Optional[str] = None) -> UNIXFile:
+    def open(self, file_type: t.Optional[str] = None) -> UNIXFile:
         """
         Open a file
         """
@@ -753,37 +758,21 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
     """
 
     version: int  # UNIX version
-    inode_size: int
+    inode_size: int  #
+    dir_format: str
+    root_inode: int  # Root inode number
+    unix_inode_class: t.Type["UNIXInode"]
     pwd: str
     inode_list_blocks: int  # number of blocks devoted to the i-list
     volume_size: int  # size in blocks of entire volume
     free_blocks_in_list: int  # number of free blocks in the free list
     free_inodes_in_list: int  # number of free i-numbers in the inode array
     inodes: int = 0  # number of inodes
-    unix_inode_class: Type["UNIXInode"]
 
-    def __init__(self, file: "AbstractFile", version: int):
-        super().__init__(file)
-        self.version = version
-        self.pwd = "/"
-        if self.version in (1, 2, 3):
-            self.inode_size = V1_INODE_SIZE
-            self.dir_format = V1_DIR_FORMAT
-            self.root_inode = V1_ROOT_INODE
-            self.unix_inode_class = UNIXInode1
-        elif self.version in (4, 5, 6):
-            self.inode_size = V4_INODE_SIZE
-            self.dir_format = V4_DIR_FORMAT
-            self.root_inode = V4_ROOT_INODE
-            self.unix_inode_class = UNIXInode6 if self.version == 6 else UNIXInode4
-        elif self.version == 7:
-            self.inode_size = V7_INODE_SIZE
-            self.dir_format = V7_DIR_FORMAT
-            self.root_inode = V7_ROOT_INODE
-            self.unix_inode_class = UNIXInode7
-        else:
-            raise ValueError(f"Invalid version {self.version}")
-        self.read_superblock()
+    @classmethod
+    @abstractmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        pass
 
     def read_superblock(self) -> None:
         """Read superblock"""
@@ -834,7 +823,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         data = self.f.read(self.inode_size)
         return self.unix_inode_class.read(self, inode_num, data)
 
-    def get_inode(self, path: str) -> Optional["UNIXInode"]:
+    def get_inode(self, path: str) -> t.Optional["UNIXInode"]:
         """
         Get inode by path
         """
@@ -864,7 +853,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
                 if not found:
                     return None
 
-    def list_dir(self, inode: UNIXInode) -> List[Tuple[int, str]]:
+    def list_dir(self, inode: UNIXInode) -> t.List[t.Tuple[int, str]]:
         if not inode.isdir:
             return []
         files = []
@@ -882,7 +871,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
             f.close()
         return files
 
-    def read_dir_entries(self, dirname: str) -> Iterator["UNIXDirectoryEntry"]:
+    def read_dir_entries(self, dirname: str) -> t.Iterator["UNIXDirectoryEntry"]:
         inode = self.get_inode(dirname)
         if inode:
             for inode_num, filename in self.list_dir(inode):
@@ -891,11 +880,11 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
 
     def filter_entries_list(
         self,
-        pattern: Optional[str],
+        pattern: t.Optional[str],
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> Iterator["UNIXDirectoryEntry"]:
+    ) -> t.Iterator["UNIXDirectoryEntry"]:
         if not pattern and expand:
             pattern = "*"
         if pattern and pattern.startswith("/"):
@@ -904,21 +893,21 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
             absolute_path = unix_join(self.pwd, pattern or "")
         if self.isdir(absolute_path):
             if not expand:
-                yield self.get_file_entry(absolute_path)
+                yield self.get_file_entry(absolute_path)  # type: ignore
                 return
             dirname = pattern
             pattern = "*"
         else:
             dirname, pattern = unix_split(absolute_path)
-        for entry in self.read_dir_entries(dirname):
+        for entry in self.read_dir_entries(dirname):  # type: ignore
             if filename_match(entry.basename, pattern, wildcard):
                 yield entry
 
     @property
-    def entries_list(self) -> Iterator["UNIXDirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["UNIXDirectoryEntry"]:
         yield from self.read_dir_entries(self.pwd)
 
-    def get_file_entry(self, fullname: str) -> Optional[UNIXDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Optional[UNIXDirectoryEntry]:
         inode = self.get_inode(fullname)
         if not inode:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -928,8 +917,8 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,
         content: bytes,
-        creation_date: Optional[date] = None,
-        file_type: Optional[str] = None,
+        creation_date: t.Optional[date] = None,
+        file_type: t.Optional[str] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
@@ -937,20 +926,20 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         self,
         fullname: str,
         number_of_blocks: int,  # length in blocks
-        creation_date: Optional[date] = None,  # optional creation date
-        file_type: Optional[str] = None,
-    ) -> Optional[UNIXDirectoryEntry]:
+        creation_date: t.Optional[date] = None,  # optional creation date
+        file_type: t.Optional[str] = None,
+    ) -> t.Optional[UNIXDirectoryEntry]:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def isdir(self, fullname: str) -> bool:
         inode = self.get_inode(fullname)
         return inode is not None and inode.isdir
 
-    def read_uids(self) -> Dict[int, str]:
+    def read_uids(self) -> t.Dict[int, str]:
         """
         Read the uid -> name map
         """
-        result: Dict[int, str] = {}
+        result: t.Dict[int, str] = {}
         filename = "/etc/uids" if self.version < 3 else "/etc/passwd"
         try:
             for line in self.read_text(filename).split("\n"):
@@ -970,7 +959,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
             pass
         return result
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         entries = sorted(self.filter_entries_list(pattern, include_all=True, wildcard=True))
         if not entries:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), pattern)
@@ -1000,12 +989,12 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
                         f"{x.inode_num:>5} {mode}{x.inode.nlinks:>2} {uid:<6}{x.inode.size:>7} {time} {x.basename}\n"
                     )
 
-    def examine(self, arg: Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str]) -> None:
         if arg:
             if arg.isnumeric():
                 # Dump the inode by number
                 inode_num = int(arg)
-                inode: Optional[UNIXInode] = self.read_inode(inode_num)
+                inode: t.Optional[UNIXInode] = self.read_inode(inode_num)
             else:
                 # Dump the inode by path
                 inode = self.get_inode(arg)
@@ -1018,7 +1007,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
                     # Dump the directory entries
                     sys.stdout.write("Directory entries:\n")
                     for inode_num, filename in self.list_dir(inode):
-                        child_inode: Optional[UNIXInode] = self.read_inode(inode_num)
+                        child_inode: t.Optional[UNIXInode] = self.read_inode(inode_num)
                         sys.stdout.write(f"{child_inode} {filename}\n")
         else:
             # Dump the entire filesystem
@@ -1034,7 +1023,10 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         """
         return self.f.get_size()
 
-    def initialize(self, **kwargs: str) -> None:
+    def initialize(self, **kwargs: t.Union[bool, str]) -> None:
+        """
+        Create an empty UNIX filesystem
+        """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def close(self) -> None:
@@ -1058,3 +1050,81 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         Get the current directory
         """
         return self.pwd
+
+
+class UNIX1Filesystem(UNIXFilesystem):
+    """
+    UNIX version 1, 2, 3 Filesystem
+    """
+
+    version: int = 1  # UNIX version
+    inode_size = V1_INODE_SIZE
+    dir_format = V1_DIR_FORMAT
+    root_inode = V1_ROOT_INODE
+    unix_inode_class = UNIXInode1
+
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
+        self.pwd = "/"
+        self.inode_size = V1_INODE_SIZE
+        self.dir_format = V1_DIR_FORMAT
+        self.root_inode = V1_ROOT_INODE
+        self.unix_inode_class = UNIXInode1
+        self.read_superblock()
+        return self
+
+
+class UNIX4Filesystem(UNIXFilesystem):
+    """
+    UNIX version 4, 5, 6 Filesystem
+    """
+
+    version: int = 4  # UNIX version
+    inode_size = V4_INODE_SIZE
+    dir_format = V4_DIR_FORMAT
+    root_inode = V4_ROOT_INODE
+    unix_inode_class = UNIXInode4
+
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
+        self.pwd = "/"
+        self.read_superblock()
+        return self
+
+
+class UNIX5Filesystem(UNIX4Filesystem):
+    """
+    UNIX version 5 Filesystem
+    """
+
+    version: int = 5  # UNIX version
+
+
+class UNIX6Filesystem(UNIX4Filesystem):
+    """
+    UNIX version 6 Filesystem
+    """
+
+    version: int = 6  # UNIX version
+    unix_inode_class = UNIXInode6
+
+
+class UNIX7Filesystem(UNIXFilesystem):
+    """
+    UNIX version 7 Filesystem
+    """
+
+    version: int = 7  # UNIX version
+    inode_size = V7_INODE_SIZE
+    dir_format = V7_DIR_FORMAT
+    root_inode = V7_ROOT_INODE
+    unix_inode_class = UNIXInode7
+
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
+        self.pwd = "/"
+        self.read_superblock()
+        return self

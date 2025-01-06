@@ -26,10 +26,10 @@ import sys
 import typing as t
 from datetime import date
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
+from ..tape import Tape
 from .rt11fs import rt11_canonical_filename
-from .tape import Tape
 
 __all__ = [
     "CAPS11File",
@@ -373,6 +373,11 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
     CAPS-11 Users Guide, Pag 287
     http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
     """
+
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
+        return self
 
     def read_file_headers(self, include_eot: bool = False) -> t.Iterator["CAPS11DirectoryEntry"]:
         """Read file headers"""

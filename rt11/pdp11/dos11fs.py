@@ -27,12 +27,12 @@ import sys
 import typing as t
 from datetime import date, timedelta
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice
-from .commons import BLOCK_SIZE, READ_FILE_FULL, bytes_to_word, filename_match
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..block import BlockDevice
+from ..commons import BLOCK_SIZE, READ_FILE_FULL, bytes_to_word, filename_match
+from ..uic import ANY_UIC, DEFAULT_UIC, UIC
 from .rad50 import asc_to_rad50_word, rad50_word_to_asc
 from .rt11fs import rt11_canonical_filename
-from .uic import ANY_UIC, DEFAULT_UIC, UIC
 
 __all__ = [
     "DOS11DirectoryEntry",
@@ -804,9 +804,11 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
     dectape: bool = False  # DECtape format
     bitmap_start_block: int = 0
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         self.uic = DEFAULT_UIC
+        return self
 
     def read_mfd_entries(
         self,

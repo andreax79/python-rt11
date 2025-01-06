@@ -1,6 +1,6 @@
 import pytest
 
-from rt11.dos11fs import DOS11Filesystem, UserFileDirectoryBlock
+from rt11.pdp11.dos11fs import DOS11Filesystem, UserFileDirectoryBlock
 from rt11.shell import Shell
 
 DSK = "tests/dsk/dos11_dectape.tap"

@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from rt11.rstsfs import (  # UserFileDirectoryBlock,; date_to_rsts,; rsts_to_date,
+from rt11.pdp11.rstsfs import (  # UserFileDirectoryBlock,; date_to_rsts,; rsts_to_date,
     ANY_GROUP,
     ANY_USER,
     PPN,

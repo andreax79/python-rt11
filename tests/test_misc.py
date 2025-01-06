@@ -3,8 +3,8 @@ from datetime import date
 import pytest
 
 from rt11.commons import PartialMatching, bytes_to_word, word_to_bytes
-from rt11.rad50 import asc2rad, rad2asc
-from rt11.rt11fs import date_to_rt11, rt11_canonical_filename, rt11_to_date
+from rt11.pdp11.rad50 import asc2rad, rad2asc
+from rt11.pdp11.rt11fs import date_to_rt11, rt11_canonical_filename, rt11_to_date
 from rt11.shell import extract_options
 
 

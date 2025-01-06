@@ -1,7 +1,7 @@
 import pytest
 
 from rt11.native import NativeFilesystem
-from rt11.rt11fs import RT11Filesystem
+from rt11.pdp11.rt11fs import RT11Filesystem
 from rt11.shell import Shell
 
 

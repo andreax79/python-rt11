@@ -26,9 +26,9 @@ import sys
 import typing as t
 from datetime import date
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .block import BlockDevice
-from .commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
+from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..block import BlockDevice
+from ..commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
 
 __all__ = [
     "SOLOFile",
@@ -785,12 +785,14 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
 
     catalog_length: int
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file)
         # Get catalog length
         buffer = self.read_block(CAT_ADDR)
         self.catalog_length = struct.unpack_from("<H", buffer, 0)[0]
         # assert self.catalog_length == 15
+        return self
 
     def read_block(
         self,

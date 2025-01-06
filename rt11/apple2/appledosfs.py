@@ -59,7 +59,9 @@ VTOC_ADDRESS = TrackSector(VTOC_TRACK, VTOC_SECTOR)
 VTOC_FORMAT = "<BBBB2sB32sB8sBB2sBBH"
 VTOC_BITMAP_OFFSET = struct.calcsize(VTOC_FORMAT)
 VTOC_BITMAP_TRACK_SIZE = 4  # 4 bytes per track
-VTOC_MAX_TRACKS = (SECTOR_SIZE - VTOC_BITMAP_OFFSET) // VTOC_BITMAP_TRACK_SIZE # Maximum number of tracks, limited by the bitmap size
+VTOC_MAX_TRACKS = (
+    SECTOR_SIZE - VTOC_BITMAP_OFFSET
+) // VTOC_BITMAP_TRACK_SIZE  # Maximum number of tracks, limited by the bitmap size
 
 DEFAULT_VOLUME_NUMBER = 254  # Default volume number
 DEFAULT_DOS_VERSION = 3  # Default DOS version (DOS 3.3)
@@ -895,8 +897,9 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
     number_of_tracks: int  # Number of tracks on disk
     sectors_per_track: int  # Sectors per track
 
-    def __init__(self, file: "AbstractFile"):
-        super().__init__(file, rx_device_support=False)
+    @classmethod
+    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+        self = cls(file, rx_device_support=False)
         vtoc: t.Optional[AppleDOSVTOC] = None
         # Read VTOC in DOS order
         self.prodos_order = False
@@ -927,6 +930,7 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
                 self.number_of_tracks = vtoc.number_of_tracks
             if vtoc.sectors_per_track > 0:
                 self.sectors_per_track = vtoc.sectors_per_track
+        return self
 
     def filter_entries_list(
         self,
