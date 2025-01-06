@@ -1,6 +1,7 @@
 import pytest
 
 from rt11.apple2.appledosfs import AppleDOSFilesystem
+from rt11.apple2.commons import ProDOSFileInfo, decode_apple_single, encode_apple_single
 from rt11.shell import Shell
 
 DSK = "tests/dsk/appledos.dsk"
@@ -32,7 +33,6 @@ def test_appledos():
 
 
 def test_appledos_init():
-    # Init
     shell = Shell(verbose=True)
     shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
     shell.onecmd(f"mount t: /appledos {DSK}", batch=True)
@@ -53,3 +53,34 @@ def test_appledos_init():
     shell.onecmd("delete ou:50.txt", batch=True)
     with pytest.raises(FileNotFoundError):
         fs.read_bytes("50.txt")
+
+
+def test_appledos_init_non_standard():
+    shell = Shell(verbose=True)
+    shell.onecmd(f"create {DSK}.mo /allocate:500", batch=True)
+    shell.onecmd(f"mount ou: /appledos {DSK}.mo", batch=True)
+    shell.onecmd("init ou:", batch=True)
+
+
+def test_apple_single():
+    info = ProDOSFileInfo(0xFF, 0x34, 0x5678)
+    data = b"Hello, world!"
+    apple_single = encode_apple_single(info, data)
+    data2, _, info2 = decode_apple_single(apple_single)
+    assert info.access == info2.access
+    assert info.file_type == info2.file_type
+    assert info.aux_type == info2.aux_type
+
+    shell = Shell(verbose=True)
+    shell.onecmd(f"create {DSK}.mo /allocate:280", batch=True)
+    shell.onecmd(f"mount ou: /appledos {DSK}.mo", batch=True)
+    shell.onecmd("init ou:", batch=True)
+    fs = shell.volumes.get('OU')
+
+    shell.onecmd("copy tests/dsk/ciao.apple2 ou:", batch=True)
+    test1 = fs.get_file_entry("ciao.apple2")
+    assert test1.file_type == "B"
+    apple_single3 = fs.read_bytes("ciao.apple2")
+    _, _, info3 = decode_apple_single(apple_single3)
+    assert info3.file_type == 0x6
+    assert info3.aux_type == 0x2000

@@ -35,6 +35,7 @@ from ..commons import (
     filename_match,
     hex_dump,
 )
+from .commons import ProDOSFileInfo, decode_apple_single, encode_apple_single
 from .disk import SECTOR_SIZE, AppleDisk, TrackSector
 
 __all__ = [
@@ -56,8 +57,9 @@ VTOC_TRACK = 17  # Track of VTOC
 VTOC_SECTOR = 0  # Sector of VTOC
 VTOC_ADDRESS = TrackSector(VTOC_TRACK, VTOC_SECTOR)
 VTOC_FORMAT = "<BBBB2sB32sB8sBB2sBBH"
-VTOC_BITMAP_OFFSET = 0x38
+VTOC_BITMAP_OFFSET = struct.calcsize(VTOC_FORMAT)
 VTOC_BITMAP_TRACK_SIZE = 4  # 4 bytes per track
+VTOC_MAX_TRACKS = (SECTOR_SIZE - VTOC_BITMAP_OFFSET) // VTOC_BITMAP_TRACK_SIZE # Maximum number of tracks, limited by the bitmap size
 
 DEFAULT_VOLUME_NUMBER = 254  # Default volume number
 DEFAULT_DOS_VERSION = 3  # Default DOS version (DOS 3.3)
@@ -75,10 +77,10 @@ FILE_TYPE_TEXT = 0x00  # Text file
 FILE_TYPE_INTEGER_BASIC = 0x01  # Integer BASIC file
 FILE_TYPE_APPLESOFT_BASIC = 0x02  # Applesoft BASIC file
 FILE_TYPE_BINARY = 0x04  # Binary file
-FILE_TYPE_SPECIAL = 0x08  # S type file
+FILE_TYPE_SPECIAL = 0x08  # Type S file
 FILE_TYPE_RELOCABLE = 0x10  # Relocatable object module file
-FILE_TYPE_A = 0x20  # A type file
-FILE_TYPE_B = 0x40  # B type file
+FILE_TYPE_A = 0x20  # New type A file
+FILE_TYPE_B = 0x40  # New type B file
 
 LOCKED_FLAG = 0x80
 DELETED_TRACK = 0xFF
@@ -93,6 +95,15 @@ FILE_TYPES = {
     FILE_TYPE_A: "a",
     FILE_TYPE_B: "b",
 }
+
+PRODOS_TXT_FILE_TYPE = 0x04  # Text file type (mapped to T)
+PRODOS_BIN_FILE_TYPE = 0x06  # Binary file type (mapped to B)
+PRODOS_INT_FILE_TYPE = 0xFA  # Integer BASIC file type (mapped to I)
+PRODOS_BAS_FILE_TYPE = 0xFC  # Applesoft BASIC file type (mapped to A)
+PRODOS_REL_FILE_TYPE = 0xFE  # Relocable object file type (mapped to R)
+
+BINARY_FILE_FORMAT = "<HH"  # Addres/Length
+BASIC_FILE_FORMAT = "<H"  # Length
 
 
 def appledos_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) -> t.Optional[str]:
@@ -346,6 +357,9 @@ class AppleDOSVTOC:
         self.allocation_direction = 255  # allocation direction
         self.reserved_4 = b"\0" * 2  # reserved
         self.number_of_tracks = fs.number_of_tracks  # number of tracks on disk
+        if fs.number_of_tracks > VTOC_MAX_TRACKS:
+            self.number_of_tracks = VTOC_MAX_TRACKS
+            fs.number_of_tracks = self.number_of_tracks
         self.sectors_per_track = fs.sectors_per_track  # sectors per track
         self.bytes_per_sector = SECTOR_SIZE  # bytes per sector
         # Initialize the bitmap
@@ -756,6 +770,28 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
         """
         return FILE_TYPES.get(self.raw_file_type)
 
+    def read_bytes(self, file_type: t.Optional[str] = None) -> bytes:
+        """Get the content of the file"""
+        data = super().read_bytes()
+        if self.file_type == "B":
+            # Binary File Format on Disk
+            # +------------------+-----------------+------------------
+            # | Address (2 byte) | Length (2 byte) | Memory image ...
+            # +------------------+-----------------+------------------
+            # https://archive.org/details/beneath-apple-dos-prodos-2020/page/42/mode/2up
+            address, length = struct.unpack_from(BINARY_FILE_FORMAT, data, 0)
+            prodos_file_info = ProDOSFileInfo(0xFF, PRODOS_BIN_FILE_TYPE, address)
+            data = encode_apple_single(prodos_file_info, data[struct.calcsize(BINARY_FILE_FORMAT) :])
+        elif self.file_type == "A" or self.file_type == "I":
+            # Integer/Applesoft Basic File Format on Disk
+            # +-----------------+--------------------------
+            # | Length (2 byte) | Program memory image ...
+            # +-----------------+--------------------------
+            # https://archive.org/details/beneath-apple-dos-prodos-2020/page/44/mode/2up
+            length = struct.unpack_from(BASIC_FILE_FORMAT, data, 0)[0]
+            data = data[struct.calcsize(BASIC_FILE_FORMAT) : -length]
+        return data
+
     def blocks(self, include_indexes: bool = False) -> t.Iterator[TrackSector]:
         """
         Iterate over the sectors of the file
@@ -932,6 +968,39 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
         """
         Write content to a file
         """
+        # Check if the file is an AppleSingle file and extract the content and metadata
+        try:
+            content, _, prodos_file_info = decode_apple_single(content)
+            if prodos_file_info is not None and file_type is None:
+                # Map ProDOS file type to DOS file type
+                if prodos_file_info.file_type == PRODOS_TXT_FILE_TYPE:
+                    file_type = "T"
+                elif prodos_file_info.file_type == PRODOS_BIN_FILE_TYPE:
+                    # Binary File Format on Disk
+                    # +------------------+-----------------+------------------
+                    # | Address (2 byte) | Length (2 byte) | Memory image ...
+                    # +------------------+-----------------+------------------
+                    # https://archive.org/details/beneath-apple-dos-prodos-2020/page/42/mode/2up
+                    file_type = "B"
+                    header = struct.pack(BINARY_FILE_FORMAT, prodos_file_info.aux_type, len(content))
+                    content = header + content
+                elif prodos_file_info.file_type in (PRODOS_INT_FILE_TYPE, PRODOS_BAS_FILE_TYPE):
+                    # Integer/Applesoft Basic File Format on Disk
+                    # +-----------------+--------------------------
+                    # | Length (2 byte) | Program memory image ...
+                    # +-----------------+--------------------------
+                    # https://archive.org/details/beneath-apple-dos-prodos-2020/page/44/mode/2up
+                    if prodos_file_info.file_type == PRODOS_INT_FILE_TYPE:
+                        file_type = "I"
+                    else:
+                        file_type = "A"
+                    header = struct.pack(BASIC_FILE_FORMAT, len(content))
+                    content = header + content
+                elif prodos_file_info.file_type == PRODOS_REL_FILE_TYPE:
+                    file_type = "R"
+        except ValueError:
+            pass
+
         number_of_blocks = int(math.ceil(len(content) / SECTOR_SIZE))
         entry = self.create_file(
             fullname=fullname,

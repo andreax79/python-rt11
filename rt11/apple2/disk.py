@@ -99,7 +99,8 @@ class AppleDisk(BlockDevice):
             self.sectors_per_track = floppy_size.sectors_per_track
             self.number_of_tracks = floppy_size.number_of_tracks
         except ValueError:
-            pass
+            self.sectors_per_track = SECTORS_PER_TRACK
+            self.number_of_tracks = file.get_size() // SECTOR_SIZE // self.sectors_per_track
 
     def read_block(
         self,

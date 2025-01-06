@@ -292,11 +292,10 @@ class AbstractFilesystem:
 
     def read_bytes(self, fullname: str, file_type: t.Optional[str] = None) -> bytes:
         """Get the content of a file"""
-        f = self.open_file(fullname, file_type)
-        try:
-            return f.read_block(0, READ_FILE_FULL)[: f.get_size()]
-        finally:
-            f.close()
+        entry = self.get_file_entry(fullname)
+        if not entry:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+        return entry.read_bytes(file_type)
 
     def read_text(self, fullname: str, encoding: str = "ascii", errors: str = "ignore", file_type: str = ASCII) -> str:
         """Get the content of a file as text"""
