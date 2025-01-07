@@ -50,7 +50,7 @@ The following commands are availables:
 * MOUNT           Assigns a logical disk unit to a file
 * PWD             Displays the current working drive and directory
 * SHELL           Executes a system shell command
-* SHOW            Displays the volume assignment
+* SHOW		      Displays software status
 * TYPE            Outputs files to the terminal
 
 Usage example
@@ -180,7 +180,7 @@ UNIX
 * [UNIX version 2 fs man page](http://squoze.net/UNIX/v2man/man5/fs)
 * [UNIX version 3 fs man page](http://squoze.net/UNIX/v3man/man5/fs)
 * [UNIX version 4 fs man page](http://squoze.net/UNIX/v4man/man5/fs)
-* [UNIX version 5 fs man page](http://squoze.net/UNIX/v6man/man5/fs)
+* [UNIX version 5 fs man page](http://squoze.net/UNIX/v5man/man5/fs)
 * [UNIX version 6 fs man page](http://squoze.net/UNIX/v6man/man5/fs)
 
 RSTS/E
@@ -205,3 +205,15 @@ Apple II ProDOS / Apple III SOS (Sophisticated Operating System)
 
 * [ProDOS 8 Technical Reference Manual](http://www.easy68k.com/paulrsm/6502/PDOS8TRM.HTM)
 * [Apple III SOS Reference Manual Volume 1 - How SOS Works.PDF](https://apple3.org/Documents/Manuals/Apple%20III%20SOS%20Reference%20Manual%20Volume%201%20-%20How%20SOS%20Works.PDF)
+
+Apple II Pascal
+---------------
+
+* [Apple II Pascal 1.3](https://archive.org/details/apple-ii-pascal-1.3/page/n803/mode/2up)
+
+
+Apple II AppleDOS
+-----------------
+
+* [Beneath Apple DOS](https://archive.org/details/Beneath_Apple_DOS_alt/page/n17/mode/2up)
+* [Beneath Apple DOS ProDOS 2020](https://archive.org/details/beneath-apple-dos-prodos-2020/page/30/mode/2up)

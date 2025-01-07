@@ -783,15 +783,19 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
           +-------------------------------------+
     """
 
+    fs_name = "solo"
+    fs_description = "PDP-11 SOLO"
+
     catalog_length: int
 
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
         self = cls(file)
         # Get catalog length
         buffer = self.read_block(CAT_ADDR)
         self.catalog_length = struct.unpack_from("<H", buffer, 0)[0]
-        # assert self.catalog_length == 15
+        if self.catalog_length != 15:
+            raise OSError(errno.EIO, "Invalid catalog length")
         return self
 
     def read_block(

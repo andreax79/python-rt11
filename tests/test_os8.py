@@ -133,8 +133,8 @@ def test_os8_write_rx01():
     diskname = "tests/dsk/os8.rx01.mo"
     with open(diskname, "wb") as f:
         f.truncate(RX01_SIZE)
+    shell.onecmd(f"init /os8 {diskname}", batch=True)
     shell.onecmd(f"mount ou: /os8 {diskname}", batch=True)
-    shell.onecmd("init ou:", batch=True)
     shell.onecmd("dir ou:", batch=True)
     fs = shell.volumes.get('OU')
     assert isinstance(fs, OS8Filesystem)
@@ -155,7 +155,6 @@ def test_os8_write_rx01():
 def test_os8():
     shell = Shell(verbose=True)
     shell.onecmd(f"mount t: /os8 {DSK}", batch=True)
-    shell.onecmd(f"mount ou: /os8 {DSK}.mo", batch=True)
     fs = shell.volumes.get('T')
     assert isinstance(fs, OS8Filesystem)
 
@@ -172,13 +171,24 @@ def test_os8():
     l = list(fs.filter_entries_list("*.TX[0]"))
     assert len(l) == 6
 
-    # Init
-    shell.onecmd("init ou:", batch=True)
+
+def test_os8_init():
+    shell = Shell(verbose=True)
+    shell.onecmd(f"mount t: /os8 {DSK}", batch=True)
+    shell.onecmd(f"create /allocate:280 {DSK}.mo", batch=True)
+    shell.onecmd(f"init /os8 {DSK}.mo", batch=True)
+    shell.onecmd(f"mount ou: /os8 {DSK}.mo", batch=True)
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("copy t:*.TX ou:", batch=True)
+    fs = shell.volumes.get('OU')
 
     x1 = fs.read_bytes("[0]50.tx")
     x1 = x1.rstrip(b"\0")
     assert len(x1) == 2200
     for i in range(0, 50):
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x1
+
+    # Test init mounted volume
+    shell.onecmd("init ou:", batch=True)
+    with pytest.raises(Exception):
+        print(fs.read_bytes("[0]50.tx"))

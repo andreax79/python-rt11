@@ -444,6 +444,9 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
     RT-11 Filesystem
     """
 
+    fs_name = "rt11"
+    fs_description = "PDP-11 RT-11"
+
     # First directory segment block
     dir_segment: int = DEFAULT_DIR_SEGMENT
     # System version
@@ -635,9 +638,9 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
                     raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), fullname)
             entry.segment.insert_entry_after(entry, entry_number, length)
         # Fill the entry
-        t = os.path.splitext(fullname.upper())
-        entry.filename = t[0]
-        entry.extension = t[1] and t[1][1:] or ""
+        tmp = os.path.splitext(fullname.upper())
+        entry.filename = tmp[0]
+        entry.extension = tmp[1] and tmp[1][1:] or ""
         entry.raw_creation_date = date_to_rt11(creation_date)
         entry.job = 0
         entry.channel = 0

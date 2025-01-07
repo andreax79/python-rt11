@@ -75,14 +75,15 @@ def test_prodos():
 def test_prodos_init():
     # Init
     shell = Shell(verbose=True)
-    shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
     shell.onecmd(f"mount t: /prodos {DSK}", batch=True)
+    shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
+    shell.onecmd(f"init /prodos {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /prodos {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("create/directory ou:aaa", batch=True)
     shell.onecmd("create/directory ou:aaa/bbb", batch=True)
     shell.onecmd("copy t:small/medium/*.txt ou:aaa/bbb", batch=True)
+    shell.onecmd("copy t:small/1.txt ou:", batch=True)
     fs = shell.volumes.get('OU')
 
     x1 = fs.read_bytes("aaa/bbb/50.txt")
@@ -92,11 +93,17 @@ def test_prodos_init():
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x1
 
     shell.onecmd("delete ou:aaa", batch=True)
+    assert fs.read_bytes("1.txt")
     with pytest.raises(FileNotFoundError):
         x1 = fs.read_bytes("aaa/bbb/50.txt")
     shell.onecmd("ou:", batch=True)
     shell.onecmd("cd aaa/bbb", batch=True)
     shell.onecmd("dir", batch=True)
+
+    # Test init mounted volume
+    shell.onecmd("init ou:", batch=True)
+    with pytest.raises(Exception):
+        fs.read_bytes("1.txt")
 
 
 def test_grow_dir():
@@ -119,8 +126,8 @@ def test_types():
 
     shell = Shell(verbose=True)
     shell.onecmd(f"create {DSK}.mo /allocate:2000", batch=True)
+    shell.onecmd(f"init /prodos {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /prodos {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
     fs = shell.volumes.get('OU')
     shell.onecmd("create ou:test1 /allocate:1 /type:txt,3000", batch=True)
     test1 = fs.get_file_entry("test1")
@@ -137,8 +144,8 @@ def test_types():
 def test_pascal_area():
     shell = Shell(verbose=True)
     shell.onecmd(f"create {DSK}.mo /allocate:2000", batch=True)
+    shell.onecmd(f"init /prodos {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /prodos {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
     shell.onecmd("create ou:pascal.area /allocate:500", batch=True)
     shell.onecmd("create ou:pascal.area/vol1 /allocate:200", batch=True)
     shell.onecmd("create ou:pascal.area/vol2 /allocate:100", batch=True)
@@ -173,8 +180,8 @@ def test_apple_single():
 
     shell = Shell(verbose=True)
     shell.onecmd(f"create {DSK}.mo /allocate:2000", batch=True)
+    shell.onecmd(f"init /prodos {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /prodos {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
     fs = shell.volumes.get('OU')
     shell.onecmd("copy tests/dsk/ciao.apple2 ou:", batch=True)
     test1 = fs.get_file_entry("ciao.apple2")

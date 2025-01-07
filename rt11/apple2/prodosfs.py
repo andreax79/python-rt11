@@ -1761,15 +1761,21 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
 
     """
 
+    fs_name = "prodos"
+    fs_description = "Apple II ProDOS"
+
     pwd: str  # Current working directory
     volume_name: str  # Volume name
     total_blocks: int  # The total number of blocks on the volume
     bit_map_pointer: int  # Volume bitmap pointer
     root: "DirectoryFileEntry"  # Root directory entry
 
+    def __init__(self, file: "AbstractFile"):
+        super().__init__(file, rx_device_support=False)
+
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
-        self = cls(file, rx_device_support=False)
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
+        self = cls(file)
         self.pwd = "/"
         # Dummy root directory entry
         self.root = VolumeDirectoryFileEntry(self, parent=None)
@@ -1777,7 +1783,8 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
         if not self.read_volume_directory_header():
             # Try ProDOS order
             self.prodos_order = True
-            self.read_volume_directory_header()
+            if not self.read_volume_directory_header():
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
         return self
 
     def read_volume_directory_header(self) -> bool:

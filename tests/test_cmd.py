@@ -47,8 +47,8 @@ def test_cmds():
     f.close()
     # Create ad initialize the RT-11 filesystem
     shell.onecmd("CREATE test0.dsk /allocate:500", batch=True)
+    shell.onecmd("INITIALIZE /RT11 test0.dsk", batch=True)
     shell.onecmd("MOUNT T: test0.dsk", batch=True)
-    shell.onecmd("INITIALIZE T:", batch=True)
     fs = shell.volumes.get('T')
     assert isinstance(fs, RT11Filesystem)
     with pytest.raises(FileNotFoundError):

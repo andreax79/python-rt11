@@ -1,6 +1,6 @@
 CREATE/ALLOCATE:280 pascal.dsk
+INITIALIZE/PASCAL /NAME:PAS pascal.dsk
 MOUNT/PASCAL pas: pascal.dsk
-INITIALIZE/NAME:PAS pas:
 COPY/TYPE:TEXT data/1.txt pas:
 COPY/TYPE:TEXT data/2.txt pas:
 COPY/TYPE:TEXT data/5.txt pas:

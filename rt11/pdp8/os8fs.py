@@ -829,29 +829,41 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
     http://www.bitsavers.org/pdf/dec/pdp8/os8/DEC-S8-OSSMB-A-D_OS8_v3ssup.pdf Pag 62
     """
 
+    fs_name = "os8"
+    fs_description = "PDP-8 OS/8"
+
     current_partition: int  # Current partition
     number_of_blocks: int  # Number of blocks
-    num_of_partitions: int  # Number of partitions
-    partition_size: int  # Size of each partition
-    partitions: t.List[OS8Partition]  # Partitions
+
+    @property
+    def num_of_partitions(self) -> int:
+        """Get the number of partitions"""
+        return 1 + (self.number_of_blocks - 1) // 0o10000
+
+    @property
+    def partition_size(self) -> int:  # Size of each partition
+        """Get the size of each partition"""
+        return self.number_of_blocks // self.num_of_partitions
+
+    def get_partition(self, partition_number: int) -> OS8Partition:
+        """
+        Get a partition by number
+        """
+        try:
+            if partition_number is None:
+                partition_number = self.current_partition
+            if partition_number < 0 or partition_number >= self.num_of_partitions:
+                raise ValueError
+            return OS8Partition(self, partition_number)
+        except:
+            raise FileNotFoundError(errno.ENOENT, "Partition not found", partition_number)
 
     @classmethod
     def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
         self = cls(file)
         self.current_partition = 0
         self.number_of_blocks = self.f.get_size() // BLOCK_SIZE
-        self.num_of_partitions = 1 + (self.number_of_blocks - 1) // 0o10000
-        self.partition_size = self.number_of_blocks // self.num_of_partitions
-        self.partitions = [OS8Partition(self, x) for x in range(0, self.num_of_partitions)]
         return self
-
-    def get_partition(self, partition: int) -> OS8Partition:
-        try:
-            if partition is None:
-                partition = self.current_partition
-            return self.partitions[partition]
-        except:
-            raise FileNotFoundError(errno.ENOENT, "Partition not found", partition)
 
     def filter_entries_list(
         self,
@@ -970,7 +982,8 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         else:
             sys.stdout.write(f"Number of partitions:     {self.num_of_partitions}\n")
             sys.stdout.write(f"Size of each partition:   {self.partition_size}\n")
-            for partition in self.partitions:
+            for partition_number in range(0, self.num_of_partitions):
+                partition = self.get_partition(partition_number)
                 sys.stdout.write(f"{partition}\n")
                 for segment in partition.read_dir_segments():
                     sys.stdout.write(f"{segment}\n")
@@ -1006,7 +1019,11 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         """
         Create an empty OS/8 filesystem
         """
-        for partition in self.partitions:
+        self.current_partition = 0
+        self.number_of_blocks = self.f.get_size() // BLOCK_SIZE
+        # Initialize the partitions
+        for partition_number in range(0, self.num_of_partitions):
+            partition = OS8Partition(self, partition_number)
             partition.initialize(**kwargs)
 
     def get_size(self) -> int:

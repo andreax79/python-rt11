@@ -1,6 +1,8 @@
 import random
 import string
 
+import pytest
+
 from rt11.commons import ASCII, IMAGE
 from rt11.pdp8.dmsfs import (
     FILE_TYPE_ASCII,
@@ -286,7 +288,6 @@ def test_dms():
 
     shell = Shell(verbose=True)
     shell.onecmd(f"mount t: /dms {DSK}", batch=True)
-    shell.onecmd(f"mount ou: /dms {DSK}.mo", batch=True)
     fs = shell.volumes.get('T')
     assert isinstance(fs, DMSFilesystem)
 
@@ -303,7 +304,8 @@ def test_dms():
     assert len(l) == 7
 
     # Init
-    shell.onecmd("init ou:", batch=True)
+    shell.onecmd(f"init /dms {DSK}.mo", batch=True)
+    shell.onecmd(f"mount ou: /dms {DSK}.mo", batch=True)
     shell.onecmd("ex ou:", batch=True)
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("copy t:*.ascii ou:", batch=True)
@@ -336,3 +338,8 @@ def test_dms():
     shell.onecmd("del ou:*.user", batch=True)
     l = list(fs.filter_entries_list("*.user"))
     assert len(l) == 0
+
+    # Test init mounted volume
+    shell.onecmd("init ou:", batch=True)
+    with pytest.raises(Exception):
+        fs.read_bytes("50.ascii")

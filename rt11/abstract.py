@@ -203,6 +203,9 @@ class AbstractDirectoryEntry(ABC):
 class AbstractFilesystem:
     """Abstract base class for filesystem implementations"""
 
+    fs_name: str  # Filesystem name
+    fs_description: str  # Filesystem description
+
     @classmethod
     @abstractmethod
     def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":

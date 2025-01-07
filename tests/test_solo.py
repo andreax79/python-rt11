@@ -53,9 +53,16 @@ def test_solo_write():
     for i in range(0, 10):
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x2
 
-    shell.onecmd("init ou:", batch=True)
+
+def test_solo_init_write():
+    shell = Shell(verbose=True)
+    shell.onecmd(f"mount in: /solo {DSK}", batch=True)
+    shell.onecmd(f"create /allocate:4800 {DSK}.mo", batch=True)
+    shell.onecmd(f"init /solo {DSK}.mo", batch=True)
+    shell.onecmd(f"mount ou: /solo {DSK}.mo", batch=True)
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("copy in:*.TXT ou:", batch=True)
+    fs = shell.volumes.get('OU')
 
     x = fs.read_bytes("50.txt")
     x = x.rstrip(b"\0")
@@ -66,6 +73,11 @@ def test_solo_write():
     entry = fs.get_file_entry("50.txt")
     hash_key = entry.hash_key
     assert fs.get_searchlength(hash_key) == 1
+
+    # Test init mounted volume
+    shell.onecmd("init ou:", batch=True)
+    with pytest.raises(Exception):
+        fs.read_bytes("50.txt")
 
 
 def test_dos11_bitmap():

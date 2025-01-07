@@ -1,3 +1,4 @@
+import shlex
 from datetime import date
 
 import pytest
@@ -127,7 +128,7 @@ def test_extract_options():
     line = "command /a /b /c:1 /d:abc /flag value1 value2"
     options = ("/a", "/b", "/c", "/d", "/flag")
 
-    args, opts = extract_options(line, *options)
+    args, opts = extract_options(shlex.split(line), *options)
     assert args == ["command", "value1", "value2"]
     assert opts == {"a": True, "b": True, "c": "1", "d": "abc", "flag": True}
 
@@ -136,7 +137,7 @@ def test_extract_options_with_no_options():
     line = "command value1 value2"
     options = ("/a", "/b", "/flag")
 
-    args, opts = extract_options(line, *options)
+    args, opts = extract_options(shlex.split(line), *options)
     assert args == ["command", "value1", "value2"]
     assert opts == {}
 
@@ -145,7 +146,7 @@ def test_extract_options_with_some_options():
     line = "command /a value1 /flag value2"
     options = ("/a", "/b", "/flag")
 
-    args, opts = extract_options(line, *options)
+    args, opts = extract_options(shlex.split(line), *options)
     assert args == ["command", "value1", "value2"]
     assert opts == {"a": True, "flag": True}
 
@@ -154,7 +155,7 @@ def test_extract_options_case_insensitive():
     line = "command /A /B /FLAG value1 value2"
     options = ("/a", "/b", "/flag")
 
-    args, opts = extract_options(line, *options)
+    args, opts = extract_options(shlex.split(line), *options)
     assert args == ["command", "value1", "value2"]
     assert opts == {"a": True, "b": True, "flag": True}
 
@@ -163,6 +164,6 @@ def test_extract_options_with_unexpected_options():
     line = "command /x /y value1 value2"
     options = ("/a", "/b", "/flag")
 
-    args, opts = extract_options(line, *options)
+    args, opts = extract_options(shlex.split(line), *options)
     assert args == ["command", "/x", "/y", "value1", "value2"]
     assert opts == {}

@@ -493,6 +493,9 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
     Files-11 Filesystem
     """
 
+    fs_name = "files11"
+    fs_description = "PDP-11 Files-11"
+
     uic: UIC  # current User Identification Code
 
     ibsz: int  #     2 bytes  Index File Bitmap Size
@@ -520,11 +523,21 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
     chk2: int  #     2 bytes  Second Checksum
 
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
         self = cls(file)
-        self.read_home()
         self.uic = DEFAULT_UIC
         self.read_home()
+        if strict:
+            # Check the bitmap size
+            if not self.ibsz:
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
+            # Check the volume structure level
+            if self.vlev not in (0o401, 0o402):
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
+            # Check the index file
+            indexfs = self.read_file_header(INDEXF_SYS)
+            if indexfs.fnum != INDEXF_SYS:
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
         return self
 
     def read_home(self) -> None:
@@ -562,8 +575,6 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
             _,  #           2 bytes  Unused
             self.chk2,  #   2 bytes  Second Checksum
         ) = struct.unpack(HOME_BLOCK_FORMAT, t)
-        assert self.vlev == 0o401 or self.vlev == 0o402
-        assert self.ibsz
         self.uic = UIC.from_word(self.vown)
         self.iblb = (iblb_h << 16) + iblb_l
         # print(f"{self.ibsz=} {self.iblb=}")

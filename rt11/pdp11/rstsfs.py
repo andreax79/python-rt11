@@ -69,6 +69,8 @@ RDS1_FLAGS = 0o20000  # RDS1.1 or RDS1.2
 RDS0_PLVL = 0  # RDS 0 - V7.x and before
 RDS11_PLVL = 257  # RDS 1.1 - V8
 RDS12_PLVL = 258  # RDS 1.2 - V9.0 and beyond
+SAT_FILENAME = "[0,1]SATT.SYS'"  # Storage Allocation Table filename
+BAD_BLOCK_FILENAME = "[0,1]BADB.SYS'"  # Bad Block filename
 
 
 class PPN(UIC):
@@ -776,6 +778,9 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
 
     """
 
+    fs_name = "rsts"
+    fs_description = "PDP-11 RSTS/E"
+
     ppn: PPN  # Current Project Programmer Number
 
     device_size: int  # Device size in blocks
@@ -791,10 +796,14 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
     mfd: t.Optional[MFD] = None  # Master File Directory (RDS1.1 or later)
 
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
         self = cls(file)
         self.read_disk_pack_label()
         self.ppn = DEFAULT_PPN
+        if strict:
+            # Check if the SATT.SYS file exists
+            if self.get_file_entry(SAT_FILENAME) is None:
+                raise OSError(errno.EIO, "SATT.SYS file not found")
         return self
 
     def new_cache(self) -> "RTFSBlockCache":

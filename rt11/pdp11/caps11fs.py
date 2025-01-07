@@ -178,7 +178,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
 
     fs: "CAPS11Filesystem"
     filename: str = ""  #             6 chars - name
-    extension: str = ""  #             3 chars - extension
+    extension: str = ""  #            3 chars - extension
     record_type: int = 0  #           1 byte  - record type
     record_length: int = 0  #         2 bytes - file record length (fixed at 128 bytes)
     sequence: int = 0  #              1 byte  - file sequence number for multi volume files (0)
@@ -374,9 +374,16 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
     http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
     """
 
+    fs_name = "caps11"
+    fs_description = "PDP-11 CAPS-11"
+
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
         self = cls(file)
+        if strict:
+            for entry in self.read_file_headers(include_eot=False):
+                if entry.record_length != RECORD_SIZE or entry.size < 0:
+                    raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
         return self
 
     def read_file_headers(self, include_eot: bool = False) -> t.Iterator["CAPS11DirectoryEntry"]:
@@ -518,7 +525,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
 
     def write_sentinel_file(self) -> None:
         """
-        Write the sentinel file at the current tape position"
+        Write the sentinel file at the current tape position
         The sentinel file is the last file on a tape
         """
         self.tape_write_forward(SENTINEL_FILE)

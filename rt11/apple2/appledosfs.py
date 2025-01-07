@@ -893,13 +893,19 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
     https://archive.org/details/beneath-apple-dos-prodos-2020/page/30/mode/2up
     """
 
+    fs_name = "appledos"
+    fs_description = "Apple II DOS 3.x"
+
     catalog_address: TrackSector  # first catalog address
     number_of_tracks: int  # Number of tracks on disk
     sectors_per_track: int  # Sectors per track
 
+    def __init__(self, file: "AbstractFile"):
+        super().__init__(file, rx_device_support=False)
+
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
-        self = cls(file, rx_device_support=False)
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
+        self = cls(file)
         vtoc: t.Optional[AppleDOSVTOC] = None
         # Read VTOC in DOS order
         self.prodos_order = False
@@ -924,12 +930,13 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
         else:
             self.prodos_order = False
             vtoc = dos_vtoc  # type: ignore
-        if vtoc is not None and vtoc.is_valid:
-            self.catalog_address = vtoc.catalog_address
-            if vtoc.number_of_tracks > 0:
-                self.number_of_tracks = vtoc.number_of_tracks
-            if vtoc.sectors_per_track > 0:
-                self.sectors_per_track = vtoc.sectors_per_track
+        if vtoc is None or not vtoc.is_valid:
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        self.catalog_address = vtoc.catalog_address
+        if vtoc.number_of_tracks > 0:
+            self.number_of_tracks = vtoc.number_of_tracks
+        if vtoc.sectors_per_track > 0:
+            self.sectors_per_track = vtoc.sectors_per_track
         return self
 
     def filter_entries_list(

@@ -533,16 +533,24 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
     Apple II Pascal Filesystem
     """
 
+    fs_name = "pascal"
+    fs_description = "Apple II Pascal"
+
     volume_name: str = ""  # Volume name
 
+    def __init__(self, file: "AbstractFile"):
+        super().__init__(file, rx_device_support=False)
+
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
-        self = cls(file, rx_device_support=False)
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
+        self = cls(file)
         # Read volume dir
         volume_dir = VolumeDirectory.read(self)
         if not volume_dir.volume_name:
             self.prodos_order = True
             volume_dir = VolumeDirectory.read(self)
+            if not volume_dir.volume_name:
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
         self.volume_name = volume_dir.volume_name
         return self
 

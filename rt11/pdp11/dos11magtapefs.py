@@ -284,7 +284,9 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
 
 class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
     """
-    DOS-11 MagTape Filesystem
+    DOS/BATCH MagTape Filesystem
+
+    All files on magnetic tape have the following format:
 
     Record
         +-------------------------------------+
@@ -292,7 +294,9 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         +-------------------------------------+
      2  |              Data                   | 512 bytes
         +-------------------------------------+
-     n  |               ...                   |
+        |                                     |
+     n  /               ...                   /
+        |                                     |
         +-------------------------------------+
     n-1 |              Data                   | <= 512 bytes (last data block)
         +-------------------------------------+
@@ -303,11 +307,21 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
     http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/dos-batch/V9/DEC-11-UPPA-A-D_PIP_Aug73.pdf
     """
 
+    fs_name = "magtape"
+    fs_description = "PDP-11 DOS/BATCH Magtape"
+
     uic: UIC = DEFAULT_UIC  # current User Identification Code
 
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
         self = cls(file)
+        # if strict:
+        #     self.tape_rewind()
+        #     tape_pos = self.tape_pos
+        #     header, size = self.tape_read_header()
+        #     entry = DOS11MagTapeDirectoryEntry.read(self, header, tape_pos, size)
+        #     # if entry is not None or entry.size < 0:
+        #     #     raise OSError(errno.EIO, os.strerror(errno.EIO))
         return self
 
     def read_magtape(self) -> t.Iterator[bytes]:

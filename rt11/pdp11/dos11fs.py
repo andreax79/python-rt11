@@ -742,7 +742,9 @@ class MasterFileDirectoryEntry:
     def __init__(self, fs: "DOS11Filesystem"):
         self.fs = fs
 
-    def read(self, buffer: bytes, position: int) -> None:
+    @classmethod
+    def read(cls, fs: "DOS11Filesystem", buffer: bytes, position: int) -> "MasterFileDirectoryEntry":
+        self = cls(fs)
         (
             mfd_uic,  # UIC
             self.ufd_block,  # UFD start block
@@ -750,6 +752,7 @@ class MasterFileDirectoryEntry:
             self.zero,  # always 0
         ) = struct.unpack_from(MFD_ENTRY_FORMAT, buffer, position)
         self.uic = UIC.from_word(mfd_uic)
+        return self
 
     def read_ufd_blocks(self) -> t.Iterator["UserFileDirectoryBlock"]:
         """Read User File Directory blocks"""
@@ -799,15 +802,29 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
     https://raw.githubusercontent.com/rust11/xxdp/main/XXDP%2B%20File%20Structure.pdf
     """
 
+    fs_name = "dos11"
+    fs_description = "PDP-11 DOS-11/XXDP+"
+
     uic: UIC  # current User Identification Code
     xxdp: bool = False  # MFD Variety #2 (XXDP+)
     dectape: bool = False  # DECtape format
     bitmap_start_block: int = 0
 
     @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
         self = cls(file)
         self.uic = DEFAULT_UIC
+        if strict:
+            # Check if the used blocks are in the bitmap
+            blocks = [mfd.ufd_block for mfd in self.read_mfd_entries()]
+            if not self.bitmap_start_block:
+                raise OSError(errno.EIO, "Failed to read MFD block")
+            bitmap = self.read_bitmap()
+            for block in blocks:
+                if not bitmap.get_bit(block):
+                    raise OSError(errno.EIO, f"Block {block} is not in the bitmap")
+            if not bitmap.get_bit(self.bitmap_start_block):
+                raise OSError(errno.EIO, f"Block {self.bitmap_start_block} is not in the bitmap")
         return self
 
     def read_mfd_entries(
@@ -853,8 +870,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
                     raise OSError(errno.EIO, f"Failed to read block {next_mfd}")
                 next_mfd = bytes_to_word(t[0:2])  # link to next MFD
                 for i in range(2, BLOCK_SIZE - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
-                    entry = MasterFileDirectoryEntry(self)
-                    entry.read(t, i)
+                    entry = MasterFileDirectoryEntry.read(self, t, i)
                     if entry.num_words:
                         # Filter by UIC
                         if uic.match(entry.uic):

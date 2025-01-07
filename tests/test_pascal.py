@@ -47,12 +47,11 @@ def test_pascal():
 
 
 def test_pascal_init():
-    # Init
     shell = Shell(verbose=True)
-    shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
     shell.onecmd(f"mount t: /pascal {DSK}", batch=True)
+    shell.onecmd(f"create /allocate:280 {DSK}.mo", batch=True)
+    shell.onecmd(f"init /pascal {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /pascal {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("copy t:*.txt ou:", batch=True)
     fs = shell.volumes.get('OU')
@@ -66,5 +65,11 @@ def test_pascal_init():
     with pytest.raises(Exception):
         shell.onecmd("delete ou:aaa", batch=True)
     shell.onecmd("delete ou:50.txt", batch=True)
+    assert fs.read_bytes("10.txt")
     with pytest.raises(FileNotFoundError):
         fs.read_bytes("50.txt")
+
+    # Test init mounted volume
+    shell.onecmd("init ou:", batch=True)
+    with pytest.raises(Exception):
+        print(fs.read_bytes("10.tx"))

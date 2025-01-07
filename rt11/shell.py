@@ -20,11 +20,13 @@
 
 import argparse
 import cmd
+import functools
 import os
 import shlex
 import sys
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import typing as t
+from typing import Any, Callable, Dict, Tuple, Union
 
 from .abstract import AbstractDirectoryEntry, AbstractFilesystem
 from .commons import ASCII, PartialMatching, splitdrive
@@ -62,13 +64,12 @@ def ask(prompt: str) -> str:
     return result
 
 
-def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, Union[bool, str]]]:
+def extract_options(args: t.List[str], *options: str) -> Tuple[t.List[str], t.Dict[str, t.Union[bool, str]]]:
     """
     Extract options from the command line
     """
-    args = shlex.split(line)
-    result: List[str] = []
-    options_result: Dict[str, Union[bool, str]] = {}
+    result: t.List[str] = []
+    options_result: t.Dict[str, t.Union[bool, str]] = {}
     for arg in args:
         if ':' in arg:
             key, value = arg.split(':', 1)
@@ -83,7 +84,7 @@ def extract_options(line: str, *options: str) -> Tuple[List[str], Dict[str, Unio
     return result, options_result
 
 
-def get_int_option(options: Dict[str, Union[bool, str]], key: str, default: Optional[int] = None) -> Optional[int]:
+def get_int_option(options: Dict[str, Union[bool, str]], key: str, default: t.Optional[int] = None) -> t.Optional[int]:
     """
     Get an integer option from the options dictionary
     """
@@ -98,10 +99,29 @@ def get_int_option(options: Dict[str, Union[bool, str]], key: str, default: Opti
         raise Exception("?KMON-F-Invalid value specified with option")
 
 
-def flgtxt(arg: str) -> Callable[[Callable], Callable]:
+def flgtxt(decorator_arg: str) -> Callable[[Callable], Callable]:
     def decorator(func: Callable) -> Callable:
-        setattr(func, "flgtxt", arg)
-        return func
+
+        @functools.wraps(func)
+        def wrapper(cls: cmd.Cmd, args: t.List[str]) -> None:
+            # If the command has subcommands, expand the first argument
+            sub_matching = getattr(func, "flgtxt_sub", None)
+            if sub_matching is not None and args:
+                args[0] = sub_matching.get(args[0].upper()) or args[0]
+            return func(cls, args)
+
+        # Subcommands have a space in the decorator argument
+        if " " in decorator_arg:
+            # Add subcommands to the wrapper
+            _, sub = decorator_arg.split(" ", 1)
+            sub_matching = getattr(func, "flgtxt_sub", None)
+            if sub_matching is None:
+                sub_matching = PartialMatching()
+                setattr(func, "flgtxt_sub", sub_matching)
+            sub_matching.add(sub.upper())
+        else:
+            setattr(wrapper, "flgtxt", decorator_arg)
+        return wrapper
 
     return decorator
 
@@ -111,7 +131,7 @@ def copy_file(
     from_entry: AbstractDirectoryEntry,
     to_fs: AbstractFilesystem,
     to_path: str,
-    file_type: Optional[str],
+    file_type: t.Optional[str],
     verbose: int,
     cmd: str = "COPY",
 ) -> None:
@@ -161,13 +181,15 @@ class Shell(cmd.Cmd):
                 if flgtxt:
                     self.cmd_matching.add(flgtxt.lower())
 
-    def completenames(self, text: str, *ignored: Any) -> List[str]:
+    def completenames(self, text: str, *ignored: Any) -> t.List[str]:
         dotext = "do_" + text.lower()
         return ["%s " % a[3:] for a in self.get_names() if a.startswith(dotext)] + [
             "%s:" % a for a in self.volumes.volumes.keys() if a.startswith(text.upper())
         ]
 
-    def completedefault(self, text, state, *ignored):
+    def completedefault(self, *ignored: t.Any) -> t.List[str]:
+        text: str = ignored[0]
+
         def add_slash(fs: AbstractFilesystem, filename: str) -> str:
             try:
                 if fs.isdir(filename):
@@ -186,7 +208,7 @@ class Shell(cmd.Cmd):
                 path = ""
             pattern = path + "*"
             fs = self.volumes.get(volume_id)
-            result: List[str] = []
+            result: t.List[str] = []
             for x in fs.filter_entries_list(pattern):
                 if has_volume_id:
                     result.append("%s:%s" % (volume_id, add_slash(fs, x.fullname)))
@@ -208,7 +230,7 @@ class Shell(cmd.Cmd):
             except:
                 pass
 
-    def cmdloop(self, intro: Optional[str] = None) -> None:
+    def cmdloop(self, intro: t.Optional[str] = None) -> None:
         self.update_prompt()
         try:
             return cmd.Cmd.cmdloop(self, intro)
@@ -244,7 +266,8 @@ class Shell(cmd.Cmd):
                 except AttributeError:
                     self.default(line)
                     return False
-                return bool(func(arg))
+                args = shlex.split(arg) if arg else []
+                return bool(func(args))
         except KeyboardInterrupt:
             sys.stdout.write("\n")
             sys.stdout.write("\n")
@@ -264,7 +287,7 @@ class Shell(cmd.Cmd):
                 raise ex
             return False
 
-    def parseline(self, line: str) -> Tuple[Optional[str], Optional[str], str]:
+    def parseline(self, line: str) -> Tuple[t.Optional[str], t.Optional[str], str]:
         """
         Parse the line into a command name and arguments
         """
@@ -295,7 +318,7 @@ class Shell(cmd.Cmd):
         return False
 
     @flgtxt("DIR_ECTORY")
-    def do_directory(self, line: str) -> None:
+    def do_directory(self, args: t.List[str]) -> None:
         # fmt: off
         """
 DIR             Lists file directories
@@ -320,7 +343,7 @@ DIR             Lists file directories
 
         """
         # fmt: on
-        args, options = extract_options(line, "/brief", "/uic", "/full")
+        args, options = extract_options(args, "/brief", "/uic", "/full")
         if len(args) > 1:
             sys.stdout.write("?DIR-F-Too many arguments\n")
             return
@@ -330,13 +353,13 @@ DIR             Lists file directories
             volume_id = DEFAULT_VOLUME
             pattern = None
         fs = self.volumes.get(volume_id, cmd="DIR")
-        fs.dir(volume_id, pattern, options)
+        fs.dir(volume_id, pattern, options)  # type: ignore
 
-    def do_ls(self, line: str) -> None:
-        self.do_directory(line)
+    def do_ls(self, args: t.List[str]) -> None:
+        self.do_directory(args)
 
     @flgtxt("TY_PE")
-    def do_type(self, line: str) -> None:
+    def do_type(self, args: t.List[str]) -> None:
         # fmt: off
         """
 TYPE            Outputs files to the terminal
@@ -349,7 +372,6 @@ TYPE            Outputs files to the terminal
 
         """
         # fmt: on
-        args = shlex.split(line)
         if not args:
             line = ask("File? ")
             args = shlex.split(line)
@@ -369,7 +391,7 @@ TYPE            Outputs files to the terminal
             raise Exception("?TYPE-F-No files")
 
     @flgtxt("COP_Y")
-    def do_copy(self, line: str) -> None:
+    def do_copy(self, args: t.List[str]) -> None:
         # fmt: off
         """
 COPY            Copies files
@@ -394,7 +416,7 @@ COPY            Copies files
 
         """
         # fmt: on
-        args, options = extract_options(line, "/type")
+        args, options = extract_options(args, "/type")
         if len(args) > 2:
             sys.stdout.write("?COPY-F-Too many arguments\n")
             return
@@ -410,7 +432,7 @@ COPY            Copies files
         to_fs = self.volumes.get(to_volume_id, cmd="COPY")
         from_len = len(list(from_fs.filter_entries_list(cfrom)))
         from_list = from_fs.filter_entries_list(cfrom)
-        file_type = options["type"].upper() if isinstance(options.get("type"), str) else None
+        file_type = options["type"].upper() if isinstance(options.get("type"), str) else None  # type: ignore
         if from_len == 0:  # No files
             raise Exception("?COPY-F-No files")
         elif from_len == 1:  # One file to be copied
@@ -441,7 +463,7 @@ COPY            Copies files
                 copy_file(from_fs, from_entry, to_fs, to_path, file_type, self.verbose, cmd="COPY")
 
     @flgtxt("DEL_ETE")
-    def do_delete(self, line: str) -> None:
+    def do_delete(self, args: t.List[str]) -> None:
         # fmt: off
         """
 DELETE          Removes files from a volume
@@ -457,7 +479,6 @@ DELETE          Removes files from a volume
 
         """
         # fmt: on
-        args = shlex.split(line)
         if not args:
             line = ask("Files? ")
             args = shlex.split(line)
@@ -472,7 +493,7 @@ DELETE          Removes files from a volume
             raise Exception("?DEL-F-No files")
 
     @flgtxt("E_XAMINE")
-    def do_examine(self, line: str) -> None:
+    def do_examine(self, args: t.List[str]) -> None:
         # fmt: off
         """
 EXAMINE         Examines disk structure
@@ -482,12 +503,12 @@ EXAMINE         Examines disk structure
 
         """
         # fmt: on
-        volume_id, block = splitdrive(line or "")
+        volume_id, block = splitdrive(args[0] if args else "")
         fs = self.volumes.get(volume_id)
         fs.examine(block)
 
     @flgtxt("DU_MP")
-    def do_dump(self, line: str) -> None:
+    def do_dump(self, args: t.List[str]) -> None:
         # fmt: off
         """
 DUMP            Prints formatted data dumps of files or devices
@@ -510,7 +531,7 @@ DUMP            Prints formatted data dumps of files or devices
 
         """
         # fmt: on
-        args, options = extract_options(line, "/start", "/end")
+        args, options = extract_options(args, "/start", "/end")
         start = get_int_option(options, "start")
         end = get_int_option(options, "end")
         volume_id, fullname = splitdrive(args[0])
@@ -518,7 +539,7 @@ DUMP            Prints formatted data dumps of files or devices
         fs.dump(fullname, start=start, end=end)
 
     @flgtxt("CR_EATE")
-    def do_create(self, line: str) -> None:
+    def do_create(self, args: t.List[str]) -> None:
         # fmt: off
         """
 CREATE          Creates files or directories
@@ -545,7 +566,7 @@ CREATE          Creates files or directories
 
         """
         # fmt: on
-        args, options = extract_options(line, "/file", "/directory", "/uic", "/allocate", "/type")
+        args, options = extract_options(args, "/file", "/directory", "/uic", "/allocate", "/type")
         if len(args) > 1:
             sys.stdout.write("?CREATE-F-Too many arguments\n")
             return
@@ -581,7 +602,7 @@ CREATE          Creates files or directories
             )
 
     @flgtxt("MO_UNT")
-    def do_mount(self, line: str) -> None:
+    def do_mount(self, args: t.List[str]) -> None:
         # fmt: off
         """
 MOUNT           Assigns a logical disk unit to a file
@@ -591,47 +612,18 @@ MOUNT           Assigns a logical disk unit to a file
 
   SEMANTICS
         Associates a logical disk unit with a file.
-
-  OPTIONS
-   DOS
-        Mount DOS-11 filesystem
-   MAGTAPE
-        Mount DOS-11 MagTape filesystem
-   FILES11
-        Mount Files-11 filesystem
-   CAPS11
-        Mount CAPS-11 filesystem
-   SOLO
-        Mount SOLO filesystem
-   UNIX0
-        Mount PDP-7 UNIX version 0 filesystem
-   UNIX1
-        Mount UNIX version 1 filesystem
-   UNIX5
-        Mount UNIX version 5 filesystem
-   UNIX6
-        Mount UNIX version 6 filesystem
-   UNIX7
-        Mount UNIX version 7 filesystem
-   RSTS
-        Mount RSTS filesystem
-   OS8
-        Mount OS/8 filesystem
-   DMS
-        Mount PDP-8 4k Disk Monitor System filesystem
-   PRODOS
-        Mount Apple II ProDOS filesystem
-   PASCAL
-        Mount Apple II Pascal filesystem
+        See the SHOW FILESYSTEMS command for a list of filesystems
+        that can be mounted.
 
   EXAMPLES
-        MOUNT AB: SY:AB.DSK
-        MOUNT /DOS AB: SY:DOS.DSK
+        MOUNT AB: SY:rt11v503.dsk
+        MOUNT /DOS11 AB: SY:dos.dsk
+        MOUNT /UNIX7 AB: SY:unix7.dsk
 
         """
         # fmt: on
         fs_args = [f"/{x}" for x in FILESYSTEMS.keys()]
-        args, options = extract_options(line, *fs_args)
+        args, options = extract_options(args, *fs_args)
         if len(args) > 2:
             sys.stdout.write("?MOUNT-F-Too many arguments\n")
             return
@@ -649,7 +641,7 @@ MOUNT           Assigns a logical disk unit to a file
         self.volumes.mount(path, logical, fstype=fstype, verbose=self.verbose)
 
     @flgtxt("DIS_MOUNT")
-    def do_dismount(self, line: str) -> None:
+    def do_dismount(self, args: t.List[str]) -> None:
         # fmt: off
         """
 DISMOUNT        Disassociates a logical disk assignment from a file
@@ -666,7 +658,6 @@ DISMOUNT        Disassociates a logical disk assignment from a file
 
         """
         # fmt: on
-        args = shlex.split(line)
         if len(args) > 1:
             sys.stdout.write("?DISMOUNT-F-Too many arguments\n")
             return
@@ -677,7 +668,7 @@ DISMOUNT        Disassociates a logical disk assignment from a file
         self.volumes.dismount(logical)
 
     @flgtxt("AS_SIGN")
-    def do_assign(self, line: str) -> None:
+    def do_assign(self, args: t.List[str]) -> None:
         # fmt: off
         """
 ASSIGN          Associates a logical device name with a device
@@ -694,7 +685,7 @@ ASSIGN          Associates a logical device name with a device
 
         """
         # fmt: on
-        args, options = extract_options(line)
+        args, options = extract_options(args)
         if len(args) > 2:
             sys.stdout.write("?ASSIGN-F-Too many arguments\n")
             return
@@ -707,7 +698,7 @@ ASSIGN          Associates a logical device name with a device
         self.volumes.assign(volume_id, logical, verbose=self.verbose)
 
     @flgtxt("DEA_SSIGN")
-    def do_deassign(self, line: str) -> None:
+    def do_deassign(self, args: t.List[str]) -> None:
         # fmt: off
         """
 DEASSIGN        Removes logical device name assignments
@@ -723,7 +714,6 @@ DEASSIGN        Removes logical device name assignments
 
         """
         # fmt: on
-        args = shlex.split(line)
         if len(args) > 1:
             sys.stdout.write("?DEASSIGN-F-Too many arguments\n")
             return
@@ -734,17 +724,18 @@ DEASSIGN        Removes logical device name assignments
         self.volumes.deassign(logical, cmd="DEASSIGN")
 
     @flgtxt("INI_TIALIZE")
-    def do_initialize(self, line: str) -> None:
+    def do_initialize(self, args: t.List[str]) -> None:
         # fmt: off
         """
 INITIALIZE      Writes an empty device directory on the specified volume
 
   SYNTAX
-        INITIALIZE [/options] volume:
+        INITIALIZE [/options] [volume:][filespec]]
 
   SEMANTICS
         Initializes the specified filesystem on the volume.
         Any data on the volume is lost.
+        See the SHOW FILESYSTEMS command for a list of filesystems.
 
   OPTIONS
    NAME:name
@@ -752,17 +743,34 @@ INITIALIZE      Writes an empty device directory on the specified volume
 
         """
         # fmt: on
-        args, options = extract_options(line, "/name")
+        fs_args = [f"/{x}" for x in FILESYSTEMS.keys()]
+        args, options = extract_options(args, "/name", *fs_args)
         if len(args) > 1:
             sys.stdout.write("?INITIALIZE-F-Too many arguments\n")
             return
-        volume = len(args) > 0 and args[0]
-        if not volume:
-            volume = ask("Volume? ")
-        fs = self.volumes.get(volume)
-        fs.initialize(**options)
+        target = len(args) > 0 and args[0]
+        if not target:
+            target = ask("Volume? ")
+        if target.endswith(":"):
+            fs = self.volumes.get(target)
+            fs.initialize(**options)
+        else:
+            filesystem_cls = None
+            for k, v in FILESYSTEMS.items():
+                if options.get(k):
+                    filesystem_cls = v
+                    break
+            if filesystem_cls is None:
+                sys.stdout.write("?INITIALIZE-F-Filesystem not specified\n")
+                return
+            parent_volume_id, target_path = splitdrive(target)
+            parent_fs = self.volumes.get(parent_volume_id)
+            target_file = parent_fs.open_file(target_path)
+            fs = filesystem_cls(target_file)
+            fs.initialize(**options)
+            fs.close()
 
-    def do_cd(self, line: str) -> None:
+    def do_cd(self, args: t.List[str]) -> None:
         # fmt: off
         """
 CD              Changes or displays the current working drive and directory
@@ -772,7 +780,6 @@ CD              Changes or displays the current working drive and directory
 
         """
         # fmt: on
-        args = shlex.split(line)
         if len(args) > 1:
             sys.stdout.write("?CD-F-Too many arguments\n")
             return
@@ -782,13 +789,13 @@ CD              Changes or displays the current working drive and directory
         if not self.volumes.chdir(args[0]):
             sys.stdout.write("?CD-F-Directory not found\n")
 
-    def do_batch(self, line: str) -> None:
+    def do_batch(self, args: t.List[str]) -> None:
         # fmt: off
         """
 @               Executes a command file
 
   SYNTAX
-        @filespec
+        @[volume:]filespec
 
   SEMANTICS
         You can group a collection of commands that you want to execute
@@ -800,15 +807,15 @@ CD              Changes or displays the current working drive and directory
 
         """
         # fmt: on
-        line = line.strip()
-        if not line:
+        if not args:
             return
         try:
-            with open(line, "r") as f:
-                for line in f:
-                    if line.startswith("!"):
-                        continue
-                    self.onecmd(line.strip(), catch_exceptions=False, batch=True)
+            volume_id, filespec = splitdrive(args[0])
+            fs = self.volumes.get(volume_id, cmd="BATCH")
+            for line in fs.read_text(filespec).split("\n"):
+                if line.startswith("!"):
+                    continue
+                self.onecmd(line.strip(), catch_exceptions=False, batch=True)
         except FileNotFoundError:
             raise Exception("?KMON-F-File not found")
 
@@ -824,18 +831,39 @@ PWD             Displays the current working drive and directory
         sys.stdout.write("%s\n" % self.volumes.get_pwd())
 
     @flgtxt("SH_OW")
-    def do_show(self, line: str) -> None:
+    @flgtxt("SH_OW V_OLUMES")
+    @flgtxt("SH_OW T_YPES")
+    @flgtxt("SH_OW F_ILESYSTEMS")
+    def do_show(self, args: t.List[str]) -> None:
         # fmt: off
         """
-SHOW            Displays the volume assignment
+SHOW		    Displays software status
 
   SYNTAX
+        SHOW [options] [volume:]
+
+  SEMANTICS
+	    SHOW displays the device assignments; other information
+	    is displayed by specifying one or more option names.
+
+  OPTIONS
+   VOLUMES
+        Show the device assignments
+   FILESYSTEMS
+        Show the supported filesystems
+   TYPES
+        Show the file types of a volume
+
+  EXAMPLES
         SHOW
+        SHOW FILESYSTEMS
+        SHOW TYPES DL0:
 
         """
         # fmt: on
-        args = shlex.split(line) or ["VOLUMES"]
-        action = args[0].upper()
+        # Process cmd names
+        action = args[0].upper() if args else "VOLUMES"
+
         if action == "TYPES":
             if len(args) == 1:
                 volume_id = ask("Volume? ")
@@ -846,7 +874,6 @@ SHOW            Displays the volume assignment
             sys.stdout.write("----------\n")
             for item in fs.get_types():
                 sys.stdout.write(f"{item}\n")
-            return
         elif action == "VOLUMES":
             sys.stdout.write("Volumes\n")
             sys.stdout.write("-------\n")
@@ -856,10 +883,15 @@ SHOW            Displays the volume assignment
             for k, v in self.volumes.logical.items():  # type: ignore
                 label = f"{k}:"
                 sys.stdout.write(f"{label:<4} = {v}:\n")
+        elif action == "FILESYSTEMS":
+            sys.stdout.write("Filesystems\n")
+            sys.stdout.write("-----------\n")
+            for k, v in sorted(FILESYSTEMS.items()):  # type: ignore
+                sys.stdout.write(f"{k.upper():<10} {v.fs_description}\n")
         else:
             sys.stdout.write("?SHOW-F-Too many arguments\n")
 
-    def do_exit(self, line: str) -> None:
+    def do_exit(self, args: t.List[str]) -> None:
         # fmt: off
         """
 EXIT            Exit the shell
@@ -870,11 +902,11 @@ EXIT            Exit the shell
         # fmt: on
         raise SystemExit
 
-    def do_quit(self, line: str) -> None:
+    def do_quit(self, args: t.List[str]) -> None:
         raise SystemExit
 
     @flgtxt("H_ELP")
-    def do_help(self, arg: str) -> None:
+    def do_help(self, args: t.List[str]) -> None:
         # fmt: off
         """
 HELP            Displays commands help
@@ -884,7 +916,8 @@ HELP            Displays commands help
 
         """
         # fmt: on
-        if arg and arg != "*":
+        if args and args[0] != "*":
+            arg = args[0]
             if arg == "@":
                 arg = "batch"
             try:
@@ -903,7 +936,7 @@ HELP            Displays commands help
                     sys.stdout.write(getattr(self, name).__doc__.split("\n")[1])
                     sys.stdout.write("\n")
 
-    def do_shell(self, arg: str) -> None:
+    def do_shell(self, args: t.List[str]) -> None:
         # fmt: off
         """
 SHELL           Executes a system shell command
@@ -913,9 +946,9 @@ SHELL           Executes a system shell command
 
         """
         # fmt: on
-        os.system(arg)
+        os.system(shlex.join(args))
 
-    def do_EOF(self, line: str) -> bool:
+    def do_EOF(self, args: t.List[str]) -> bool:
         return True
 
 
@@ -925,9 +958,10 @@ class CustomAction(argparse.Action):
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: Any,
-        option_string: Optional[str] = None,
+        option_string: t.Optional[str] = None,
     ) -> None:
-        fstype = option_string.strip("-")
+        fstype = option_string.strip("-") if option_string else None
+        assert fstype is not None
         arr = getattr(namespace, "mounts", [])
         for v in values:
             arr.append((fstype, v))

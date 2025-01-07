@@ -34,10 +34,10 @@ def test_appledos():
 
 def test_appledos_init():
     shell = Shell(verbose=True)
-    shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
     shell.onecmd(f"mount t: /appledos {DSK}", batch=True)
+    shell.onecmd(f"create /allocate:280 {DSK}.mo", batch=True)
+    shell.onecmd(f"init /appledos {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /appledos {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("copy/type:t t:*.txt ou:", batch=True)
     fs = shell.volumes.get('OU')
@@ -51,15 +51,21 @@ def test_appledos_init():
     with pytest.raises(Exception):
         shell.onecmd("delete ou:aaa", batch=True)
     shell.onecmd("delete ou:50.txt", batch=True)
+    fs.read_bytes("10.txt")
     with pytest.raises(FileNotFoundError):
         fs.read_bytes("50.txt")
+
+    # Test init mounted volume
+    shell.onecmd("init ou:", batch=True)
+    with pytest.raises(Exception):
+        fs.read_bytes("10.txt")
 
 
 def test_appledos_init_non_standard():
     shell = Shell(verbose=True)
     shell.onecmd(f"create {DSK}.mo /allocate:505", batch=True)
+    shell.onecmd(f"init /appledos {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /appledos {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
 
 
 def test_apple_single():
@@ -73,8 +79,8 @@ def test_apple_single():
 
     shell = Shell(verbose=True)
     shell.onecmd(f"create {DSK}.mo /allocate:280", batch=True)
+    shell.onecmd(f"init /appledos {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /appledos {DSK}.mo", batch=True)
-    shell.onecmd("init ou:", batch=True)
     fs = shell.volumes.get('OU')
 
     shell.onecmd("copy tests/dsk/ciao.apple2 ou:", batch=True)

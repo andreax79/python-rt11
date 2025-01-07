@@ -1,6 +1,6 @@
 CREATE/ALLOCATE:280 prodos.dsk
+INITIALIZE/PRODOS /NAME:PR prodos.dsk
 MOUNT/PRODOS pr: prodos.dsk
-INITIALIZE/NAME:PR pr:
 CREATE/DIRECTORY pr:small
 COPY/TYPE:TXT data/1.txt pr:small
 COPY/TYPE:TXT data/2.txt pr:small

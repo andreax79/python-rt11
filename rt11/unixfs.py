@@ -774,39 +774,6 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
     def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
         pass
 
-    def read_superblock(self) -> None:
-        """Read superblock"""
-        if self.version in (4, 5, 6):
-            superblock_data = self.read_block(V4_SUPER_BLOCK)
-            superblock = struct.unpack_from(V4_SUPER_BLOCK_FORMAT, superblock_data, 0)
-            self.inode_list_blocks = superblock[0]
-            self.volume_size = superblock[1]
-            self.free_blocks_in_list = superblock[2]
-            self.free_blocks_list = list(superblock[3 : 3 + V4_NICFREE])
-            self.free_inodes_in_list = superblock[3 + V4_NICFREE]
-            self.free_inodes_list = list(superblock[4 + V4_NICFREE : 4 + V4_NICFREE + V4_NICINOD])
-            # _ = superblock[4 + V4_NICINOD + V4_NICFREE]  # lock during free list manipulation
-            # _ = superblock[5 + V4_NICINOD + V4_NICFREE]  # lock during i-list manipulation
-            # _ = superblock[6 + V4_NICINOD + V4_NICFREE]  # flag to indicate that the super-block has changed and should be written
-            # _ = swap_words(superblock[7 + V4_NICINOD + V4_NICFREE]) # last super block update
-            self.inodes = (self.inode_list_blocks - 1) * (BLOCK_SIZE // self.inode_size)
-
-        elif self.version == 7:
-            superblock_data = self.read_block(V7_SUPER_BLOCK)
-            superblock = struct.unpack_from(V7_SUPER_BLOCK_FORMAT, superblock_data, 0)
-            self.inode_list_blocks = superblock[0]  # number of blocks devoted to the i-list
-            self.volume_size = swap_words(superblock[1])  # size in blocks of entire volume
-            self.free_blocks_in_list = superblock[2]  # number of free blocks in the free list
-            self.free_blocks_list = list([swap_words(x) for x in superblock[3 : 3 + V7_NICINOD]])  # free block list
-            self.free_inodes_in_list = superblock[3 + V7_NICINOD]  # number of free inodes in the inode list
-            self.free_inodes_list = list(superblock[4 + V7_NICINOD : 4 + V7_NICINOD + V7_NICFREE])  # free inode list
-            # _ = superblock[4 + V7_NICINOD + V7_NICFREE]  # lock during free list manipulation
-            # _ = superblock[5 + V7_NICINOD + V7_NICFREE]  # lock during i-list manipulation
-            # _ = superblock[6 + V7_NICINOD + V7_NICFREE]  # flag to indicate that the super-block has changed and should be written
-            # _ = superblock[7 + V7_NICINOD + V7_NICFREE]  # mounted read-only flag
-            # _ = swap_words(superblock[8 + V7_NICINOD + V7_NICFREE]) # last super block update
-            self.inodes = (self.inode_list_blocks - 1) * (BLOCK_SIZE // self.inode_size)
-
     def write_block(
         self,
         buffer: bytes,
@@ -1057,6 +1024,8 @@ class UNIX1Filesystem(UNIXFilesystem):
     UNIX version 1, 2, 3 Filesystem
     """
 
+    fs_name = "unix1"
+    fs_description = "UNIX version 1"
     version: int = 1  # UNIX version
     inode_size = V1_INODE_SIZE
     dir_format = V1_DIR_FORMAT
@@ -1071,7 +1040,6 @@ class UNIX1Filesystem(UNIXFilesystem):
         self.dir_format = V1_DIR_FORMAT
         self.root_inode = V1_ROOT_INODE
         self.unix_inode_class = UNIXInode1
-        self.read_superblock()
         return self
 
 
@@ -1080,6 +1048,8 @@ class UNIX4Filesystem(UNIXFilesystem):
     UNIX version 4, 5, 6 Filesystem
     """
 
+    fs_name = "unix4"
+    fs_description = "UNIX version 4"
     version: int = 4  # UNIX version
     inode_size = V4_INODE_SIZE
     dir_format = V4_DIR_FORMAT
@@ -1093,12 +1063,30 @@ class UNIX4Filesystem(UNIXFilesystem):
         self.read_superblock()
         return self
 
+    def read_superblock(self) -> None:
+        """Read superblock"""
+        superblock_data = self.read_block(V4_SUPER_BLOCK)
+        superblock = struct.unpack_from(V4_SUPER_BLOCK_FORMAT, superblock_data, 0)
+        self.inode_list_blocks = superblock[0]
+        self.volume_size = superblock[1]
+        self.free_blocks_in_list = superblock[2]
+        self.free_blocks_list = list(superblock[3 : 3 + V4_NICFREE])
+        self.free_inodes_in_list = superblock[3 + V4_NICFREE]
+        self.free_inodes_list = list(superblock[4 + V4_NICFREE : 4 + V4_NICFREE + V4_NICINOD])
+        # _ = superblock[4 + V4_NICINOD + V4_NICFREE]  # lock during free list manipulation
+        # _ = superblock[5 + V4_NICINOD + V4_NICFREE]  # lock during i-list manipulation
+        # _ = superblock[6 + V4_NICINOD + V4_NICFREE]  # flag to indicate that the super-block has changed and should be written
+        # _ = swap_words(superblock[7 + V4_NICINOD + V4_NICFREE]) # last super block update
+        self.inodes = (self.inode_list_blocks - 1) * (BLOCK_SIZE // self.inode_size)
+
 
 class UNIX5Filesystem(UNIX4Filesystem):
     """
     UNIX version 5 Filesystem
     """
 
+    fs_name = "unix5"
+    fs_description = "UNIX version 5"
     version: int = 5  # UNIX version
 
 
@@ -1107,6 +1095,8 @@ class UNIX6Filesystem(UNIX4Filesystem):
     UNIX version 6 Filesystem
     """
 
+    fs_name = "unix6"
+    fs_description = "UNIX version 6"
     version: int = 6  # UNIX version
     unix_inode_class = UNIXInode6
 
@@ -1116,6 +1106,8 @@ class UNIX7Filesystem(UNIXFilesystem):
     UNIX version 7 Filesystem
     """
 
+    fs_name = "unix7"
+    fs_description = "UNIX version 7"
     version: int = 7  # UNIX version
     inode_size = V7_INODE_SIZE
     dir_format = V7_DIR_FORMAT
@@ -1128,3 +1120,19 @@ class UNIX7Filesystem(UNIXFilesystem):
         self.pwd = "/"
         self.read_superblock()
         return self
+
+    def read_superblock(self) -> None:
+        superblock_data = self.read_block(V7_SUPER_BLOCK)
+        superblock = struct.unpack_from(V7_SUPER_BLOCK_FORMAT, superblock_data, 0)
+        self.inode_list_blocks = superblock[0]  # number of blocks devoted to the i-list
+        self.volume_size = swap_words(superblock[1])  # size in blocks of entire volume
+        self.free_blocks_in_list = superblock[2]  # number of free blocks in the free list
+        self.free_blocks_list = list([swap_words(x) for x in superblock[3 : 3 + V7_NICINOD]])  # free block list
+        self.free_inodes_in_list = superblock[3 + V7_NICINOD]  # number of free inodes in the inode list
+        self.free_inodes_list = list(superblock[4 + V7_NICINOD : 4 + V7_NICINOD + V7_NICFREE])  # free inode list
+        # _ = superblock[4 + V7_NICINOD + V7_NICFREE]  # lock during free list manipulation
+        # _ = superblock[5 + V7_NICINOD + V7_NICFREE]  # lock during i-list manipulation
+        # _ = superblock[6 + V7_NICINOD + V7_NICFREE]  # flag to indicate that the super-block has changed and should be written
+        # _ = superblock[7 + V7_NICINOD + V7_NICFREE]  # mounted read-only flag
+        # _ = swap_words(superblock[8 + V7_NICINOD + V7_NICFREE]) # last super block update
+        self.inodes = (self.inode_list_blocks - 1) * (BLOCK_SIZE // self.inode_size)

@@ -295,6 +295,8 @@ class UNIX0Filesystem(UNIXFilesystem):
     UNIX version 0 Filesystem
     """
 
+    fs_name = "unix0"
+    fs_description = "UNIX version 0"
     version: int = 0
 
     @classmethod

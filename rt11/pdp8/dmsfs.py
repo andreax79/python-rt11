@@ -877,49 +877,75 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
     ====
 
     Block
-    -----
-    0o177     DN1 (USER)
-    0o200     SAM1 (USER)
-    0o201     DN2 (USER)
-    0o202     DN3 (USER)
-
-    data
-
-    0o373     Scratch
-    0o374     Scratch
-    0o375     Scratch
+           +---------------+
+    0o177  |   DN1 (USER)  |
+           +---------------+
+    0o200  |   SAM1 (USER) |
+           +---------------+
+    0o201  |   DN2 (USER)  |
+           +---------------+
+    0o202  |   DN3 (USER)  |
+           +---------------+
+           |               |
+    data   /               /
+           |               |
+           +---------------+
+    0o373  |   Scratch     |
+    0o374  |   Scratch     |
+    0o375  |   Scratch     |
+           +---------------+
 
     Dectape (Pag 100)
     =======
 
     Block
-    -----
-    0o177     DN1 (USER)
-    0o200     SAM1 (USER)
-    0o201     DN2 (USER)
-    0o202     SAM2 (USER)
-    0o203     SAM3 (USER)
-    0o204     SAM4 (USER)
-    0o205     SAM5 (USER)
-    0o206     SAM6 (USER)
-    0o207     DN3 (USER)
+           +---------------+
+    0o177  |   DN1 (USER)  |
+           +---------------+
+    0o200  |   SAM1 (USER) |
+           +---------------+
+    0o201  |   DN2 (USER)  |
+           +---------------+
+    0o202  |   SAM2 (USER) |
+           +---------------+
+    0o203  |   SAM3 (USER) |
+           +---------------+
+    0o204  |   SAM4 (USER) |
+           +---------------+
+    0o205  |   SAM5 (USER) |
+           +---------------+
+    0o206  |   SAM6 (USER) |
+           +---------------+
+    0o207  |   DN3 (USER)  |
+           +---------------+
 
     """
+
+    fs_name = "dms"
+    fs_description = "PDP-8 4k Disk Monitor System"
 
     version_string: str  # Version
     first_scratch_block_number: int  # First scratch block number
     first_sam_block_number: int  # First SAM block number
 
-    @classmethod
-    def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
-        self = cls(file)
+    def __init__(self, file: "AbstractFile"):
+        super().__init__(file)
         self.is_rx_12bit = False
         self.is_rx = False
+
+    @classmethod
+    def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
+        self = cls(file)
         # Read the first Directory Name block
         dn = DirectorNameBlock.read(self, DN_START, 0)
         self.first_scratch_block_number = dn.first_scratch_block_number
         self.first_sam_block_number = dn.first_sam_block_number
         self.version_string = sixbit_word12_to_asc(dn.version_number)
+        if strict:
+            sam = StorageAllocationMap.read(self)
+            reserved_blocks = sam.files_blocks.get(RESERVED_FILE_NUMBER, [])
+            if not reserved_blocks or not self.first_scratch_block_number in reserved_blocks:
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
         return self
 
     def read_12bit_words_block(self, block_number: int) -> t.List[int]:
@@ -1172,7 +1198,7 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
         # Initialize this instance
         self.first_scratch_block_number = scratch_blocks[0]
         self.first_sam_block_number = sam_blocks[0]
-        self.version_string = self.version_string
+        self.version_string = version_string
         # Create SAM
         for i, block_number in enumerate(dn_blocks):
             sam_block = StorageAllocationMapBlock.read(self, block_number, i)

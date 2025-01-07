@@ -1,6 +1,6 @@
 CREATE/ALLOCATE:280 appledos.dsk
+INITIALIZE/APPLEDOS appledos.dsk
 MOUNT/APPLEDOS dos: appledos.dsk
-INITIALIZE dos:
 COPY/TYPE:T data/1.txt dos:
 COPY/TYPE:T data/2.txt dos:
 COPY/TYPE:T data/5.txt dos:
