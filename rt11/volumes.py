@@ -29,6 +29,8 @@ from .apple2.pascalfs import PascalFilesystem
 from .apple2.prodosfs import ProDOSFilesystem
 from .commons import splitdrive
 from .native import NativeFilesystem
+from .pdp7.decsysfs import DECSysFilesystem
+from .pdp7.unix0fs import UNIX0Filesystem
 from .pdp8.dmsfs import DMSFilesystem
 from .pdp8.os8fs import OS8Filesystem
 from .pdp11.caps11fs import CAPS11Filesystem
@@ -38,7 +40,6 @@ from .pdp11.files11fs import Files11Filesystem
 from .pdp11.rstsfs import RSTSFilesystem
 from .pdp11.rt11fs import RT11Filesystem
 from .pdp11.solofs import SOLOFilesystem
-from .unix0fs import UNIX0Filesystem
 from .unixfs import UNIX1Filesystem, UNIX5Filesystem, UNIX6Filesystem, UNIX7Filesystem
 
 __all__ = [
@@ -69,6 +70,7 @@ FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "prodos": ProDOSFilesystem,
     "pascal": PascalFilesystem,
     "appledos": AppleDOSFilesystem,
+    "decsys": DECSysFilesystem,
 }
 
 

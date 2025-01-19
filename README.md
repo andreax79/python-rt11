@@ -14,6 +14,7 @@ Python-RT11 is an utility for transferring files between various file systems.
 | Files-11        | :white_check_mark:|                   |                   |                   |
 | SOLO            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
 | PDP-7 UNIX v0   | :white_check_mark:|                   |                   |                   |
+| PDP-7 DECSys    | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
 | UNIX v1         | :white_check_mark:|                   |                   |                   |
 | UNIX v5         | :white_check_mark:|                   |                   |                   |
 | UNIX v6         | :white_check_mark:|                   |                   |                   |
@@ -188,6 +189,12 @@ RSTS/E
 
 * [RSTS/E Monitor Internals, Michael Mayfield](http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf)
 * [RSTS/E V8.0 Internals Manual](https://bitsavers.org/pdf/dec/pdp11/rsts_e/V08/AA-CL35A-TE_8.0intern_Sep84.pdf)
+
+PDP-7 DECSys
+------------
+
+* [DECSys-7 Operating Manual](http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp7/DEC-07-SDDA-D_DECSYS7_Nov66.pdf)
+* [Technical Notes on DECsys](https://simh.trailing-edge.com/docs/decsys.pdf)
 
 PDP-8 OS/8
 ----------

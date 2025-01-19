@@ -467,7 +467,7 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
         return str(self)
 
 
-class OS8Segment(object):
+class OS8Segment:
     """
     Volume Directory Segment
 
@@ -1005,11 +1005,10 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         else:
             if start is None:
                 start = 0
-            if end is None:
-                if start == 0:
+                if end is None:  # full disk
                     end = self.get_size() // BLOCK_SIZE - 1
-                else:
-                    end = start
+            elif end is None:  # one single block
+                end = start
             for block_number in range(start, end + 1):
                 words = self.read_12bit_words_block(block_number)
                 print(f"\nBLOCK NUMBER   {block_number:08}")

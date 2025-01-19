@@ -376,7 +376,7 @@ class DMSFile(AbstractFile):
         return self.entry.fullname
 
 
-class StorageAllocationMapBlock(object):
+class StorageAllocationMapBlock:
     """
     Storage Allocation Map (SAM) Block
 
@@ -457,7 +457,7 @@ class StorageAllocationMapBlock(object):
         return self.sam.count(EMPTY_FILE_NUMBER)
 
 
-class StorageAllocationMap(object):
+class StorageAllocationMap:
     """
     Storage Allocation Map (SAM)
     """
@@ -740,7 +740,7 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
         return str(self)
 
 
-class DirectorNameBlock(object):
+class DirectorNameBlock:
     """
     Directory Name (DN) Block
 
@@ -1177,9 +1177,10 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
                 print(f"\nBLOCK NUMBER   {block_number:08}")
                 oct_dump(words)
         else:
-            if start is None:  # full disk
+            if start is None:
                 start = 0
-                end = self.get_size() // BLOCK_SIZE_WORD // BYTES_PER_WORD - 1
+                if end is None:  # full disk
+                    end = self.get_size() // BLOCK_SIZE_WORD // BYTES_PER_WORD - 1
             elif end is None:  # one single block
                 end = start
             for block_number in range(start, end + 1):
