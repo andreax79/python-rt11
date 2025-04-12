@@ -34,12 +34,11 @@ def test_caps11_write():
     assert isinstance(fs, CAPS11Filesystem)
 
     d = fs.get_file_entry("500.TXT")
-    assert d is not None
 
     # Delete a file
     d.delete()
-    d2 = fs.get_file_entry("500.TXT")
-    assert d2 is None
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_entry("500.TXT")
 
     # Create a file
     shell.onecmd("copy in:10.TXT ou:10NEW.TXT", batch=True)

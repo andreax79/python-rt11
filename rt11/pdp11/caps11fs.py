@@ -330,7 +330,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.write()
         return True
 
-    def open(self, file_type: t.Optional[str] = None) -> CAPS11File:
+    def open(self, file_mode: t.Optional[str] = None) -> CAPS11File:
         """
         Open a file
         """
@@ -421,11 +421,14 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
             if not entry.is_empty:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[CAPS11DirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> CAPS11DirectoryEntry:
         fullname = rt11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return next(self.filter_entries_list(fullname, wildcard=False), None)
+        try:
+            return next(self.filter_entries_list(fullname, wildcard=False))
+        except StopIteration:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -433,6 +436,7 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         """
         Write content to a file
@@ -453,9 +457,10 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         """
         # Delete the existing file
         fullname = rt11_canonical_filename(fullname, wildcard=False)
-        old_entry = self.get_file_entry(fullname)
-        if old_entry is not None:
-            old_entry.delete()
+        try:
+            self.get_file_entry(fullname).delete()
+        except FileNotFoundError:
+            pass
         # Find the position for the new file
         tape_pos = 0
         for entry in reversed(list(self.read_file_headers(include_eot=True))):

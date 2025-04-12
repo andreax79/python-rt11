@@ -262,7 +262,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         self.write()
         return True
 
-    def open(self, file_type: t.Optional[str] = None) -> DOS11MagTapeFile:
+    def open(self, file_mode: t.Optional[str] = None) -> DOS11MagTapeFile:
         """
         Open a file
         """
@@ -387,12 +387,15 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
             if not entry.is_empty:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[DOS11MagTapeDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> DOS11MagTapeDirectoryEntry:
         fullname = dos11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
-        return next(self.filter_entries_list(basename, uic=uic, wildcard=False), None)
+        try:
+            return next(self.filter_entries_list(basename, uic=uic, wildcard=False))
+        except StopIteration:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -400,6 +403,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> None:
         """
@@ -428,9 +432,10 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         """
         # Delete the existing file
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
-        old_entry = self.get_file_entry(basename)  # type: ignore
-        if old_entry is not None:
-            old_entry.delete()
+        try:
+            self.get_file_entry(basename).delete()  # type: ignore
+        except FileNotFoundError:
+            pass
         # Find the position for the new file
         tape_pos = self.tape_pos - 4  # tape mark size
         self.f.truncate(tape_pos)

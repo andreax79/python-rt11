@@ -535,7 +535,7 @@ class UFDNameEntry(AbstractDirectoryEntry):
     def delete(self) -> bool:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def open(self, file_type: t.Optional[str] = None) -> RSTSFile:
+    def open(self, file_mode: t.Optional[str] = None) -> RSTSFile:
         """
         Open a file
         """
@@ -802,7 +802,9 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         self.ppn = DEFAULT_PPN
         if strict:
             # Check if the SATT.SYS file exists
-            if self.get_file_entry(SAT_FILENAME) is None:
+            try:
+                self.get_file_entry(SAT_FILENAME)
+            except FileNotFoundError:
                 raise OSError(errno.EIO, "SATT.SYS file not found")
         return self
 
@@ -1018,12 +1020,15 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
     def entries_list(self) -> t.Iterator[UFDNameEntry]:
         yield from self.read_dir_entries(ppn=self.ppn)
 
-    def get_file_entry(self, fullname: str) -> t.Optional[UFDNameEntry]:
+    def get_file_entry(self, fullname: str) -> UFDNameEntry:
         fullname = rsts_canonical_fullname(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         ppn, basename = rsts_split_fullname(fullname=fullname, wildcard=False, ppn=self.ppn)
-        return next(self.filter_entries_list(basename, wildcard=False, ppn=ppn), None)
+        try:
+            return next(self.filter_entries_list(basename, wildcard=False, ppn=ppn))
+        except StopIteration:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -1031,6 +1036,7 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 

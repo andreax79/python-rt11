@@ -29,6 +29,7 @@ from .apple2.pascalfs import PascalFilesystem
 from .apple2.prodosfs import ProDOSFilesystem
 from .commons import splitdrive
 from .native import NativeFilesystem
+from .nova.rdosfs import RDOSFilesystem
 from .pdp7.decsysfs import DECSysFilesystem
 from .pdp7.unix0fs import UNIX0Filesystem
 from .pdp8.dmsfs import DMSFilesystem
@@ -52,11 +53,9 @@ DEFAULT_VOLUME = "DK"
 SYSTEM_VOLUME = "SY"
 FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "caps11": CAPS11Filesystem,
-    "dos": DOS11Filesystem,
     "dos11": DOS11Filesystem,
     "dos11mt": DOS11MagTapeFilesystem,
     "files11": Files11Filesystem,
-    "magtape": DOS11MagTapeFilesystem,
     "rt11": RT11Filesystem,
     "solo": SOLOFilesystem,
     "unix0": UNIX0Filesystem,
@@ -71,6 +70,7 @@ FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "pascal": PascalFilesystem,
     "appledos": AppleDOSFilesystem,
     "decsys": DECSysFilesystem,
+    "rdos": RDOSFilesystem,
 }
 
 

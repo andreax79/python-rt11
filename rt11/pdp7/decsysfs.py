@@ -87,6 +87,13 @@ class FileType(Enum):
     def short(self) -> str:
         return self.name[0]
 
+    @property
+    def file_mode(self) -> str:
+        if self in [FileType.FORTRAN, FileType.ASSEMBLER]:
+            return ASCII
+        else:
+            return IMAGE
+
     @classmethod
     def from_str(cls, value: str) -> "FileType":
         value = value.upper()
@@ -133,21 +140,15 @@ def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
 
 class DECSysFile(AbstractFile):
     entry: "DECSysDirectoryEntry"
-    file_type: str  # ASCII of IMAGE
+    file_mode: str  # ASCII of IMAGE
     closed: bool
 
-    def __init__(self, entry: "DECSysDirectoryEntry", file_type: t.Optional[str] = None):
+    def __init__(self, entry: "DECSysDirectoryEntry", file_mode: t.Optional[str] = None):
         self.entry = entry
-        if file_type is not None:
-            self.file_type = file_type
+        if file_mode is not None:
+            self.file_mode = file_mode
         else:
-            try:
-                if FileType.from_str(entry.file_type) in [FileType.FORTRAN, FileType.ASSEMBLER]:  # type: ignore
-                    self.file_type = ASCII
-                else:
-                    self.file_type = IMAGE
-            except ValueError:
-                self.file_type = IMAGE
+            self.file_mode = entry.raw_file_type.file_mode
         self.closed = False
 
     def read_block(
@@ -182,7 +183,7 @@ class DECSysFile(AbstractFile):
                         words = words[2:]  # Skip the first 2 words
                     words = words[:num_words]
                     num_words -= len(words)
-                    t = from_18bit_words_to_bytes(words, self.file_type)
+                    t = from_18bit_words_to_bytes(words, self.file_mode)
                     data.extend(t)
                     number_of_blocks -= 1
                     if number_of_blocks == 0 or num_words <= 0:
@@ -198,7 +199,7 @@ class DECSysFile(AbstractFile):
                     num_words_comp = words[1]
                     num_words = 0x40000 - num_words_comp
                     words = words[2 : 2 + num_words]  # Skip the first 2 words
-                    t = from_18bit_words_to_bytes(words, self.file_type)
+                    t = from_18bit_words_to_bytes(words, self.file_mode)
                     data.extend(t)
                     number_of_blocks -= 1
                     if number_of_blocks == 0:
@@ -216,7 +217,7 @@ class DECSysFile(AbstractFile):
         """
         if self.closed or block_number < 0 or number_of_blocks < 0:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
-        words = from_bytes_to_18bit_words(buffer, self.file_type)
+        words = from_bytes_to_18bit_words(buffer, self.file_mode)
         self.write_18bit_words_block(words, block_number, number_of_blocks)
 
     def write_18bit_words_block(
@@ -907,7 +908,7 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
                     entry.raw_file_type = raw_file_type
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[DECSysDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> DECSysDirectoryEntry:
         """
         Get the directory entry for a file
         """
@@ -925,7 +926,7 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
                     # Assign the file type to the entry
                     entry.raw_file_type = raw_file_type
                 return entry
-        return None
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def get_allocated_blocks(self) -> t.List[int]:
         """
@@ -987,10 +988,10 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
         if raw_file_type == FileType.LIBRARY:
             raw_file_type = FileType.BINARY
         # If the file already exists, deallocate the blocks
-        entry: DECSysDirectoryEntry = self.get_file_entry(fullname)  # type: ignore
-        if entry is not None:
+        try:
+            entry: DECSysDirectoryEntry = self.get_file_entry(fullname)  # type: ignore
             entry.deallocate()
-        else:
+        except FileNotFoundError:
             # Create a new entry
             directory = LibraryDirectory(self) if raw_file_type == FileType.LIBRARY else ProgramDirectory.read(self)
             if raw_file_type == FileType.SYSTEM:
@@ -1013,6 +1014,7 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         words = str_to_fiodec(content.decode('ascii'))
         number_of_blocks = int(math.ceil(len(content) / LINKED_FILE_WORDS_PER_BLOCK))
@@ -1099,8 +1101,6 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
         """Dump the content of a file or a range of blocks"""
         if fullname:
             entry = self.get_file_entry(fullname)
-            if not entry:
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
             if start is None:
                 start = 0
             blocks = entry.get_blocks()

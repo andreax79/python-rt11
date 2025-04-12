@@ -478,7 +478,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     def delete(self) -> bool:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def open(self, file_type: t.Optional[str] = None) -> Files11File:
+    def open(self, file_mode: t.Optional[str] = None) -> Files11File:
         """
         Open a file
         """
@@ -671,12 +671,15 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         for entry in self.read_dir_entries(uic=self.uic):
             yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[Files11DirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> Files11DirectoryEntry:
         fullname = files11_canonical_fullname(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
-        return next(self.filter_entries_list(basename, wildcard=False, uic=uic), None)
+        try:
+            return next(self.filter_entries_list(basename, wildcard=False, uic=uic))
+        except StopIteration:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -684,6 +687,7 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 

@@ -146,7 +146,7 @@ def test_os8_write_rx01():
     for l in [100, 378, 512, 888]:
         t = "x" * l
         fs.write_bytes("X.TX", t.encode("ascii"))
-        t1 = fs.read_bytes("X.TX", file_type="ascii").decode("ascii").rstrip("\x00")
+        t1 = fs.read_bytes("X.TX", file_mode="ascii").decode("ascii").rstrip("\x00")
         print(t, len(t))
         print(t1, len(t1))
         assert t == t1

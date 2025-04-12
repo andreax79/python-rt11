@@ -132,14 +132,15 @@ def copy_file(
     to_fs: AbstractFilesystem,
     to_path: str,
     file_type: t.Optional[str],
+    file_mode: t.Optional[str],
     verbose: int,
     cmd: str = "COPY",
 ) -> None:
     if not file_type:
         file_type = from_entry.file_type
     try:
-        content = from_entry.read_bytes(file_type)
-        to_fs.write_bytes(to_path, content, from_entry.creation_date, file_type)
+        content = from_entry.read_bytes(file_mode)
+        to_fs.write_bytes(to_path, content, from_entry.creation_date, file_type, file_mode)
     except Exception:
         if verbose:
             traceback.print_exc()
@@ -383,7 +384,7 @@ TYPE            Outputs files to the terminal
         match = False
         for entry in fs.filter_entries_list(pattern):
             match = True
-            content = entry.read_bytes(file_type=ASCII)
+            content = entry.read_bytes(file_mode=ASCII)
             if content is not None:
                 os.write(sys.stdout.fileno(), content)
                 sys.stdout.write("\n")
@@ -400,6 +401,7 @@ COPY            Copies files
         COPY [/options] [input-volume:]input-filespec [output-volume:][output-filespec]
 
   OPTIONS
+   ASCII                Copy as ASCII text
    TYPE:type
         Specifies that the output file type, if supported by the taget filesystem
    TYPE:CONTIGUOUS      Contiguous
@@ -416,10 +418,11 @@ COPY            Copies files
 
         """
         # fmt: on
-        args, options = extract_options(args, "/type")
+        args, options = extract_options(args, "/ascii", "/type")
         if len(args) > 2:
             sys.stdout.write("?COPY-F-Too many arguments\n")
             return
+        file_mode = ASCII if options.get("ascii") else None
         cfrom = len(args) > 0 and args[0]
         to = len(args) > 1 and args[1]
         if not cfrom:
@@ -448,7 +451,7 @@ COPY            Copies files
             if not from_entry:
                 raise Exception(f"?COPY-F-Error copying {source.fullname}")
             sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, source.fullname, to_volume_id, to_path))
-            copy_file(from_fs, from_entry, to_fs, to_path, file_type, self.verbose, cmd="COPY")
+            copy_file(from_fs, from_entry, to_fs, to_path, file_type, file_mode, self.verbose, cmd="COPY")
         else:
             if not to:
                 to = self.volumes.get(to_volume_id).get_pwd()
@@ -460,7 +463,7 @@ COPY            Copies files
                 else:
                     to_path = from_entry.basename
                 sys.stdout.write("%s:%s -> %s:%s\n" % (from_volume_id, from_entry.fullname, to_volume_id, to_path))
-                copy_file(from_fs, from_entry, to_fs, to_path, file_type, self.verbose, cmd="COPY")
+                copy_file(from_fs, from_entry, to_fs, to_path, file_type, file_mode, self.verbose, cmd="COPY")
 
     @flgtxt("DEL_ETE")
     def do_delete(self, args: t.List[str]) -> None:
@@ -534,9 +537,15 @@ DUMP            Prints formatted data dumps of files or devices
         args, options = extract_options(args, "/start", "/end")
         start = get_int_option(options, "start")
         end = get_int_option(options, "end")
-        volume_id, fullname = splitdrive(args[0])
-        fs = self.volumes.get(volume_id)
-        fs.dump(fullname, start=start, end=end)
+        if not args:
+            args = ask("From? ").split()
+        for arg in args:
+            try:
+                volume_id, fullname = splitdrive(arg)
+                fs = self.volumes.get(volume_id)
+                fs.dump(fullname, start=start, end=end)
+            except FileNotFoundError:
+                raise Exception("?DUMP-F-File not found")
 
     @flgtxt("CR_EATE")
     def do_create(self, args: t.List[str]) -> None:
@@ -996,125 +1005,14 @@ def main() -> None:
         default=False,
         help="display verbose output",
     )
-    parser.add_argument(
-        "--dos11",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a DOS-11 disk or DecTape",
-    )
-    parser.add_argument(
-        "--files11",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a Files11 disk",
-    )
-    parser.add_argument(
-        "--magtape",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a DOS-11 Magtape",
-    )
-    parser.add_argument(
-        "--caps11",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a CAPS-11 cassette",
-    )
-    parser.add_argument(
-        "--rt11",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a RT-11 disk",
-    )
-    parser.add_argument(
-        "--solo",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a SOLO disk",
-    )
-    parser.add_argument(
-        "--unix0",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a PDP-7 UNIX v0 disk",
-    )
-    parser.add_argument(
-        "--unix1",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a UNIX v1 disk",
-    )
-    parser.add_argument(
-        "--unix5",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a UNIX v5 disk",
-    )
-    parser.add_argument(
-        "--unix6",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a UNIX v6 disk",
-    )
-    parser.add_argument(
-        "--unix7",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a UNIX v7 disk",
-    )
-    parser.add_argument(
-        "--rsts",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a RSTS disk",
-    )
-    parser.add_argument(
-        "--os8",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a OS/8 disk",
-    )
-    parser.add_argument(
-        "--dms",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount a PDP-8 4k Disk Monitor System disk",
-    )
-    parser.add_argument(
-        "--prodos",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount an Apple II ProDOS disk",
-    )
-    parser.add_argument(
-        "--pascal",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount an Apple II Pascal disk",
-    )
-    parser.add_argument(
-        "--appledos",
-        nargs=1,
-        dest="image",
-        action=CustomAction,
-        help="mount an Apple II DOS disk",
-    )
+    for name, fs in FILESYSTEMS.items():
+        parser.add_argument(
+            f"--{name}",
+            nargs=1,
+            dest="image",
+            action=CustomAction,
+            help=f"mount {fs.fs_description}",
+        )
     parser.add_argument(
         "disk",
         nargs="*",

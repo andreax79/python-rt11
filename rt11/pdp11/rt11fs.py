@@ -292,7 +292,7 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         self.segment.write()
         return True
 
-    def open(self, file_type: t.Optional[str] = None) -> RT11File:
+    def open(self, file_mode: t.Optional[str] = None) -> RT11File:
         """
         Open a file
         """
@@ -525,17 +525,15 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
             for entry in segment.entries_list:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[RT11DirectoryEntry]:  # fullname=filename+ext
+    def get_file_entry(self, fullname: str) -> RT11DirectoryEntry:  # fullname=filename+ext
         fullname = rt11_canonical_filename(fullname)
         for entry in self.entries_list:
             if entry.fullname == fullname and entry.is_permanent:
                 return entry
-        return None
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
-    def read_bytes(self, fullname: str, file_type: t.Optional[str] = None) -> bytes:  # fullname=filename+ext
+    def read_bytes(self, fullname: str, file_mode: t.Optional[str] = None) -> bytes:  # fullname=filename+ext
         entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return self.read_block(entry.file_position, entry.length)
 
     def write_bytes(
@@ -544,6 +542,7 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         number_of_blocks = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
         entry = self.create_file(fullname, number_of_blocks, creation_date, file_type)
@@ -560,9 +559,10 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         file_type: t.Optional[str] = None,
     ) -> t.Optional[RT11DirectoryEntry]:
         fullname = os.path.basename(fullname)
-        entry: t.Optional[RT11DirectoryEntry] = self.get_file_entry(fullname)
-        if entry is not None:
-            entry.delete()
+        try:
+            self.get_file_entry(fullname).delete()
+        except FileNotFoundError:
+            pass
         return self.allocate_space(fullname, number_of_blocks, creation_date)
 
     def split_segment(self, entry: RT11DirectoryEntry) -> bool:

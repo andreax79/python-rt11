@@ -153,7 +153,7 @@ class DMSFilename:
         return result
 
 
-def from_12bit_words_to_bytes(words: list[int], file_type: str = ASCII) -> bytes:
+def from_12bit_words_to_bytes(words: list[int], file_mode: str = ASCII) -> bytes:
     """
     Convert 12bit words to bytes
 
@@ -161,7 +161,7 @@ def from_12bit_words_to_bytes(words: list[int], file_type: str = ASCII) -> bytes
     """
     result = bytearray()
 
-    if file_type == ASCII:
+    if file_mode == ASCII:
         esc = False
         eof = False
         for word in words:
@@ -210,13 +210,13 @@ def from_12bit_words_to_bytes(words: list[int], file_type: str = ASCII) -> bytes
     return bytes(result)
 
 
-def from_bytes_to_12bit_words(byte_data: bytes, file_type: str = "ASCII") -> t.List[int]:
+def from_bytes_to_12bit_words(byte_data: bytes, file_mode: str = "ASCII") -> t.List[int]:
     """
     Convert bytes to 12-bit words.
     """
     words = []
 
-    if file_type == ASCII:
+    if file_mode == ASCII:
         buffer = []
         for byte in byte_data:
             byte = byte & 0o177
@@ -296,15 +296,15 @@ def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
 
 class DMSFile(AbstractFile):
     entry: "DMSDirectoryEntry"
-    file_type: str
+    file_mode: str
     closed: bool
 
-    def __init__(self, entry: "DMSDirectoryEntry", file_type: t.Optional[str] = None):
+    def __init__(self, entry: "DMSDirectoryEntry", file_mode: t.Optional[str] = None):
         self.entry = entry
-        if file_type is not None:
-            self.file_type = file_type
+        if file_mode is not None:
+            self.file_mode = file_mode
         else:
-            self.file_type = ASCII if entry.extension.upper() == EXT_ASCII else IMAGE
+            self.file_mode = ASCII if entry.extension.upper() == EXT_ASCII else IMAGE
         self.closed = False
 
     def read_block(
@@ -325,7 +325,7 @@ class DMSFile(AbstractFile):
         for i in range(block_number, block_number + number_of_blocks):
             words = self.entry.dn.fs.read_12bit_words_block(blocks[i])
             # Skip the last word of the block (the link to the next block)
-            t = from_12bit_words_to_bytes(words[:-1], self.file_type)
+            t = from_12bit_words_to_bytes(words[:-1], self.file_mode)
             data.extend(t)
         return bytes(data)
 
@@ -345,7 +345,7 @@ class DMSFile(AbstractFile):
             or block_number + number_of_blocks > self.entry.get_length()
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
-        words = from_bytes_to_12bit_words(buffer, self.file_type)
+        words = from_bytes_to_12bit_words(buffer, self.file_mode)
         blocks = self.entry.get_blocks()
         for i in range(block_number, block_number + number_of_blocks):
             block_words = words[i * DATA_BLOCK_SIZE_WORD : (i + 1) * DATA_BLOCK_SIZE_WORD]
@@ -640,20 +640,20 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
             flags & 0o7777,
         ]
 
-    def read_bytes(self, file_type: t.Optional[str] = None) -> bytes:
+    def read_bytes(self, file_mode: t.Optional[str] = None) -> bytes:
         """Get the content of the file"""
-        if file_type is None:
+        if file_mode is None:
             if self.program_type == FILE_TYPE_ASCII:
-                file_type = ASCII
+                file_mode = ASCII
             else:
-                file_type = IMAGE
+                file_mode = IMAGE
         # Always read the file as IMAGE
         f = self.open(IMAGE)
         try:
             data = f.read_block(0, READ_FILE_FULL)
-            if file_type == ASCII:
-                words = from_bytes_to_12bit_words(data, file_type=IMAGE)
-                return from_12bit_words_to_bytes(words, file_type=ASCII)
+            if file_mode == ASCII:
+                words = from_bytes_to_12bit_words(data, file_mode=IMAGE)
+                return from_12bit_words_to_bytes(words, file_mode=ASCII)
             else:
                 return data
         finally:
@@ -727,11 +727,11 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
             self.dn.write()
             return True
 
-    def open(self, file_type: t.Optional[str] = None) -> DMSFile:
+    def open(self, file_mode: t.Optional[str] = None) -> DMSFile:
         """
         Open a file
         """
-        return DMSFile(self, file_type)
+        return DMSFile(self, file_mode)
 
     def __str__(self) -> str:
         return f"{self.fullname:<14} #{self.file_number:02d}  {self.low_core_addr:04o}  {self.entry_point:>04o}  {self.high_core_addr:>o}"
@@ -993,7 +993,7 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
             for entry in dn.entries_list:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[DMSDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> DMSDirectoryEntry:
         """
         Get the directory entry for a file
         """
@@ -1005,24 +1005,24 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
                     and entry.program_type == dms_filename.program_type
                 ):
                     return entry
-        return None
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
-    def read_bytes(self, fullname: str, file_type: t.Optional[str] = None) -> bytes:
+    def read_bytes(self, fullname: str, file_mode: t.Optional[str] = None) -> bytes:
         """Get the content of a file"""
-        if file_type is None:
+        if file_mode is None:
             dms_filename = DMSFilename(fullname)
             if dms_filename.program_type == FILE_TYPE_ASCII:
-                file_type = ASCII
+                file_mode = ASCII
             else:
-                file_type = IMAGE
+                file_mode = IMAGE
         # Always read the file as IMAGE
-        f = self.open_file(fullname, file_type=IMAGE)
+        f = self.open_file(fullname, IMAGE)
         try:
             data = f.read_block(0, READ_FILE_FULL)
-            if file_type == ASCII:
+            if file_mode == ASCII:
                 # Convert IMAGE => words => ASCII
-                words = from_bytes_to_12bit_words(data, file_type=IMAGE)
-                return from_12bit_words_to_bytes(words, file_type=ASCII)
+                words = from_bytes_to_12bit_words(data, file_mode=IMAGE)
+                return from_12bit_words_to_bytes(words, file_mode=ASCII)
             else:
                 return data
         finally:
@@ -1034,20 +1034,26 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         """
         Write content to a file
         """
         dms_filename = DMSFilename(fullname)
-        if dms_filename.program_type == FILE_TYPE_ASCII:
+        if file_mode is None:
+            if dms_filename.program_type == FILE_TYPE_ASCII:
+                file_mode = ASCII
+            else:
+                file_mode = IMAGE
+        if file_mode == ASCII:
             # Append FF (form feed) if not present
             if not content.endswith(b'\x0c\x0c'):
                 content = content + b'\x0c\x0c'
             # Convert ASCII => words
-            words = from_bytes_to_12bit_words(content, file_type=ASCII)
+            words = from_bytes_to_12bit_words(content, file_mode=ASCII)
         else:
             # Convert IMAGE => words
-            words = from_bytes_to_12bit_words(content, file_type=IMAGE)
+            words = from_bytes_to_12bit_words(content, file_mode=IMAGE)
         # Allocate space
         number_of_blocks = int(math.ceil(len(words) * 1.0 / DATA_BLOCK_SIZE_WORD))
         entry = self.create_file(fullname, number_of_blocks, creation_date, file_type)
@@ -1073,9 +1079,10 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
         """
         # Delete the file if it already exists
         dms_filename = DMSFilename(fullname)
-        entry: t.Optional[DMSDirectoryEntry] = self.get_file_entry(fullname)
-        if entry is not None:
-            entry.delete()
+        try:
+            self.get_file_entry(fullname).delete()
+        except FileNotFoundError:
+            pass
         # Allocate space
         sam = StorageAllocationMap.read(self)
         file_number = sam.allocate_space(fullname, number_of_blocks)
@@ -1165,8 +1172,6 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
         """Dump the content of a file or a range of blocks"""
         if fullname:
             entry = self.get_file_entry(fullname)
-            if not entry:
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
             if start is None:
                 start = 0
             if end is None:

@@ -1,5 +1,5 @@
+from rt11.pdp7.unix0fs import UNIX0Filesystem
 from rt11.shell import Shell
-from rt11.unix0fs import UNIX0Filesystem
 
 DSK = "tests/dsk/unixv0.dsk"
 

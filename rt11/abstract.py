@@ -20,6 +20,7 @@
 
 import errno
 import os
+import sys
 import typing as t
 from abc import ABC, abstractmethod
 from datetime import date
@@ -70,10 +71,11 @@ class AbstractFile(ABC):
     def read(self, size: t.Optional[int] = None) -> bytes:
         """Read bytes from the file, starting at the current position"""
         data = bytearray()
+        block_size = self.get_block_size()
         while size is None or len(data) < size:
             # Calculate current block and offset within the block
-            block_number = self.current_position // self.get_block_size()
-            block_offset = self.current_position % self.get_block_size()
+            block_number = self.current_position // block_size
+            block_offset = self.current_position % block_size
             # print(f"{block_number=} {block_offset=}")
             # Read the next block
             block_data = self.read_block(block_number)
@@ -97,16 +99,17 @@ class AbstractFile(ABC):
         """Write bytes to the file at the current position"""
         data_length = len(data)
         written = 0
+        block_size = self.get_block_size()
         while written < data_length:
             # Calculate current block and offset within the block
-            block_number = self.current_position // self.get_block_size()
-            block_offset = self.current_position % self.get_block_size()
+            block_number = self.current_position // block_size
+            block_offset = self.current_position % block_size
             # Read the current block
             block_data = bytearray(self.read_block(block_number))
             if not block_data:
-                block_data = bytearray(self.get_block_size())
+                block_data = bytearray(block_size)
             # Calculate the amount of data to write in the current block
-            remaining_block_space = self.get_block_size() - block_offset
+            remaining_block_space = block_size - block_offset
             data_to_write = data[written : written + remaining_block_space]
             # Write the data to the block
             block_data[block_offset : block_offset + len(data_to_write)] = data_to_write
@@ -183,20 +186,20 @@ class AbstractDirectoryEntry(ABC):
         """Delete the file"""
 
     @abstractmethod
-    def open(self, file_type: t.Optional[str] = None) -> AbstractFile:
+    def open(self, file_mode: t.Optional[str] = None) -> AbstractFile:
         """Open the file"""
 
-    def read_bytes(self, file_type: t.Optional[str] = None) -> bytes:
+    def read_bytes(self, file_mode: t.Optional[str] = None) -> bytes:
         """Get the content of the file"""
-        f = self.open(file_type)
+        f = self.open(file_mode)
         try:
             return f.read_block(0, READ_FILE_FULL)[: f.get_size()]
         finally:
             f.close()
 
-    def read_text(self, encoding: str = "ascii", errors: str = "ignore", file_type: str = ASCII) -> str:
+    def read_text(self, encoding: str = "ascii", errors: str = "ignore", file_mode: str = ASCII) -> str:
         """Get the content of the file as text"""
-        data = self.read_bytes(file_type)
+        data = self.read_bytes(file_mode)
         return data.decode(encoding, errors)
 
 
@@ -223,7 +226,7 @@ class AbstractFilesystem:
         """Property to get an iterator of directory entries"""
 
     @abstractmethod
-    def get_file_entry(self, fullname: str) -> t.Optional["AbstractDirectoryEntry"]:
+    def get_file_entry(self, fullname: str) -> "AbstractDirectoryEntry":
         """Get the directory entry for a file"""
 
     @abstractmethod
@@ -233,6 +236,7 @@ class AbstractFilesystem:
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         """Write content to a file"""
 
@@ -288,26 +292,25 @@ class AbstractFilesystem:
 
     def exists(self, fullname: str) -> bool:
         """Check if the given path exists"""
-        entry = self.get_file_entry(fullname)
-        return entry is not None
+        try:
+            self.get_file_entry(fullname)
+            return True
+        except FileNotFoundError:
+            return False
 
-    def open_file(self, fullname: str, file_type: t.Optional[str] = None) -> "AbstractFile":
+    def open_file(self, fullname: str, file_mode: t.Optional[str] = None) -> "AbstractFile":
         """Open a file"""
         entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return entry.open(file_type)
+        return entry.open(file_mode)
 
-    def read_bytes(self, fullname: str, file_type: t.Optional[str] = None) -> bytes:
+    def read_bytes(self, fullname: str, file_mode: t.Optional[str] = None) -> bytes:
         """Get the content of a file"""
         entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        return entry.read_bytes(file_type)
+        return entry.read_bytes(file_mode)
 
-    def read_text(self, fullname: str, encoding: str = "ascii", errors: str = "ignore", file_type: str = ASCII) -> str:
+    def read_text(self, fullname: str, encoding: str = "ascii", errors: str = "ignore", file_mode: str = ASCII) -> str:
         """Get the content of a file as text"""
-        data = self.read_bytes(fullname, file_type)
+        data = self.read_bytes(fullname, file_mode)
         return data.decode(encoding, errors)
 
     def dump(self, fullname: t.Optional[str], start: t.Optional[int] = None, end: t.Optional[int] = None) -> None:
@@ -318,14 +321,12 @@ class AbstractFilesystem:
                 start = 0
             if end is None:
                 entry = self.get_file_entry(fullname)
-                if not entry:
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
                 end = entry.get_length() - 1
-            f = self.open_file(fullname, file_type=IMAGE)
+            f = self.open_file(fullname, file_mode=IMAGE)
             try:
                 for block_number in range(start, end + 1):
                     data = f.read_block(block_number)
-                    print(f"\nBLOCK NUMBER   {block_number:08}")
+                    sys.stdout.write(f"\nBLOCK NUMBER   {block_number:08}\n")
                     hex_dump(data)
             finally:
                 f.close()
@@ -339,7 +340,7 @@ class AbstractFilesystem:
                     end = start
             for block_number in range(start, end + 1):
                 data = self.read_block(block_number)
-                print(f"\nBLOCK NUMBER   {block_number:08}")
+                sys.stdout.write(f"\nBLOCK NUMBER   {block_number:08}\n")
                 hex_dump(data)
 
     def get_types(self) -> t.List[str]:

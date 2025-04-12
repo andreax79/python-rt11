@@ -329,16 +329,15 @@ class ProDOSFile(AbstractFile):
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         data = bytearray()
-        for i, next_block_number in enumerate(self.entry.blocks()):
-            if i >= block_number:
-                if next_block_number == 0:  # sparse file
-                    t = bytes(BLOCK_SIZE)
-                else:
-                    t = self.entry.fs.read_block(next_block_number)
-                data.extend(t)
-                number_of_blocks -= 1
-                if number_of_blocks == 0:
-                    break
+        # Get the blocks to be read
+        blocks = list(self.entry.blocks())[block_number : block_number + number_of_blocks]
+        # Read the blocks
+        for disk_block_number in blocks:
+            if disk_block_number == 0:  # sparse file
+                t = bytes(BLOCK_SIZE)
+            else:
+                t = self.entry.fs.read_block(disk_block_number)
+            data.extend(t)
         return bytes(data)
 
     def write_block(
@@ -357,12 +356,15 @@ class ProDOSFile(AbstractFile):
             or block_number + number_of_blocks > self.entry.get_length()
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
-        for i, next_block_number in enumerate(self.entry.blocks()):
-            if next_block_number == 0:
+        # Get the blocks to be written
+        blocks = list(self.entry.blocks())[block_number : block_number + number_of_blocks]
+        # Write the blocks
+        for i, disk_block_number in enumerate(blocks):
+            if disk_block_number == 0:
                 # TODO: write spase file
                 raise OSError(errno.ENOSYS, os.strerror(errno.ENOSYS))
             data = buffer[i * BLOCK_SIZE : (i + 1) * BLOCK_SIZE]
-            self.entry.fs.write_block(data, next_block_number)
+            self.entry.fs.write_block(data, disk_block_number)
 
     def get_size(self) -> int:
         """
@@ -534,7 +536,7 @@ class ProDOSAbstractDirEntry(AbstractDirectoryEntry):
         """
         return 0
 
-    def open(self, file_type: t.Optional[str] = None) -> ProDOSFile:
+    def open(self, file_mode: t.Optional[str] = None) -> ProDOSFile:
         """
         Open a file
         """
@@ -912,7 +914,7 @@ class FileEntry(ProDOSAbstractDirEntry):
             self.header_pointer,
         )
 
-    def read_bytes(self, file_type: t.Optional[str] = None) -> bytes:
+    def read_bytes(self, file_mode: t.Optional[str] = None) -> bytes:
         """Get the content of the file"""
         data = super().read_bytes(IMAGE)
         if len(data) < self.length:  # sparse file - pad with zeros
@@ -941,7 +943,7 @@ class FileEntry(ProDOSAbstractDirEntry):
         """
         return self.length
 
-    def open(self, file_type: t.Optional[str] = None) -> ProDOSFile:
+    def open(self, file_mode: t.Optional[str] = None) -> ProDOSFile:
         """
         Open a file
         """
@@ -1352,7 +1354,7 @@ class DirectoryFileEntry(AbstractDirectoryFileEntry):
         # Delete the directory
         return super().delete()
 
-    def open(self, file_type: t.Optional[str] = None) -> ProDOSFile:
+    def open(self, file_mode: t.Optional[str] = None) -> ProDOSFile:
         """
         Open a file
         """
@@ -1513,7 +1515,7 @@ class ExtendedFileEntry(FileEntry):
         yield ExtendedFileFork.read(self.fs, self, extended_key_block, EXTENDED_DATA_FORK_POS)
         yield ExtendedFileFork.read(self.fs, self, extended_key_block, EXTENDED_RESOURCE_FORK_POS)
 
-    def open(self, file_type: t.Optional[str] = None, fork: str = "DATA.FORK") -> ProDOSFile:
+    def open(self, file_mode: t.Optional[str] = None, fork: str = "DATA.FORK") -> ProDOSFile:
         """
         Open the data fork / resource fork
         """
@@ -1525,7 +1527,7 @@ class ExtendedFileEntry(FileEntry):
             data_fork = ExtendedFileFork.read(self.fs, self, extended_key_block, EXTENDED_DATA_FORK_POS)
             return ProDOSFile(data_fork)
 
-    def read_bytes(self, file_type: t.Optional[str] = None) -> bytes:
+    def read_bytes(self, file_mode: t.Optional[str] = None) -> bytes:
         """
         Get the data/resource/metadata as AppleSingle
         """
@@ -1881,6 +1883,7 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
         content: bytes,
         creation_date: t.Optional[t.Union[date, datetime]] = None,  # optional creation date
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
         access: t.Optional[int] = None,  # optional access
         aux_type: t.Optional[int] = None,  # optional auxiliary type
     ) -> None:
@@ -1926,7 +1929,7 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
                     f.close()
             # Write the data fork
             content = content + (b"\0" * BLOCK_SIZE)  # pad with zeros
-            f = entry.open(file_type)
+            f = entry.open(file_mode)
             try:
                 f.write_block(content, block_number=0, number_of_blocks=number_of_blocks)
             finally:

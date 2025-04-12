@@ -166,7 +166,7 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
         except:
             return False
 
-    def open(self, file_type: t.Optional[str] = None) -> NativeFile:
+    def open(self, file_mode: t.Optional[str] = None) -> NativeFile:
         """
         Open a file
         """
@@ -239,6 +239,7 @@ class NativeFilesystem(AbstractFilesystem):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         if not fullname.startswith("/") and not fullname.startswith("\\"):
             fullname = os.path.join(self.pwd, fullname)

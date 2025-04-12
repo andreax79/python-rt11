@@ -84,9 +84,9 @@ def get_v0_inode_block_offset(inode_num: int) -> Tuple[int, int]:
 class UNIXFile0(UNIXFile):
     inode: "UNIXInode0"
 
-    def __init__(self, inode: "UNIXInode0", file_type: Optional[str] = None):
+    def __init__(self, inode: "UNIXInode0", file_mode: Optional[str] = None):
         super().__init__(inode)
-        self.file_type = file_type or IMAGE
+        self.file_mode = file_mode or IMAGE
 
     def read_block(
         self,
@@ -109,7 +109,7 @@ class UNIXFile0(UNIXFile):
         for i, next_block_number in enumerate(self.inode.blocks()):
             if i >= block_number:
                 words = self.inode.fs.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + next_block_number)
-                t = from_18bit_words_to_bytes(words, self.file_type)
+                t = from_18bit_words_to_bytes(words, self.file_mode)
                 data.extend(t)
                 number_of_blocks -= 1
                 if number_of_blocks == 0:
@@ -120,7 +120,7 @@ class UNIXFile0(UNIXFile):
         """
         Get file size in bytes
         """
-        if self.file_type == ASCII:
+        if self.file_mode == ASCII:
             return self.inode.size * 2  # 2 ASCII bytes per 18 bit word
         else:
             return self.inode.size * V0_IO_BYTES_PER_WORD
@@ -265,11 +265,11 @@ class UNIXInode0(UNIXInode):
 class UNIXDirectoryEntry0(UNIXDirectoryEntry):
     inode: "UNIXInode0"
 
-    def open(self, file_type: Optional[str] = None) -> UNIXFile:
+    def open(self, file_mode: Optional[str] = None) -> UNIXFile:
         """
         Open a file
         """
-        return UNIXFile0(self.inode, file_type)
+        return UNIXFile0(self.inode, file_mode)
 
 
 class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
@@ -328,7 +328,7 @@ class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
                 fullname = unix_join(dirname, filename)
                 yield UNIXDirectoryEntry0(self, fullname, inode_num)
 
-    def get_file_entry(self, fullname: str) -> Optional[UNIXDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> UNIXDirectoryEntry:
         inode: UNIXInode0 = self.get_inode(fullname)  # type: ignore
         if not inode:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)

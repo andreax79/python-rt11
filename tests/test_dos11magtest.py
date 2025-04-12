@@ -8,7 +8,7 @@ DSK = "tests/dsk/dos11_magtape.tap"
 
 def test_dos11magtape_read():
     shell = Shell(verbose=True)
-    shell.onecmd(f"mount t: /magtape {DSK}", batch=True)
+    shell.onecmd(f"mount t: /dos11mt {DSK}", batch=True)
     fs = shell.volumes.get('T')
     assert isinstance(fs, DOS11MagTapeFilesystem)
 
@@ -29,8 +29,8 @@ def test_dos11magtape_read():
 def test_dos11magtape_write():
     shell = Shell(verbose=True)
     shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
-    shell.onecmd(f"mount in: /magtape {DSK}", batch=True)
-    shell.onecmd(f"mount ou: /magtape {DSK}.mo", batch=True)
+    shell.onecmd(f"mount in: /dos11mt {DSK}", batch=True)
+    shell.onecmd(f"mount ou: /dos11mt {DSK}.mo", batch=True)
     fs = shell.volumes.get('OU')
     assert isinstance(fs, DOS11MagTapeFilesystem)
 
@@ -39,8 +39,8 @@ def test_dos11magtape_write():
 
     # Delete a file
     d.delete()
-    d2 = fs.get_file_entry("500.TXT")
-    assert d2 is None
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_entry("500.TXT")
 
     # Create a file
     shell.onecmd("copy in:10.TXT ou:10NEW.TXT", batch=True)
@@ -53,10 +53,10 @@ def test_dos11magtape_write():
 
 def test_dos11magtape_init():
     shell = Shell(verbose=True)
-    shell.onecmd(f"mount in: /magtape {DSK}", batch=True)
+    shell.onecmd(f"mount in: /dos11mt {DSK}", batch=True)
     shell.onecmd(f"create /allocate:280 {DSK}.mo", batch=True)
-    shell.onecmd(f"init /magtape {DSK}.mo", batch=True)
-    shell.onecmd(f"mount ou: /magtape {DSK}.mo", batch=True)
+    shell.onecmd(f"init /dos11mt {DSK}.mo", batch=True)
+    shell.onecmd(f"mount ou: /dos11mt {DSK}.mo", batch=True)
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("copy in:*.TXT ou:", batch=True)
     shell.onecmd("copy in:*.TXT ou:", batch=True)

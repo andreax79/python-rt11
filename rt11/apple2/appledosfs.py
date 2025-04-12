@@ -141,18 +141,18 @@ def appledos_filename_to_raw_filename(filename: str) -> bytes:
 
 class AppleDOSFile(AbstractFile):
     entry: "AppleDOSDirectoryEntry"
-    file_type: str
+    file_mode: str
     closed: bool
 
-    def __init__(self, entry: "AppleDOSDirectoryEntry", file_type: t.Optional[str] = None):
+    def __init__(self, entry: "AppleDOSDirectoryEntry", file_mode: t.Optional[str] = None):
         self.entry = entry
         self.closed = False
-        if file_type is None:
-            self.file_type = ASCII if entry.raw_file_type == FILE_TYPE_TEXT else IMAGE
-        elif file_type is ASCII or file_type == FILE_TYPES[FILE_TYPE_TEXT]:
-            self.file_type = ASCII
+        if file_mode is None:
+            self.file_mode = ASCII if entry.raw_file_type == FILE_TYPE_TEXT else IMAGE
+        elif file_mode is ASCII or file_mode == FILE_TYPES[FILE_TYPE_TEXT]:
+            self.file_mode = ASCII
         else:
-            self.file_type = IMAGE
+            self.file_mode = IMAGE
 
     def read_block(
         self,
@@ -172,14 +172,14 @@ class AppleDOSFile(AbstractFile):
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         data = bytearray()
-        for i, next_address in enumerate(self.entry.blocks()):
-            if i >= block_number:
-                t = self.entry.fs.read_sector(next_address)
-                data.extend(t)
-                number_of_blocks -= 1
-                if number_of_blocks == 0:
-                    break
-        if self.file_type == ASCII:
+        # Get the blocks to be read
+        blocks = list(self.entry.blocks())[block_number : block_number + number_of_blocks]
+        # Read the blocks
+        for disk_block_number in blocks:
+            buffer = self.entry.fs.read_sector(disk_block_number)
+            data.extend(buffer)
+        # Convert to ASCII if needed
+        if self.file_mode == ASCII:
             return bytes([0x0A if x == 0x8D else x & 0x7F for x in data])
         else:
             return bytes(data)
@@ -200,11 +200,15 @@ class AppleDOSFile(AbstractFile):
             or block_number + number_of_blocks > self.entry.get_length()
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
-        if self.file_type == ASCII:
+        # Convert to ASCII if needed
+        if self.file_mode == ASCII:
             buffer = bytes([0x8D if x == 0x0A else x | 0x80 for x in buffer])
-        for i, next_address in enumerate(self.entry.blocks()):
+        # Get the blocks to be written
+        blocks = list(self.entry.blocks())[block_number : block_number + number_of_blocks]
+        # Write the blocks
+        for i, disk_block_number in enumerate(blocks):
             data = buffer[i * SECTOR_SIZE : (i + 1) * SECTOR_SIZE]
-            self.entry.fs.write_sector(data, next_address)
+            self.entry.fs.write_sector(data, disk_block_number)
 
     def get_size(self) -> int:
         """
@@ -772,7 +776,7 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
         """
         return FILE_TYPES.get(self.raw_file_type)
 
-    def read_bytes(self, file_type: t.Optional[str] = None) -> bytes:
+    def read_bytes(self, file_mode: t.Optional[str] = None) -> bytes:
         """Get the content of the file"""
         data = super().read_bytes()
         if self.file_type == "B":
@@ -868,11 +872,11 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
         vtoc.write()
         return True
 
-    def open(self, file_type: t.Optional[str] = None) -> AppleDOSFile:
+    def open(self, file_mode: t.Optional[str] = None) -> AppleDOSFile:
         """
         Open a file
         """
-        return AppleDOSFile(self, file_type)
+        return AppleDOSFile(self, file_mode)
 
     def __str__(self) -> str:
         return (
@@ -958,7 +962,7 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
         catalog = AppleDOSCatalog.read(self)
         yield from catalog.iterdir()
 
-    def get_file_entry(self, fullname: str, include_deleted: bool = False) -> t.Optional[AppleDOSDirectoryEntry]:
+    def get_file_entry(self, fullname: str, include_deleted: bool = False) -> AppleDOSDirectoryEntry:
         """
         Get the file entry for a given path
         """
@@ -967,7 +971,7 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
         for entry in catalog.iterdir(include_deleted=include_deleted):
             if entry.fullname == fullname:
                 return entry
-        return None
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -975,6 +979,7 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         """
         Write content to a file
@@ -1021,7 +1026,7 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
         )
         if entry is not None:
             content = content + (b"\0" * SECTOR_SIZE)  # pad with zeros
-            f = entry.open(file_type)
+            f = entry.open(file_mode)
             try:
                 f.write_block(content, block_number=0, number_of_blocks=number_of_blocks)
             finally:
@@ -1038,9 +1043,10 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
         Create a new file
         """
         fullname = appledos_canonical_filename(fullname)  # type: ignore
-        entry: t.Optional[AppleDOSDirectoryEntry] = self.get_file_entry(fullname)
-        if entry is not None:
-            entry.delete()
+        try:
+            self.get_file_entry(fullname).delete()
+        except FileNotFoundError:
+            pass
         vtoc = AppleDOSVTOC.read(self)
         catalog = AppleDOSCatalog.read(self)
         entry = catalog.create_file(
@@ -1105,15 +1111,14 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
                 sys.stdout.write(f"Track {track:>3}: {bits:032b}\n")
         else:
             # Examine by path
-            entry = self.get_file_entry(arg, include_deleted=True)  # type: ignore
-            if entry:
-                entry_dict = dict(entry.__dict__)
-                entry_dict["address"] = str(entry.address)
-                entry_dict["blocks"] = list(entry.blocks())  # type: ignore
-                sys.stdout.write(dump_struct(entry_dict, exclude=["fs"]) + "\n")
-                vtoc = AppleDOSVTOC.read(self)
-                for sector in entry.blocks(include_indexes=True):
-                    sys.stdout.write(f"Sector {sector} is {'free' if vtoc.is_free(sector) else 'used'}\n")
+            entry = self.get_file_entry(arg, include_deleted=True)
+            entry_dict = dict(entry.__dict__)
+            entry_dict["address"] = str(entry.address)
+            entry_dict["blocks"] = list(entry.blocks())  # type: ignore
+            sys.stdout.write(dump_struct(entry_dict, exclude=["fs"]) + "\n")
+            vtoc = AppleDOSVTOC.read(self)
+            for sector in entry.blocks(include_indexes=True):
+                sys.stdout.write(f"Sector {sector} is {'free' if vtoc.is_free(sector) else 'used'}\n")
 
     def dump(self, fullname: t.Optional[str], start: t.Optional[int] = None, end: t.Optional[int] = None) -> None:
         """
@@ -1124,10 +1129,8 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
                 start = 0
             if end is None:
                 entry = self.get_file_entry(fullname)
-                if not entry:
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
                 end = entry.get_length() - 1
-            f = self.open_file(fullname, file_type=IMAGE)
+            f = self.open_file(fullname, file_mode=IMAGE)
             try:
                 for block_number in range(start, end + 1):
                     data = f.read_block(block_number)

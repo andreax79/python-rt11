@@ -736,7 +736,7 @@ class UNIXDirectoryEntry(AbstractDirectoryEntry):
     def delete(self) -> bool:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def open(self, file_type: t.Optional[str] = None) -> UNIXFile:
+    def open(self, file_mode: t.Optional[str] = None) -> UNIXFile:
         """
         Open a file
         """
@@ -874,7 +874,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
     def entries_list(self) -> t.Iterator["UNIXDirectoryEntry"]:
         yield from self.read_dir_entries(self.pwd)
 
-    def get_file_entry(self, fullname: str) -> t.Optional[UNIXDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> UNIXDirectoryEntry:
         inode = self.get_inode(fullname)
         if not inode:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -886,6 +886,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 

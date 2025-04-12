@@ -49,33 +49,33 @@ def test_12bit_words_ascii():
     9 ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890
     """
     data = text
-    words = from_bytes_to_12bit_words(data, file_type=IMAGE)
-    data2 = from_12bit_words_to_bytes(words, file_type=ASCII)
-    words2 = from_bytes_to_12bit_words(data2, file_type=ASCII)
-    data3 = from_12bit_words_to_bytes(words2, file_type=IMAGE)
+    words = from_bytes_to_12bit_words(data, file_mode=IMAGE)
+    data2 = from_12bit_words_to_bytes(words, file_mode=ASCII)
+    words2 = from_bytes_to_12bit_words(data2, file_mode=ASCII)
+    data3 = from_12bit_words_to_bytes(words2, file_mode=IMAGE)
     assert words == words2
     assert data == data3.rstrip(b"\x00")
 
     data = random_string(17)
-    words = from_bytes_to_12bit_words(data, file_type=IMAGE)
-    data2 = from_12bit_words_to_bytes(words, file_type=ASCII)
-    words2 = from_bytes_to_12bit_words(data2, file_type=ASCII)
-    data3 = from_12bit_words_to_bytes(words2, file_type=IMAGE)
+    words = from_bytes_to_12bit_words(data, file_mode=IMAGE)
+    data2 = from_12bit_words_to_bytes(words, file_mode=ASCII)
+    words2 = from_bytes_to_12bit_words(data2, file_mode=ASCII)
+    data3 = from_12bit_words_to_bytes(words2, file_mode=IMAGE)
     assert words == words2
     assert data == data3.rstrip(b"\x00")
 
-    assert from_12bit_words_to_bytes([], file_type=ASCII) == b""
-    assert from_12bit_words_to_bytes([0], file_type=ASCII) == b""
+    assert from_12bit_words_to_bytes([], file_mode=ASCII) == b""
+    assert from_12bit_words_to_bytes([0], file_mode=ASCII) == b""
 
     # data = random_string(18)
     data = text
     print(len(data))
-    words = from_bytes_to_12bit_words(data, file_type=ASCII)
+    words = from_bytes_to_12bit_words(data, file_mode=ASCII)
     print("len words", len(words))
-    data2 = from_12bit_words_to_bytes(words, file_type=IMAGE)
+    data2 = from_12bit_words_to_bytes(words, file_mode=IMAGE)
     print("len bytes (image)", len(data2))
-    words2 = from_bytes_to_12bit_words(data2, file_type=IMAGE)
-    data3 = from_12bit_words_to_bytes(words2, file_type=ASCII)
+    words2 = from_bytes_to_12bit_words(data2, file_mode=IMAGE)
+    data3 = from_12bit_words_to_bytes(words2, file_mode=ASCII)
     print(words)
     print(words2)
     print(data)
@@ -268,8 +268,8 @@ def test_directory_name_block():
     assert d.get_length() == 21
     assert len(sam.files_blocks[d.file_number]) == d.get_length()
     assert 2 in sam.files_blocks
-    d1 = fs.get_file_entry("XXX.SYS")
-    assert d1 is None
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_entry("XXX.SYS")
     d2 = fs.create_file("TEST.ASCII", 7)
     assert d2.program_type == FILE_TYPE_ASCII
     assert fs.free() == 39 - 7

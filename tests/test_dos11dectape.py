@@ -8,7 +8,7 @@ DSK = "tests/dsk/dos11_dectape.tap"
 
 def test_dos11_dectape():
     shell = Shell(verbose=True)
-    shell.onecmd(f"mount t: /dos {DSK}", batch=True)
+    shell.onecmd(f"mount t: /dos11 {DSK}", batch=True)
     fs = shell.volumes.get('T')
     assert isinstance(fs, DOS11Filesystem)
 
@@ -29,7 +29,7 @@ def test_dos11_dectape():
 def test_dos11_dectape_bitmap():
     shell = Shell(verbose=True)
     shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
-    shell.onecmd(f"mount t: /dos {DSK}.mo", batch=True)
+    shell.onecmd(f"mount t: /dos11 {DSK}.mo", batch=True)
     fs = shell.volumes.get('T')
     assert isinstance(fs, DOS11Filesystem)
 
@@ -44,8 +44,8 @@ def test_dos11_dectape_bitmap():
 
     # Delete linked file
     d.delete()
-    d2 = fs.get_file_entry("[200,200]500.TXT")
-    assert d2 is None
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_entry("[200,200]500.TXT")
 
     # UIC not found
     with pytest.raises(Exception):

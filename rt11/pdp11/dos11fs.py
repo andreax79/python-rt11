@@ -569,7 +569,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         bitmap.write()
         return True
 
-    def open(self, file_type: t.Optional[str] = None) -> DOS11File:
+    def open(self, file_mode: t.Optional[str] = None) -> DOS11File:
         """
         Open a file
         """
@@ -918,7 +918,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
                     if not entry.is_empty:
                         yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[DOS11DirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> DOS11DirectoryEntry:
         """
         Get the directory entry for a file
         """
@@ -926,7 +926,10 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
-        return next(self.filter_entries_list(basename, wildcard=False, uic=uic), None)
+        try:
+            return next(self.filter_entries_list(basename, wildcard=False, uic=uic))
+        except StopIteration:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -934,6 +937,7 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
         protection_code: int = DEFAULT_PROTECTION_CODE,
     ) -> None:
         """
@@ -968,9 +972,10 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         """
         contiguous = dos11_get_file_type_id(file_type) == CONTIGUOUS_FILE_TYPE
         # Delete the existing file
-        old_entry = self.get_file_entry(fullname)
-        if old_entry is not None:
-            old_entry.delete()
+        try:
+            self.get_file_entry(fullname).delete()
+        except FileNotFoundError:
+            pass
         # Get the MFD entry for the target UIC
         uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
         try:

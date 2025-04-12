@@ -98,15 +98,15 @@ def test_dos11_bitmap():
 
     # Delete contiguous file
     e.delete()
-    e2 = fs.get_file_entry("[100,100]200.TXT")
-    assert e2 is None
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_entry("[100,100]200.TXT")
     bitmap = fs.read_bitmap()
     assert bitmap.used() == 337 - e_length
 
     # Delete linked file
     d.delete()
-    d2 = fs.get_file_entry("[200,200]500.TXT")
-    assert d2 is None
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_entry("[200,200]500.TXT")
     bitmap = fs.read_bitmap()
     assert bitmap.used() == 337 - e_length - d_length
 

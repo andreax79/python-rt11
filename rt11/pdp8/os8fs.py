@@ -136,13 +136,13 @@ def os8_split_fullname(
     return partition, fullname
 
 
-def from_12bit_words_to_bytes(words: list[int], file_type: str = ASCII) -> bytes:
+def from_12bit_words_to_bytes(words: list[int], file_mode: str = ASCII) -> bytes:
     """
     Convert 12bit words to bytes
 
     http://www.bitsavers.org/pdf/dec/pdp8/os8/DEC-S8-OSSMB-A-D_OS8_v3ssup.pdf Pag 65
     """
-    mask = 127 if file_type == ASCII else 255
+    mask = 127 if file_mode == ASCII else 255
     data = bytearray()
     for i in range(0, len(words) - 1, 2):
         chr1 = words[i]
@@ -157,11 +157,11 @@ def from_12bit_words_to_bytes(words: list[int], file_type: str = ASCII) -> bytes
     return bytes(data)
 
 
-def from_bytes_to_12bit_words(byte_data: bytes, file_type: str = "ASCII") -> t.List[int]:
+def from_bytes_to_12bit_words(byte_data: bytes, file_mode: str = "ASCII") -> t.List[int]:
     """
     Convert bytes to 12-bit words.
     """
-    mask = 127 if file_type == "ASCII" else 255
+    mask = 127 if file_mode == "ASCII" else 255
     words = []
     for i in range(0, len(byte_data), 3):
         chr1 = byte_data[i] & mask
@@ -213,16 +213,16 @@ def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
 
 class OS8File(AbstractFile):
     entry: "OS8DirectoryEntry"
-    file_type: str
+    file_mode: str
     closed: bool
     size: int
 
-    def __init__(self, entry: "OS8DirectoryEntry", file_type: t.Optional[str] = None):
+    def __init__(self, entry: "OS8DirectoryEntry", file_mode: t.Optional[str] = None):
         self.entry = entry
-        if file_type is not None:
-            self.file_type = file_type
+        if file_mode is not None:
+            self.file_mode = file_mode
         else:
-            self.file_type = ASCII if entry.extension.upper() in ASCII_EXTENSIONS else IMAGE
+            self.file_mode = ASCII if entry.extension.upper() in ASCII_EXTENSIONS else IMAGE
         self.closed = False
         self.size = entry.length * OS8_BLOCK_SIZE_BYTES
 
@@ -247,7 +247,7 @@ class OS8File(AbstractFile):
         for i in range(number_of_blocks):
             block_position = block_number + self.entry.file_position + i
             words = self.entry.segment.partition.read_12bit_words_block(block_position)
-            t = from_12bit_words_to_bytes(words, self.file_type)
+            t = from_12bit_words_to_bytes(words, self.file_mode)
             data.extend(t)
         return bytes(data)
 
@@ -270,7 +270,7 @@ class OS8File(AbstractFile):
         for i in range(number_of_blocks):
             block_position = block_number + self.entry.file_position + i
             data = buffer[i * OS8_BLOCK_SIZE_BYTES : (i + 1) * OS8_BLOCK_SIZE_BYTES]
-            words = from_bytes_to_12bit_words(data, self.file_type)
+            words = from_bytes_to_12bit_words(data, self.file_mode)
             self.entry.segment.partition.write_12bit_words_block(block_position, words)
 
     def get_size(self) -> int:
@@ -453,11 +453,11 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
         self.segment.write()
         return True
 
-    def open(self, file_type: t.Optional[str] = None) -> OS8File:
+    def open(self, file_mode: t.Optional[str] = None) -> OS8File:
         """
         Open a file
         """
-        return OS8File(self, file_type)
+        return OS8File(self, file_mode)
 
     def __str__(self) -> str:
         attr = "TEMP" if self.is_tentative else "PERM" if self.is_permanent else "EMPTY"
@@ -676,7 +676,7 @@ class OS8Partition:
             next_block_number = segment.next_block_number
             yield segment
 
-    def get_file_entry(self, fullname: str) -> t.Optional[OS8DirectoryEntry]:  # fullname=filename+ext
+    def get_file_entry(self, fullname: str) -> OS8DirectoryEntry:  # fullname=filename+ext
         """
         Get the directory entry for a file in this partition
         """
@@ -684,7 +684,7 @@ class OS8Partition:
             for entry in segment.entries_list:
                 if entry.fullname == fullname and entry.is_permanent:
                     return entry
-        return None
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def split_segment(self, entry: OS8DirectoryEntry) -> bool:
         # entry is the last entry of the old_segment, new new segment will contain all the entries after that
@@ -775,9 +775,10 @@ class OS8Partition:
         creation_date: t.Optional[date] = None,  # t.optional creation date
         file_type: t.Optional[str] = None,
     ) -> t.Optional[OS8DirectoryEntry]:
-        entry: t.Optional[OS8DirectoryEntry] = self.get_file_entry(fullname)
-        if entry is not None:
-            entry.delete()
+        try:
+            self.get_file_entry(fullname).delete()
+        except FileNotFoundError:
+            pass
         return self.allocate_space(fullname, number_of_blocks, creation_date)
 
     def initialize(self, **kwargs: t.Union[bool, str]) -> None:
@@ -888,7 +889,7 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
             for entry in segment.entries_list:
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> t.Optional[OS8DirectoryEntry]:  # fullname=filename+ext
+    def get_file_entry(self, fullname: str) -> OS8DirectoryEntry:  # fullname=filename+ext
         partition = self.current_partition
         if fullname:
             partition, fullname = os8_split_fullname(partition, fullname)  # type: ignore
@@ -896,7 +897,7 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
             for entry in segment.entries_list:
                 if entry.fullname == fullname and entry.is_permanent:
                     return entry
-        return None
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -904,12 +905,13 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         number_of_blocks = int(math.ceil(len(content) / OS8_BLOCK_SIZE_BYTES))
         entry = self.create_file(fullname, number_of_blocks, creation_date, file_type)
         if entry is not None:
             content = content + (b"\0" * OS8_BLOCK_SIZE_BYTES)
-            f = entry.open(file_type)
+            f = entry.open(file_mode)
             try:
                 f.write_block(content, block_number=0, number_of_blocks=entry.length)
             finally:
@@ -992,8 +994,6 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
         """Dump the content of a file or a range of blocks"""
         if fullname:
             entry = self.get_file_entry(fullname)
-            if not entry:
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
             if start is None:
                 start = 0
             if end is None or end > entry.get_length() - 1:

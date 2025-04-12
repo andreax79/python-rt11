@@ -28,7 +28,7 @@ from datetime import date
 
 from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from ..block import BlockDevice
-from ..commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
+from ..commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL, filename_match
 
 __all__ = [
     "SOLOFile",
@@ -72,24 +72,24 @@ SEGMENTS = {
 }
 
 # File types
-SEGMENT = -1  # Segment
-EMPTY = 0  #    Empty file
-SCRATCH = 1  #  Scratch file
-ASCII = 2  #    Ascii file
-SEQCODE = 3  #  Sequential Pascal code file
-CONCODE = 4  #  Concurrent Pascal code file
+FILE_TYPE_SEGMENT = -1  # Segment
+FILE_TYPE_EMPTY = 0  #    Empty file
+FILE_TYPE_SCRATCH = 1  #  Scratch file
+FILE_TYPE_ASCII = 2  #    Ascii file
+FILE_TYPE_SEQCODE = 3  #  Sequential Pascal code file
+FILE_TYPE_CONCODE = 4  #  Concurrent Pascal code file
 
 FILE_TYPES = {
-    EMPTY: "EMPTY",
-    SCRATCH: "SCRATCH",
-    ASCII: "ASCII",
-    SEQCODE: "SEQCODE",
-    CONCODE: "CONCODE",
-    SEGMENT: "SEGMENT",
+    FILE_TYPE_EMPTY: "EMPTY",
+    FILE_TYPE_SCRATCH: "SCRATCH",
+    FILE_TYPE_ASCII: "ASCII",
+    FILE_TYPE_SEQCODE: "SEQCODE",
+    FILE_TYPE_CONCODE: "CONCODE",
+    FILE_TYPE_SEGMENT: "SEGMENT",
 }
 
 
-def get_file_type_id(file_type: t.Optional[str], default: int = ASCII) -> int:
+def get_file_type_id(file_type: t.Optional[str], default: int = FILE_TYPE_ASCII) -> int:
     """
     Get the file type id from a string
     """
@@ -149,11 +149,15 @@ def ascii_to_solo(data: bytes) -> bytes:
 
 class SOLOFile(AbstractFile):
     entry: "SOLODirectoryEntry"
+    file_mode: str
     closed: bool
 
-    def __init__(self, entry: "SOLODirectoryEntry", file_type: t.Optional[str] = None) -> None:
+    def __init__(self, entry: "SOLODirectoryEntry", file_mode: t.Optional[str] = None) -> None:
         self.entry = entry
-        self.file_type = file_type  # File type specified by open
+        if file_mode:
+            self.file_mode = file_mode
+        else:
+            self.file_mode = ASCII if self.entry.file_type_id == FILE_TYPE_ASCII else IMAGE
         self.closed = False
 
     def read_block(
@@ -177,7 +181,7 @@ class SOLOFile(AbstractFile):
         for i in range(block_number, block_number + number_of_blocks):
             disk_block_number = self.entry.page_map[i]
             data.extend(self.entry.fs.read_block(disk_block_number))
-        if data and (not self.file_type or self.file_type == FILE_TYPES[ASCII]) and self.entry.file_type_id == ASCII:
+        if data and self.file_mode == ASCII:
             return solo_to_ascii(bytes(data))
         else:
             return bytes(data)
@@ -451,7 +455,7 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         # Delete entry from the catalog
         old_key = self.hash_key
         self.hash_key = 0
-        self.file_type_id = EMPTY
+        self.file_type_id = FILE_TYPE_EMPTY
         self.protected = False
         self.filename = ""
         self.page_map_block_number = 0
@@ -460,11 +464,11 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         self.fs.update_searchlength(old_key, -1)
         return True
 
-    def open(self, file_type: t.Optional[str] = None) -> SOLOFile:
+    def open(self, file_mode: t.Optional[str] = None) -> SOLOFile:
         """
         Open a file
         """
-        return SOLOFile(self, file_type)
+        return SOLOFile(self, file_mode)
 
     def __str__(self) -> str:
         return f"{self.filename:<12}  \
@@ -483,7 +487,7 @@ class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
     fs: "SOLOFilesystem"
     filename: str = ""
     segment_addr: int = 0
-    file_type_id: int = SEGMENT
+    file_type_id: int = FILE_TYPE_SEGMENT
     protected: bool = True
     is_empty: bool = False
     file_type: str = "SEGMENT"
@@ -538,7 +542,7 @@ class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
     def delete(self) -> bool:
         return False
 
-    def open(self, file_type: t.Optional[str] = None) -> SOLOSegment:
+    def open(self, file_mode: t.Optional[str] = None) -> SOLOSegment:
         """
         Open a segment
         """
@@ -728,7 +732,7 @@ class SOLOCatalogPage:
         If search_key is not None, put the new entry in the first position after the search_key
         """
         file_type_id = get_file_type_id(file_type)
-        if file_type_id == EMPTY or file_type_id == SEGMENT:
+        if file_type_id == FILE_TYPE_EMPTY or file_type_id == FILE_TYPE_SEGMENT:
             raise Exception("?KMON-F-Invalid file type specified with option")
         if search_key is not None:
             pos = (search_key - 1) % CAT_PAGE_LENGTH
@@ -849,10 +853,10 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
                 pattern, file_type = pattern.split(";", 1)
                 file_type_id = get_file_type_id(file_type)
             pattern = solo_canonical_filename(pattern, segment=True, wildcard=True)
-        if include_all or file_type_id == SEGMENT:
+        if include_all or file_type_id == FILE_TYPE_SEGMENT:
             for segment in SEGMENTS.values():
                 if filename_match(segment, pattern, wildcard):
-                    if file_type_id is None or file_type_id == SEGMENT:
+                    if file_type_id is None or file_type_id == FILE_TYPE_SEGMENT:
                         yield SOLOSegmentDirectoryEntry(self, segment)
 
         for entry in self.entries_list:
@@ -901,7 +905,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
                 return entry
         return None
 
-    def get_file_entry(self, fullname: str) -> t.Union[None, SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> t.Union[SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
         """
         Get the directory entry for a file
         """
@@ -922,7 +926,10 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
                 if entry.basename == fullname:
                     return entry
         # Fallback
-        return next(self.filter_entries_list(fullname, wildcard=False), None)
+        try:
+            return next(self.filter_entries_list(fullname, wildcard=False))
+        except StopIteration:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def write_bytes(
         self,
@@ -930,6 +937,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
         protected: bool = False,
     ) -> None:
         """
@@ -938,7 +946,7 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
         number_of_blocks = int(math.ceil(len(content) * 1.0 / BLOCK_SIZE))
         if number_of_blocks > MAX_FILE_SIZE:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
-        if get_file_type_id(file_type) == ASCII:
+        if get_file_type_id(file_type) == FILE_TYPE_ASCII:
             content = ascii_to_solo(content)
 
         entry = self.create_file(
@@ -968,11 +976,13 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         # Delete the existing file
         fullname = solo_canonical_filename(fullname, segment=True)
-        old_entry = self.get_file_entry(fullname)
-        if isinstance(old_entry, SOLOSegmentDirectoryEntry):
-            return old_entry
-        if old_entry is not None:
+        try:
+            old_entry = self.get_file_entry(fullname)
+            if isinstance(old_entry, SOLOSegmentDirectoryEntry):
+                return old_entry
             old_entry.delete()
+        except FileNotFoundError:
+            pass
         # Allocate the space for the page map and the the file
         bitmap = SOLOBitmap.read(self)
         blocks = bitmap.allocate(number_of_blocks + 1)

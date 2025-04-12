@@ -3,28 +3,29 @@ Python-RT11
 
 Python-RT11 is an utility for transferring files between various file systems.
 
-| Fs / Features   | Read file         | Write file        | Delete file       | Initialize        |
-| --------------- | ----------------- | ----------------- | ----------------- | ----------------- |
-| RT-11           | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| DOS-11          | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
-| DOS-11 DecTape  | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
-| DOS-11 MagTape  | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| XXDP            | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
-| CAPS-11         | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| Files-11        | :white_check_mark:|                   |                   |                   |
-| SOLO            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| PDP-7 UNIX v0   | :white_check_mark:|                   |                   |                   |
-| PDP-7 DECSys    | :white_check_mark:| :white_check_mark:| :white_check_mark:|                   |
-| UNIX v1         | :white_check_mark:|                   |                   |                   |
-| UNIX v5         | :white_check_mark:|                   |                   |                   |
-| UNIX v6         | :white_check_mark:|                   |                   |                   |
-| UNIX v7         | :white_check_mark:|                   |                   |                   |
-| RSTS/E          | :white_check_mark:|                   |                   |                   |
-| OS/8            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| 4k Disk Monitor | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| Apple II ProDOS | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| Apple II Pascal | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| Apple DOS 3.x   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| Fs / Features     | Read file         | Write file        | Delete file       | Initialize        | Create dir/UIC/...|
+| ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | 
+| RT-11             | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| DOS-11            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
+| DOS-11 DecTape    | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
+| DOS-11 MagTape    | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| XXDP              | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
+| CAPS-11           | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| Files-11          | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| SOLO              | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| PDP-7 UNIX v0     | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| PDP-7 DECSys      | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
+| UNIX v1           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| UNIX v5           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| UNIX v6           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| UNIX v7           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| RSTS/E            | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| OS/8              | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| 4k Disk Monitor   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| Apple II ProDOS   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
+| Apple II Pascal   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| Apple DOS 3.x     | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
+| Data General RDOS | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
 
 Commands
 --------
@@ -224,3 +225,9 @@ Apple II AppleDOS
 
 * [Beneath Apple DOS](https://archive.org/details/Beneath_Apple_DOS_alt/page/n17/mode/2up)
 * [Beneath Apple DOS ProDOS 2020](https://archive.org/details/beneath-apple-dos-prodos-2020/page/30/mode/2up)
+
+Data General DOS / RDOS
+-----------------------
+
+* [Real Time Disk Operating System (RDOS) Reference Manual](https://bitsavers.org/pdf/dg/software/rdos/093-000075-08_RDOS_Reference_Manual_Mar79.pdf)
+* [Diskette Operating System Reference Manual](https://bitsavers.org/pdf/dg/software/093-000201-00_Diskette_Operating_System_Ref_Feb77.pdf)

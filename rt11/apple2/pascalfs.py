@@ -503,7 +503,7 @@ class PascalDirectoryEntry(AbstractDirectoryEntry):
                 return True
         return False
 
-    def open(self, file_type: t.Optional[str] = None) -> PascalFile:
+    def open(self, file_mode: t.Optional[str] = None) -> PascalFile:
         """
         Open a file
         """
@@ -573,17 +573,15 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
         volume_dir = VolumeDirectory.read(self)
         yield from volume_dir.iterdir()
 
-    def get_file_entry(self, fullname: str) -> t.Optional[PascalDirectoryEntry]:
+    def get_file_entry(self, fullname: str) -> PascalDirectoryEntry:
         fullname = pascal_canonical_filename(fullname)  # type: ignore
         for entry in self.entries_list:
             if entry.fullname == fullname and not entry.is_empty:
                 return entry
-        return None
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
     def read_bytes(self, fullname: str, file_type: t.Optional[str] = None) -> bytes:  # fullname=filename+ext
         entry = self.get_file_entry(fullname)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return self.read_block(entry.start_block, entry.length)
 
     def write_bytes(
@@ -592,6 +590,7 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
         content: bytes,
         creation_date: t.Optional[date] = None,
         file_type: t.Optional[str] = None,
+        file_mode: t.Optional[str] = None,
     ) -> None:
         """
         Write content to a file
@@ -607,7 +606,7 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
         )
         if entry is not None:
             content = content + (b"\0" * BLOCK_SIZE)  # pad with zeros
-            f = entry.open(file_type)
+            f = entry.open(file_mode)
             try:
                 f.write_block(content, block_number=0, number_of_blocks=number_of_blocks)
             finally:
@@ -622,9 +621,10 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
         last_block_bytes: int = 0,  # number of bytes in last block
     ) -> t.Optional[PascalDirectoryEntry]:
         fullname = pascal_canonical_filename(fullname)  # type: ignore
-        entry: t.Optional[PascalDirectoryEntry] = self.get_file_entry(fullname)
-        if entry is not None:
-            entry.delete()
+        try:
+            self.get_file_entry(fullname).delete()
+        except FileNotFoundError:
+            pass
         volume_dir = VolumeDirectory.read(self)
         entry = volume_dir.allocate_space(
             fullname=fullname,
@@ -684,10 +684,9 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
         if arg:
             # Dump by path
             entry = self.get_file_entry(arg)
-            if entry:
-                entry_dict = dict(entry.__dict__)
-                del entry_dict["fs"]
-                sys.stdout.write(dump_struct(entry_dict) + "\n")
+            entry_dict = dict(entry.__dict__)
+            del entry_dict["fs"]
+            sys.stdout.write(dump_struct(entry_dict) + "\n")
         else:
             # Dump the entire filesystem
             volume_dir = VolumeDirectory.read(self)
