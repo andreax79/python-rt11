@@ -693,7 +693,8 @@ class UserFileDirectoryBlock(object):
         buf.write(f"UIC:                   {self.uic or ''}\n")
         buf.write(f"Block number:          {self.block_number}\n")
         buf.write(f"Next dir block:        {self.next_block_number}\n")
-        buf.write("\nNum  File        UIC        Date       Length   Block    End   Code  Usage\n\n")
+        buf.write("\nNum  File        UIC        Date       Length   Block    End   Code  Usage")
+        buf.write("\n---  ----        ---        ----       ------   -----    ---   ----  -----\n")
         for i, x in enumerate(self.entries_list):
             buf.write(f"{i:02d}#  {x}\n")
         return buf.getvalue()
@@ -1073,9 +1074,9 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
 
-    def examine(self, name_or_block: t.Optional[str]) -> None:
-        if name_or_block:
-            self.dump(name_or_block)
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if arg:
+            self.dump(arg)
         else:
             for mfd in self.read_mfd_entries():
                 for ufd_block in mfd.read_ufd_blocks():

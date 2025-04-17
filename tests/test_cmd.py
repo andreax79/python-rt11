@@ -68,12 +68,12 @@ def test_cmds():
     f.close()
     # Create a disk in the RT11 fs
     shell.onecmd("T:", batch=True)
-    shell.onecmd("EXAMINE", batch=True)
+    shell.onecmd("EXAMINE T:", batch=True)
     with pytest.raises(OSError):
         shell.onecmd("CREATE /file test1.dsk /allocate:1000", batch=True)
     shell.onecmd("CREATE /file test1.dsk /allocate:100", batch=True)
-    shell.onecmd("EXAMINE", batch=True)
     shell.onecmd("MOUNT T1: test1.dsk", batch=True)
+    shell.onecmd("EXAMINE T1:", batch=True)
     shell.onecmd("INITIALIZE T1:", batch=True)
     shell.onecmd("DIR T1:*.*", batch=True)
     shell.onecmd("COPY T:L*.* T1:", batch=True)

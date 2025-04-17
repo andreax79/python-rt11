@@ -433,7 +433,8 @@ class RT11Segment(object):
         buf.write(f"Highest segment:       {self.highest_segment}\n")
         buf.write(f"Max entries:           {self.max_entries}\n")
         buf.write(f"Data block:            {self.data_block_number}\n")
-        buf.write("\nNum  File        Date       Length  Type Class Job Chn  Block\n\n")
+        buf.write("\nNum  File        Date       Length  Type Class Job Chn  Block")
+        buf.write("\n---  ----        ----       ------  ---- ----- --- ---  -----\n")
         for i, x in enumerate(self.entries_list):
             buf.write(f"{i:02d}#  {x}\n")
         return buf.getvalue()
@@ -709,9 +710,9 @@ class RT11Filesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write(" %d Files, %d Blocks\n" % (files, blocks))
         sys.stdout.write(" %d Free blocks\n" % unused)
 
-    def examine(self, name_or_block: t.Optional[str]) -> None:
-        if name_or_block:
-            self.dump(name_or_block)
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if arg:
+            self.dump(arg)
         else:
             sys.stdout.write(f"Directory segment:     {self.dir_segment}\n")
             sys.stdout.write(f"System version:        {self.ver}\n")

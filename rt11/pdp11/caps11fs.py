@@ -506,11 +506,12 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
                 creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or "--"
                 sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s} {creation_date:<9s}\n")
 
-    def examine(self, name: t.Optional[str]) -> None:
-        if name:
-            self.dump(name)
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if arg:
+            self.dump(arg)
         else:
             sys.stdout.write("Num    Filename    Type     Rec  Seq Cont        Date     Size\n")
+            sys.stdout.write("---    --------    ----     ---  --- ----        ----     ----\n")
             for entry in self.read_file_headers(include_eot=True):
                 sys.stdout.write(f"{entry}\n")
 

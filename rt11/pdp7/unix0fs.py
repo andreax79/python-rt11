@@ -22,8 +22,8 @@ import errno
 import io
 import os
 import sys
+import typing as t
 from functools import reduce
-from typing import Dict, Iterator, List, Optional, Tuple
 
 from ..abstract import AbstractFile, AbstractFilesystem
 from ..commons import ASCII, IMAGE, READ_FILE_FULL
@@ -72,7 +72,7 @@ V0_WOTH = 0o000001  # write, non-owner
 V0_ROOT_INODE = 4  # 'dd' folder
 
 
-def get_v0_inode_block_offset(inode_num: int) -> Tuple[int, int]:
+def get_v0_inode_block_offset(inode_num: int) -> t.Tuple[int, int]:
     """
     Return block number and offset for an inode number
     """
@@ -84,7 +84,7 @@ def get_v0_inode_block_offset(inode_num: int) -> Tuple[int, int]:
 class UNIXFile0(UNIXFile):
     inode: "UNIXInode0"
 
-    def __init__(self, inode: "UNIXInode0", file_mode: Optional[str] = None):
+    def __init__(self, inode: "UNIXInode0", file_mode: t.Optional[str] = None):
         super().__init__(inode)
         self.file_mode = file_mode or IMAGE
 
@@ -153,10 +153,10 @@ class UNIXInode0(UNIXInode):
     uid: int  # Owner user id
     nlinks: int  # Link count
     size: int  # Size (in words)
-    addr: List[int]  # Indirect blocks or data blocks
+    addr: t.List[int]  # Indirect blocks or data blocks
 
     @classmethod
-    def read(cls, fs: "UNIX0Filesystem", inode_num: int, words: List[int], position: int = 0) -> "UNIXInode0":  # type: ignore
+    def read(cls, fs: "UNIX0Filesystem", inode_num: int, words: t.List[int], position: int = 0) -> "UNIXInode0":  # type: ignore
         self = UNIXInode0(fs)
         self.inode_num = inode_num
         self.flags = words[position + V0_FLAGS]
@@ -169,7 +169,7 @@ class UNIXInode0(UNIXInode):
         self.addr = words[position + V0_ADDR : position + V0_ADDR + V0_NUMBLKS]  # Indirect blocks or data blocks
         return self
 
-    def blocks(self) -> Iterator[int]:
+    def blocks(self) -> t.Iterator[int]:
         if self.is_large:
             # Large file
             for block_number in self.addr:
@@ -206,7 +206,7 @@ class UNIXInode0(UNIXInode):
     def is_allocated(self) -> bool:
         return (self.flags & V0_USED) != 0
 
-    def read_words(self) -> List[int]:
+    def read_words(self) -> t.List[int]:
         """
         Read inode data as 18bit words
         """
@@ -265,7 +265,7 @@ class UNIXInode0(UNIXInode):
 class UNIXDirectoryEntry0(UNIXDirectoryEntry):
     inode: "UNIXInode0"
 
-    def open(self, file_mode: Optional[str] = None) -> UNIXFile:
+    def open(self, file_mode: t.Optional[str] = None) -> UNIXFile:
         """
         Open a file
         """
@@ -308,7 +308,7 @@ class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
         words = self.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + block_number)[offset : offset + V0_INODE_SIZE]
         return UNIXInode0.read(self, inode_num, words)
 
-    def list_dir(self, inode: UNIXInode0) -> List[Tuple[int, str]]:  # type: ignore
+    def list_dir(self, inode: UNIXInode0) -> t.List[t.Tuple[int, str]]:  # type: ignore
         if not inode.isdir:
             return []
         files = []
@@ -321,7 +321,7 @@ class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
                 files.append((inum, name_ascii))
         return files
 
-    def read_dir_entries(self, dirname: str) -> Iterator["UNIXDirectoryEntry"]:
+    def read_dir_entries(self, dirname: str) -> t.Iterator["UNIXDirectoryEntry"]:
         inode: UNIXInode0 = self.get_inode(dirname)  # type: ignore
         if inode:
             for inode_num, filename in self.list_dir(inode):
@@ -334,7 +334,7 @@ class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return UNIXDirectoryEntry0(self, fullname, inode.inode_num, inode)
 
-    def dir(self, volume_id: str, pattern: Optional[str], options: Dict[str, bool]) -> None:
+    def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         entries = sorted(self.filter_entries_list(pattern, include_all=True, wildcard=True))
         if not entries:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), pattern)

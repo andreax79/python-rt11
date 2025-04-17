@@ -1077,11 +1077,16 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
                 prefix = "X" if x.is_deleted else "*" if x.is_locked else " "
                 sys.stdout.write(f"{prefix}{x.file_type} {x.length:>03} {x.fullname}\n")
 
-    def examine(self, arg: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         """
         Examine the filesystem
         """
-        if not arg:
+        if options.get("bitmap"):
+            # Examine the bitmap
+            vtoc = AppleDOSVTOC.read(self)
+            for track, bits in enumerate(vtoc.bitmaps):
+                sys.stdout.write(f"Track {track:>3}: {bits:032b}\n")
+        elif not arg:
             # Examine the entire filesystem
             vtoc = AppleDOSVTOC.read(self)
             sys.stdout.write(
@@ -1104,11 +1109,6 @@ class AppleDOSFilesystem(AbstractFilesystem, AppleDisk):
             for i, entry in enumerate(catalog.directory_entries):
                 if not entry.is_empty:
                     sys.stdout.write(f"{i:>3}#  {entry}\n")
-        elif arg.strip().lower() == "/free":
-            # Examine the bitmap
-            vtoc = AppleDOSVTOC.read(self)
-            for track, bits in enumerate(vtoc.bitmaps):
-                sys.stdout.write(f"Track {track:>3}: {bits:032b}\n")
         else:
             # Examine by path
             entry = self.get_file_entry(arg, include_deleted=True)

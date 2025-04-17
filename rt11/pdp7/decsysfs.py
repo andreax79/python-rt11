@@ -1051,13 +1051,13 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
                     f"{x.basename} W {x.fortran_block_number:04},{x.assembler_block_number:04},{x.block_number:04}\n"
                 )
 
-    def examine(self, pattern: t.Optional[str]) -> None:
-        if pattern and pattern.strip().lower() == "/used":
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if options.get("bitmap"):
             allocated_blocks = sorted(self.get_allocated_blocks())
             tmp = ", ".join([f"{x:04}" for x in allocated_blocks])
             sys.stdout.write(f"Allocated Blocks: {tmp}\n")
-        elif pattern:
-            entries = self.filter_entries_list(pattern, wildcard=True)
+        elif arg:
+            entries = self.filter_entries_list(arg, wildcard=True)
             for entry in entries:
                 sys.stdout.write(f"Filename:                 {entry.filename}\n")
                 sys.stdout.write(f"File type:                {entry.file_type}\n")
@@ -1079,7 +1079,9 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
             sys.stdout.write(f"Label 1:                  {label1}\n")
             sys.stdout.write(f"Label 2:                  {label2}\n")
             program_directory = ProgramDirectory.read(self)
-            sys.stdout.write(f"First free block number:  {program_directory.first_free_block:04}\n")
+            sys.stdout.write(f"First free block number:  {program_directory.first_free_block:04}\n\n")
+            sys.stdout.write("Filename        Type     Address  Length\n")
+            sys.stdout.write("--------        ----     -------  ------\n")
             for entry in self.read_dir_entries():
                 if entry.raw_file_type == FileType.WORKING:
                     for raw_file_type in [FileType.FORTRAN, FileType.ASSEMBLER, FileType.BINARY]:
@@ -1088,14 +1090,14 @@ class DECSysFilesystem(AbstractFilesystem, BlockDevice18Bit):
                         file_type = str(raw_file_type)
                         block = blocks[0] if blocks else 0
                         filename = f"{file_type[0]},{entry.filename}"
-                        sys.stdout.write(f"{filename:<15} Type: {file_type:<10} Block: {block:04}  Length: {length}\n")
+                        sys.stdout.write(f"{filename:<15} {file_type:<10}  {block:04}  {length}\n")
                 else:
                     file_type = str(entry.raw_file_type)
                     blocks = entry.get_blocks()
                     length = len(blocks)
                     block = blocks[0] if blocks else 0
                     filename = f"{file_type[0]},{entry.filename}"
-                    sys.stdout.write(f"{filename:<15} Type: {file_type:<10} Block: {block:04}  Length: {length}\n")
+                    sys.stdout.write(f"{filename:<15} {file_type:<10}  {block:04}  {length}\n")
 
     def dump(self, fullname: t.Optional[str], start: t.Optional[int] = None, end: t.Optional[int] = None) -> None:
         """Dump the content of a file or a range of blocks"""

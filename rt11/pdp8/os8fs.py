@@ -609,8 +609,9 @@ class OS8Segment:
         buf.write(f"Next dir segment:      {self.next_block_number:>5}\n")
         buf.write(f"Tentative last word:   {self.tentative_last_word:>5}\n")
         buf.write(f"Extra words:           {self.extra_words:>5}\n")
-        buf.write(f"Max entries:           {self.max_entries:>5}\n")
-        buf.write("\nNum  File        Type  Date       Length  Block\n\n")
+        buf.write(f"Max entries:           {self.max_entries:>5}\n\n")
+        buf.write("Num  Filename    Type  Date       Length  Block\n")
+        buf.write("---  --------    ----  ----       ------  -----\n")
         for i, x in enumerate(self.entries_list):
             buf.write(f"{i:02d}#  {x}\n")
         return buf.getvalue()
@@ -976,10 +977,11 @@ class OS8Filesystem(AbstractFilesystem, BlockDevice12Bit):
             sys.stdout.write("\n")
         sys.stdout.write(f"\n{files:>4} FILES IN {blocks:>4} BLOCKS - {unused:>4} FREE BLOCKS\n")
 
-    def examine(self, pattern: t.Optional[str]) -> None:
-        if pattern:
-            sys.stdout.write("File        Type  Date       Length  Block\n\n")
-            for entry in self.filter_entries_list(pattern, include_all=True):
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if arg:
+            sys.stdout.write("Filename    Type  Date       Length  Block\n")
+            sys.stdout.write("--------    ----  ----       ------  -----\n")
+            for entry in self.filter_entries_list(arg, include_all=True):
                 sys.stdout.write(f"{entry}\n")
         else:
             sys.stdout.write(f"Number of partitions:     {self.num_of_partitions}\n")

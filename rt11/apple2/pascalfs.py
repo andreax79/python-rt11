@@ -680,7 +680,7 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
                 f"{files}/{volume_dir.number_of_files} files <listed/in dir>, {blocks} blocks used, {unused} unused, {largest_unused} in largest\n"
             )
 
-    def examine(self, arg: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         if arg:
             # Dump by path
             entry = self.get_file_entry(arg)
@@ -694,8 +694,9 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
             del volume_dir_dict["fs"]
             del volume_dir_dict["directory_entries"]
             sys.stdout.write(dump_struct(volume_dir_dict))
-            sys.stdout.write("\n")
-            sys.stdout.write("Directory entries:\n")
+            sys.stdout.write("\n\n")
+            sys.stdout.write("Nr  Filename        Blocks  Date     Start     End Size  File type\n")
+            sys.stdout.write("--  --------        ------  ----     -----     --- ----  ---------\n")
             for i, entry in enumerate(volume_dir.directory_entries, start=1):
                 # Skip null entries
                 if (
@@ -706,6 +707,7 @@ class PascalFilesystem(AbstractFilesystem, AppleDisk):
                     or entry.following_block
                     or entry.last_block_bytes
                     or entry.raw_mod_date
+                    or options.get("full")
                 ):
                     sys.stdout.write(f"{i:>2}# {entry}\n")
 

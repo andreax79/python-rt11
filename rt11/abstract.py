@@ -271,7 +271,7 @@ class AbstractFilesystem:
         """List directory contents"""
 
     @abstractmethod
-    def examine(self, block: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         """Examine the filesystem"""
 
     @abstractmethod

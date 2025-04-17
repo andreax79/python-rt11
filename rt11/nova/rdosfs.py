@@ -1629,31 +1629,33 @@ class RDOSFilesystem(AbstractFilesystem, BlockDevice):
                 )
         sys.stdout.write("\n")
 
-    def examine(self, arg: t.Optional[str]) -> None:
-        if not arg:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if options.get("diskid"):
             # Display the filesystem information
             disk_id = DiskInformationBlock.read(self)
             sys.stdout.write(str(disk_id))
-            # Display the system directory
-            sys.stdout.write("\n*System Directory\n")
-            system_directory = SystemDirectory(self)
-            for i, sys_dir_block in enumerate(system_directory.read_system_directory()):
-                sys.stdout.write(f"** #{i} {sys_dir_block}\n")
-                for entry in sys_dir_block.entries_list:
-                    sys.stdout.write(f"{entry} -- {entry.filename_hash() }\n")
-                    # sys.stdout.write(f"{entry}\n")
-        elif arg.strip().lower() == "/diskid":
-            # Display the filesystem information
-            disk_id = DiskInformationBlock.read(self)
-            sys.stdout.write(str(disk_id))
-        elif arg.strip().lower() == "/free":
+        elif options.get("free"):
             # Display the free space
+            bitmap = self.read_bitmap()
+            sys.stdout.write(f"{bitmap}\n")
+        elif options.get("bitmap"):
+            # Display the bitmap
             bitmap = self.read_bitmap()
             for i in range(0, bitmap.total_bits):
                 sys.stdout.write(f"{i:>4} {'[ ]' if bitmap.is_free(i) else '[X]'}  ")
                 if i % 16 == 15:
                     sys.stdout.write("\n")
-            sys.stdout.write(f"\n{bitmap}\n")
+        elif not arg:
+            # Display the system directory
+            sys.stdout.write("\n*System Directory\n")
+            system_directory = SystemDirectory(self)
+            for i, sys_dir_block in enumerate(system_directory.read_system_directory()):
+                if options.get("full"):
+                    sys.stdout.write(f"** #{i} {sys_dir_block}\n")
+                for entry in sys_dir_block.entries_list:
+                    if options.get("full") or not entry.is_empty:
+                        sys.stdout.write(f"{entry} -- {entry.filename_hash() }\n")
+                        # sys.stdout.write(f"{entry}\n")
         else:
             # Display the file information
             entry = self.get_file_entry(arg)  # type: ignore

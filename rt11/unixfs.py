@@ -957,7 +957,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
                         f"{x.inode_num:>5} {mode}{x.inode.nlinks:>2} {uid:<6}{x.inode.size:>7} {time} {x.basename}\n"
                     )
 
-    def examine(self, arg: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         if arg:
             if arg.isnumeric():
                 # Dump the inode by number
@@ -968,7 +968,7 @@ class UNIXFilesystem(AbstractFilesystem, BlockDevice):
                 inode = self.get_inode(arg)
             if inode:
                 if hasattr(inode, "examine"):
-                    sys.stdout.write(inode.examine())
+                    sys.stdout.write(inode.examine())  # type: ignore
                 else:
                     sys.stdout.write(dump_struct(inode.__dict__) + "\n")
                 if inode.isdir:

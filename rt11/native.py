@@ -317,7 +317,7 @@ class NativeFilesystem(AbstractFilesystem):
                 )
             )
 
-    def examine(self, block: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         pass
 
     def get_size(self) -> int:

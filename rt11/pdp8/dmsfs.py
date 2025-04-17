@@ -854,8 +854,9 @@ class DirectorNameBlock:
         buf.write(f"First SAM block:       {self.first_sam_block_number:>5}\n")
         buf.write(f"Next dir name:         {self.next_directory_name:>5}\n")
         if self.entries_list:
-            buf.write("\nFilename       Num  Low   Entry Core")
-            buf.write("\n                    Core  Point Bank\n")
+            buf.write("\nFilename       Num  Low   Entry Core  Blocks")
+            buf.write("\n                    Core  Point Bank")
+            buf.write("\n--------       ---  ----  ----- ----  -----\n")
             for i, x in enumerate(self.entries.values()):
                 buf.write(f"{x}     {x.get_blocks()}\n")
         return buf.getvalue()
@@ -1157,12 +1158,13 @@ class DMSFilesystem(AbstractFilesystem, BlockDevice12Bit):
                 sys.stdout.write(f"{fullname} {x.get_length():>04o}\n")
         sys.stdout.write("\n")
 
-    def examine(self, pattern: t.Optional[str]) -> None:
-        if pattern:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if arg:
             sam = StorageAllocationMap.read(self)
             sys.stdout.write("Filename       Num  Low   Entry Core\n")
             sys.stdout.write("                    Core  Point Bank\n")
-            for entry in self.filter_entries_list(pattern, include_all=True, sam=sam):
+            sys.stdout.write("--------       ---  ----  ----- ----\n")
+            for entry in self.filter_entries_list(arg, include_all=True, sam=sam):
                 sys.stdout.write(f"{entry}\n")
         else:
             for dn in self.read_directory_name_blocks():

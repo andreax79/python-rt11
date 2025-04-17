@@ -1048,8 +1048,16 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
             return
         sys.stdout.write(f"{files:>5} ENTRIES\n{blocks:>5} PAGES\n")
 
-    def examine(self, name_or_block: t.Optional[str]) -> None:
-        if not name_or_block:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        if options.get("bitmap"):
+            # Print the bitmap
+            bitmap = SOLOBitmap.read(self)
+            for i in range(0, bitmap.total_bits):
+                sys.stdout.write(f"{i:>4} {'[ ]' if bitmap.is_free(i) else '[X]'}  ")
+                if i % 16 == 15:
+                    sys.stdout.write("\n")
+        elif not arg:
+            # Print the catalog
             for segment in SEGMENTS.values():
                 segment_entry = SOLOSegmentDirectoryEntry(self, segment)
                 sys.stdout.write(f" -  {segment_entry}\n")
@@ -1059,14 +1067,8 @@ class SOLOFilesystem(AbstractFilesystem, BlockDevice):
                 for entry in catalog_page.entries:
                     sys.stdout.write(f"{t:>3} {page_num:>2}# {entry}\n")
                     t += 1
-        elif name_or_block.strip().lower() == "/free":
-            bitmap = SOLOBitmap.read(self)
-            for i in range(0, bitmap.total_bits):
-                sys.stdout.write(f"{i:>4} {'[ ]' if bitmap.is_free(i) else '[X]'}  ")
-                if i % 16 == 15:
-                    sys.stdout.write("\n")
         else:
-            self.dump(name_or_block)
+            self.dump(arg)
 
     def get_size(self) -> int:
         """

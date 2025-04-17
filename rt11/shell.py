@@ -504,11 +504,18 @@ EXAMINE         Examines disk structure
   SYNTAX
         EXAMINE volume:
 
+   FULL
+        Lists the entire directory, including unused areas
+
         """
         # fmt: on
-        volume_id, block = splitdrive(args[0] if args else "")
-        fs = self.volumes.get(volume_id)
-        fs.examine(block)
+        args, options = extract_options(args, "/free", "/bitmap", "/diskid", "/full")
+        if not args:
+            args = ask("From? ").split()
+        for arg in args:
+            volume_id, fullname = splitdrive(arg)
+            fs = self.volumes.get(volume_id)
+            fs.examine(fullname, options)
 
     @flgtxt("DU_MP")
     def do_dump(self, args: t.List[str]) -> None:

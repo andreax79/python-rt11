@@ -2066,7 +2066,9 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
             total = free + used
             sys.stdout.write(f"\nBLOCKS FREE:{free:>5}     BLOCKS USED:{used:>5}     TOTAL BLOCKS:  {total}\n\n")
 
-    def examine(self, arg: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
+        H1 = "Filename         File Type     Access  Address   Blocks             Size        Created          Modified\n"
+        H2 = "--------         ---------     ------- -------   -------            ----        -------          --------\n"
         if arg:
             # Dump by path
             entry = self.get_file_entry(arg, ProDOSAbstractDirEntry)  # type: ignore
@@ -2079,14 +2081,13 @@ class ProDOSFilesystem(AbstractFilesystem, AppleDisk):
                 sys.stdout.write(dump_struct(entry_dict) + "\n")
                 if hasattr(entry, "iterdir"):
                     # Dump the directory entries
-                    sys.stdout.write("Directory entries:\n")
+                    sys.stdout.write(f"\n{H1}{H2}")
                     for child in entry.iterdir():  # type: ignore
                         sys.stdout.write(f"{child}\n")
         else:
             # Dump the entire filesystem
             sys.stdout.write(dump_struct(self.__dict__))
-            sys.stdout.write("\n")
-            sys.stdout.write("Directory entries:\n")
+            sys.stdout.write(f"\n\n{H1}{H2}")
             for x in self.filter_entries_list("*", include_all=True, wildcard=True):
                 sys.stdout.write(f"{x}\n")
 

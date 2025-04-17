@@ -1079,12 +1079,12 @@ class RSTSFilesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write("\n")
         sys.stdout.write(f" Total of {blocks} blocks in {files} files in {volume_id}:{ppn}\n")
 
-    def examine(self, name_or_block: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         ppn = None
-        if name_or_block and "[" in name_or_block:
+        if arg and "[" in arg:
             try:
-                ppn = PPN.from_str(name_or_block)
-                name_or_block = name_or_block.split("]", 1)[1]
+                ppn = PPN.from_str(arg)
+                arg = arg.split("]", 1)[1]
             except Exception:
                 return
         if ppn is not None:

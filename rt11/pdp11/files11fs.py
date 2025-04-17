@@ -734,16 +734,16 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTAL OF {blocks}./{allocated}. BLOCKS IN {files}. FILES\n")
 
-    def examine(self, name_or_block: t.Optional[str]) -> None:
+    def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         uic = None
-        if name_or_block and "[" in name_or_block:
+        if arg and "[" in arg:
             try:
-                uic = UIC.from_str(name_or_block)
-                name_or_block = name_or_block.split("]", 1)[1]
+                uic = UIC.from_str(arg)
+                arg = arg.split("]", 1)[1]
             except Exception:
                 return
-        if name_or_block:
-            self.dump(name_or_block)
+        if arg:
+            self.dump(arg)
         elif uic is not None:
             for entry in self.read_dir_entries(uic):
                 sys.stdout.write(f"{entry}\n")
