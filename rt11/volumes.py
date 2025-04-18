@@ -29,7 +29,9 @@ from .apple2.pascalfs import PascalFilesystem
 from .apple2.prodosfs import ProDOSFilesystem
 from .commons import splitdrive
 from .native import NativeFilesystem
-from .nova.rdosfs import RDOSFilesystem
+from .nova.dgdosdumpfs import DGDOSDumpFilesystem
+from .nova.dgdosfs import DGDOSFilesystem
+from .nova.dgdosmagtapefs import DGDOSMagTapeFilesystem
 from .pdp7.decsysfs import DECSysFilesystem
 from .pdp7.unix0fs import UNIX0Filesystem
 from .pdp8.dmsfs import DMSFilesystem
@@ -70,7 +72,9 @@ FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "pascal": PascalFilesystem,
     "appledos": AppleDOSFilesystem,
     "decsys": DECSysFilesystem,
-    "rdos": RDOSFilesystem,
+    "dgdos": DGDOSFilesystem,
+    "dgdosmt": DGDOSMagTapeFilesystem,
+    "dgdosdump": DGDOSDumpFilesystem,
 }
 
 

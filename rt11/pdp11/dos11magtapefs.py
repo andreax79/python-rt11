@@ -324,33 +324,6 @@ class DOS11MagTapeFilesystem(AbstractFilesystem, Tape):
         #     #     raise OSError(errno.EIO, os.strerror(errno.EIO))
         return self
 
-    def read_magtape(self) -> t.Iterator[bytes]:
-        rc = 0
-        data = bytearray()
-        self.f.seek(0, 0)
-        while True:
-            bc = self.f.read(4)
-            if len(bc) == 0:
-                break
-            if bc[2] != 0 or bc[3] != 0:
-                raise OSError(
-                    errno.EIO,
-                    f"Invalid record size, record {rc}, size = 0x{bc[3]:02X}{bc[2]:02X}{bc[1]:02X}{bc[0]:02X}",
-                )
-            wc = (bc[1] << 8) | bc[0]
-            wc = (wc + 1) & ~1
-            if wc:
-                buffer = self.f.read(wc)
-                data.extend(buffer)
-                data.extend(bytes([0] * (wc - len(buffer))))  # Pad with zeros
-                bc = self.f.read(4)
-                rc += 1
-            else:
-                if rc:
-                    yield bytes(data)
-                    data.clear()
-                rc = 0
-
     def read_file_headers(self, uic: UIC = ANY_UIC) -> t.Iterator["DOS11MagTapeDirectoryEntry"]:
         """Read file headers"""
         self.tape_rewind()

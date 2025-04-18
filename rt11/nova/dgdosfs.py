@@ -43,8 +43,8 @@ from ..commons import (
 from ..unixfs import unix_join, unix_split
 
 __all__ = [
-    "RDOSFile",
-    "RDOSFilesystem",
+    "DGDOSFile",
+    "DGDOSFilesystem",
     "rdos_canonical_filename",
     "rdos_get_file_type_id",
 ]
@@ -63,7 +63,7 @@ UFD_LINK_ENTRY_FORMAT = "<10s2sH 10s10s2s"  # User File Descriptor Link Entry
 UFD_LINK_ENTRY_LEN = struct.calcsize(UFD_LINK_ENTRY_FORMAT)
 assert UFD_LINK_ENTRY_LEN == 36
 
-START_DATE = datetime(1967, 12, 31)  # RDOS date start
+START_DATE = datetime(1967, 12, 31)  # DGDOS date start
 
 FILE_NAME_LENGTH = 10  # Maximum file name length
 FILE_EXTENSION_LENGTH = 2  # Maximum file extension length
@@ -139,7 +139,7 @@ def format_attr(attr: int, long: bool = False) -> str:
     if long:
         if (attr & ATDIR) != 0:  # Directory
             t = "DIR "
-        elif (attr & ATPAR) != 0:  # Partition
+        elif (attr & ATPAR) != 0:  # Partition (RDOS only)
             t = "PART"
         elif (attr & ATLNK) != 0:  # Link entry
             t = "LINK"
@@ -320,22 +320,22 @@ def words_dump(data: t.List[int], words_per_line: int = 8) -> None:
         sys.stdout.write(f"{i:>6X}   {hex_str.ljust(3 * words_per_line)} {ascii_str}\n")
 
 
-class RDOSBitmap:
+class DGDOSBitmap:
 
-    fs: "RDOSFilesystem"
+    fs: "DGDOSFilesystem"
     blocks: t.List[int]
     bitmaps: t.List[int]
     num_of_words: int
 
-    def __init__(self, fs: "RDOSFilesystem"):
+    def __init__(self, fs: "DGDOSFilesystem"):
         self.fs = fs
 
     @classmethod
-    def read(cls, fs: "RDOSFilesystem", parent_dir: t.Optional["UserFileDescriptor"] = None) -> "RDOSBitmap":
+    def read(cls, fs: "DGDOSFilesystem", parent_dir: t.Optional["UserFileDescriptor"] = None) -> "DGDOSBitmap":
         """
         Read the bitmap blocks
         """
-        self = RDOSBitmap(fs)
+        self = DGDOSBitmap(fs)
         entry = self.fs.get_ufd(parent_dir, MAP_DR)
         if not entry:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), MAP_DR)
@@ -476,7 +476,7 @@ class RDOSBitmap:
         return f"LEFT: {free:<6} USED: {used:<6} MAX. CONTIGUOUS: {max_contiguous_blocks:6}"
 
 
-class RDOSFile(AbstractFile):
+class DGDOSFile(AbstractFile):
     entry: "UserFileDescriptor"
     closed: bool
 
@@ -723,11 +723,11 @@ class UserFileDescriptor(AbstractDirectoryEntry):
     @classmethod
     def create(
         cls,
-        fs: "RDOSFilesystem",
+        fs: "DGDOSFilesystem",
         parent: t.Optional["UserFileDescriptor"],
         filename: str,
         length: int,  # Length in blocks
-        bitmap: "RDOSBitmap",
+        bitmap: "DGDOSBitmap",
         creation_date: t.Optional[t.Union[date, datetime]] = None,  # optional creation date
         file_type: t.Optional[str] = None,  # optional file type
         length_bytes: t.Optional[int] = None,  # optional length int bytes
@@ -854,7 +854,7 @@ class UserFileDescriptor(AbstractDirectoryEntry):
             )
 
     @property
-    def fs(self) -> "RDOSFilesystem":
+    def fs(self) -> "DGDOSFilesystem":
         """
         Get the filesystem
         """
@@ -1037,11 +1037,11 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         data["Filename hash"] = self.filename_hash()
         return dump_struct(data) + "\n"
 
-    def open(self, file_mode: t.Optional[str] = None) -> RDOSFile:
+    def open(self, file_mode: t.Optional[str] = None) -> DGDOSFile:
         """
         Open a file
         """
-        return RDOSFile(self, file_mode)
+        return DGDOSFile(self, file_mode)
 
     def blocks(self, include_indexes: bool = False) -> t.Iterator[int]:
         if self.is_random:
@@ -1176,7 +1176,7 @@ class SystemDirectoryBlock:
                 yield entry
 
     @property
-    def fs(self) -> "RDOSFilesystem":
+    def fs(self) -> "DGDOSFilesystem":
         """
         Get the filesystem
         """
@@ -1191,10 +1191,10 @@ class SystemDirectory:
     System Directory (SYS.DR)
     """
 
-    fs: "RDOSFilesystem"
+    fs: "DGDOSFilesystem"
     dir_ufd: t.Optional["UserFileDescriptor"] = None  # Directory entry
 
-    def __init__(self, fs: "RDOSFilesystem", dir_ufd: t.Optional["UserFileDescriptor"] = None):
+    def __init__(self, fs: "DGDOSFilesystem", dir_ufd: t.Optional["UserFileDescriptor"] = None):
         self.fs = fs
         self.dir_ufd = dir_ufd
 
@@ -1265,7 +1265,7 @@ class DiskInformationBlock:
     for the system directory.
     """
 
-    fs: "RDOSFilesystem"
+    fs: "DGDOSFilesystem"
     revision: int = 0
     checksum: int = 0
     heads: int = 0
@@ -1274,11 +1274,11 @@ class DiskInformationBlock:
     frame_size: int = 0
     characteristics: int = 0
 
-    def __init__(self, fs: "RDOSFilesystem"):
+    def __init__(self, fs: "DGDOSFilesystem"):
         self.fs = fs
 
     @classmethod
-    def read(cls, fs: "RDOSFilesystem") -> "DiskInformationBlock":
+    def read(cls, fs: "DGDOSFilesystem") -> "DiskInformationBlock":
         self = cls(fs)
         (
             self.revision,
@@ -1320,9 +1320,9 @@ class DiskInformationBlock:
         )
 
 
-class RDOSFilesystem(AbstractFilesystem, BlockDevice):
+class DGDOSFilesystem(AbstractFilesystem, BlockDevice):
     """
-    RDOS Filesystem
+    DGDOS Filesystem
 
 
     Block
@@ -1354,7 +1354,7 @@ class RDOSFilesystem(AbstractFilesystem, BlockDevice):
     """
 
     fs_name = "rdos"
-    fs_description = "Data General Nova RDOS Filesystem"
+    fs_description = "Data General Nova DOS/RDOS Filesystem"
 
     double_addressing: bool = False  # Disk requires double addressing
     top_loader: bool = False  # Disk is a top loader
@@ -1439,7 +1439,7 @@ class RDOSFilesystem(AbstractFilesystem, BlockDevice):
         self.heads = disk_id.heads
         self.sectors_per_track = disk_id.sectors
         if strict:
-            # Check if the file is a valid RDOS filesystem
+            # Check if the file is a valid DOS/RDOS filesystem
             if not self.check_map_dr():
                 raise OSError(errno.EIO, "MAP.DR not found")
         return self
@@ -1455,13 +1455,13 @@ class RDOSFilesystem(AbstractFilesystem, BlockDevice):
         for sys_dir_block in system_directory.read_system_directory():
             yield from sys_dir_block.iterdir()
 
-    def read_bitmap(self, parent: t.Optional[UserFileDescriptor] = None) -> RDOSBitmap:
+    def read_bitmap(self, parent: t.Optional[UserFileDescriptor] = None) -> DGDOSBitmap:
         """
         Read the bitmap
         """
         if parent is None:
             parent = self.get_file_entry(self.pwd)
-        return RDOSBitmap.read(self, parent)
+        return DGDOSBitmap.read(self, parent)
 
     def filter_entries_list(
         self,
@@ -1669,7 +1669,7 @@ class RDOSFilesystem(AbstractFilesystem, BlockDevice):
             if end is None:
                 entry = self.get_file_entry(fullname)
                 end = entry.get_length() - 1
-            f: RDOSFile = t.cast(RDOSFile, self.open_file(fullname, file_mode=IMAGE))
+            f: DGDOSFile = t.cast(DGDOSFile, self.open_file(fullname, file_mode=IMAGE))
             try:
                 for block_number in range(start, end + 1):
                     data = f.read_16bit_words_block(block_number)

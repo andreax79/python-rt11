@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from rt11.nova.rdosfs import (
+from rt11.nova.dgdosfs import (
     START_DATE,
-    RDOSFilesystem,
+    DGDOSFilesystem,
     date_to_rdos,
     filename_hash,
     rdos_to_date,
@@ -88,7 +88,7 @@ def test_date_round_trip():
 
 def test_bitmap():
     shell = Shell(verbose=True)
-    shell.onecmd(f"mount t: /rdos {DSK}", batch=True)
+    shell.onecmd(f"mount t: /dgdos {DSK}", batch=True)
     fs = shell.volumes.get('T')
     bitmap = fs.read_bitmap()
     for b in fs.read_dir_entries():
@@ -100,9 +100,9 @@ def test_bitmap():
 def test_rdos():
     shell = Shell(verbose=True)
     shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
-    shell.onecmd(f"mount ou: /rdos {DSK}.mo", batch=True)
+    shell.onecmd(f"mount ou: /dgdos {DSK}.mo", batch=True)
     fs = shell.volumes.get('OU')
-    assert isinstance(fs, RDOSFilesystem)
+    assert isinstance(fs, DGDOSFilesystem)
 
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("dir/brief ou:", batch=True)
