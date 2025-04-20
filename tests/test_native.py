@@ -1,5 +1,5 @@
-from rt11.native import NativeFilesystem
-from rt11.shell import Shell
+from xferx.native import NativeFilesystem
+from xferx.shell import Shell
 
 
 def test_native():

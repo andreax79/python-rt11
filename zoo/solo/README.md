@@ -71,7 +71,7 @@ CONSOLE:
 To copy a file from the SOLO disk:
 
 ```
-rt11 --solo solo.dsk -c 'copy dl0:LISTTEXT .'
+xferx --solo solo.dsk -c 'copy dl0:LISTTEXT .'
 ```
 
 ### Copy all ASCII files from SOLO disk
@@ -79,7 +79,7 @@ rt11 --solo solo.dsk -c 'copy dl0:LISTTEXT .'
 To copy all ASCII (or SCRATCH, SEQCODE, CONCODE, SEGMENT) files from the SOLO disk to the current directory:
 
 ```
-rt11 --solo solo.dsk -c 'copy dl0:*;ascii .'
+xferx --solo solo.dsk -c 'copy dl0:*;ascii .'
 ```
 
 ### Copy source to SOLO disk
@@ -87,20 +87,20 @@ rt11 --solo solo.dsk -c 'copy dl0:*;ascii .'
 To copy a source file in ASCII format to the SOLO disk:
 
 ```
-rt11 --solo solo.dsk -c 'copy /type:ascii LISTTEXT dl0:'
+xferx --solo solo.dsk -c 'copy /type:ascii LISTTEXT dl0:'
 ```
 
 ### Copy Kernel/Solo/OtherOS to a segment on SOLO disk
 
 The SOLO filesystem includes three predefined, fixed-size files known as 'segments.'
 These segments store the kernel, the SOLO OS, and an additional alternative copy of the OS.
-In python-rt11, the segments are named @KERNEL, @SOLO, and @OTHEROS.
+In XFERX, the segments are named @KERNEL, @SOLO, and @OTHEROS.
 To copy the Kernel, Solo, or OtherOS to their respective segments on the SOLO disk:
 
 ```
-rt11 --solo solo.dsk -c 'copy kernel dl0:@KERNEL'
-rt11 --solo solo.dsk -c 'copy solo dl0:@SOLO'
-rt11 --solo solo.dsk -c 'copy otheros dl0:@OTHEROS'
+xferx --solo solo.dsk -c 'copy kernel dl0:@KERNEL'
+xferx --solo solo.dsk -c 'copy solo dl0:@SOLO'
+xferx --solo solo.dsk -c 'copy otheros dl0:@OTHEROS'
 ```
 
 

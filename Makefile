@@ -7,19 +7,19 @@ help:
 	@echo - make typecheck  Typecheck
 
 lint:
-	flake8 rt11
+	flake8 xferx
 
 .PHONY: isort
 isort:
-	@isort --profile black rt11.py rt11 tests
+	@isort --profile black xferx.py xferx tests
 
 .PHONY: black
 black: isort
-	@black -S rt11.py rt11 tests
+	@black -S xferx.py xferx tests
 
 .PHONY: typecheck
 typecheck:
-	mypy --strict --no-warn-unused-ignores rt11
+	mypy --strict --no-warn-unused-ignores xferx
 
 .PHONY: clean
 clean:

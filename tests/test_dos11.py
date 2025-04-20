@@ -2,13 +2,13 @@ from datetime import date
 
 import pytest
 
-from rt11.pdp11.dos11fs import (
+from xferx.pdp11.dos11fs import (
     DOS11Filesystem,
     UserFileDirectoryBlock,
     date_to_dos11,
     dos11_to_date,
 )
-from rt11.shell import Shell
+from xferx.shell import Shell
 
 DSK = "tests/dsk/dos11_rk05.dsk"
 

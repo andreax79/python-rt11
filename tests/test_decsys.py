@@ -1,18 +1,18 @@
-from rt11.commons import IMAGE
-from rt11.pdp7.codes import (
+from xferx.commons import IMAGE
+from xferx.pdp7.codes import (
     fiodec_to_str,
     read_baudot_string,
     str_to_baudot,
     str_to_fiodec,
 )
-from rt11.pdp7.decsysfs import (  # LibraryDirectory,
+from xferx.pdp7.decsysfs import (  # LibraryDirectory,
     DECSysDirectoryEntry,
     DECSysFilesystem,
     ProgramDirectory,
     from_bytes_to_18bit_words,
 )
 
-# from rt11.shell import Shell
+# from xferx.shell import Shell
 
 
 class MockFilesytem(DECSysFilesystem):

@@ -1,7 +1,7 @@
 import pytest
 
-from rt11.pdp11.solofs import SOLOBitmap, SOLOFilesystem
-from rt11.shell import Shell
+from xferx.pdp11.solofs import SOLOBitmap, SOLOFilesystem
+from xferx.shell import Shell
 
 DSK = "tests/dsk/solo.dsk"
 

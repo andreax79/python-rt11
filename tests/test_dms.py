@@ -3,8 +3,8 @@ import string
 
 import pytest
 
-from rt11.commons import ASCII, IMAGE
-from rt11.pdp8.dmsfs import (
+from xferx.commons import ASCII, IMAGE
+from xferx.pdp8.dmsfs import (
     FILE_TYPE_ASCII,
     FILE_TYPE_SYS_USER,
     DirectorNameBlock,
@@ -17,7 +17,7 @@ from rt11.pdp8.dmsfs import (
     from_bytes_to_12bit_words,
     sixbit_word12_to_asc,
 )
-from rt11.shell import Shell
+from xferx.shell import Shell
 
 DSK = "tests/dsk/dms.df32"
 

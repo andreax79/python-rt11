@@ -1,7 +1,7 @@
-Python-RT11
-===========
+XFERX
+=====
 
-Python-RT11 is an utility for transferring files between various file systems.
+XFERX is an utility for transferring files between various file systems.
 
 | Fs / Features     | Read file         | Write file        | Delete file       | Initialize        | Create dir/UIC/...|
 | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | 
@@ -61,9 +61,9 @@ Usage example
 -------------
 
 ```
-[SY:/home/andreax/devel/python-rt11] mount DL0: test.dsk
+[SY:/home/andreax/devel/xferx] mount DL0: test.dsk
 ?MOUNT-I-Disk test.dsk mounted to DL0:
-[SY:/home/andreax/devel/python-rt11] DL0:
+[SY:/home/andreax/devel/xferx] DL0:
 [DL0:] dir
 BOS   .SAV    61  21-Nov-95    VCG   .SAV    40  24-Aug-92
 CLI   .SAV    26  24-Aug-92    FRUN  .SAV     4  24-Aug-92
@@ -87,8 +87,8 @@ CAT   .MAC    13  31-Dec-88    CAT   .SAV     5  31-Dec-88
  35 Files, 1482 Blocks
   8690 Free blocks
 [DL0:] copy *.txt sy:
-DK:HELP.TXT -> SY:/home/andreax/devel/python-rt11/HELP.TXT
-DK:LOG.TXT -> SY:/home/andreax/devel/python-rt11/LOG.TXT
+DK:HELP.TXT -> SY:/home/andreax/devel/xferx/HELP.TXT
+DK:LOG.TXT -> SY:/home/andreax/devel/xferx/LOG.TXT
 [DL0:] mount /dos DL1: SY:BA-F019F-MC_CZZMAF0_DYDP+1_XXDP_UTILITY_1980.DSK
 ?MOUNT-I-Disk BA-F019F-MC_CZZMAF0_DYDP+1_XXDP_UTILITY_1980.DSK mounted to DL0:
 [DL0:] dir DL1:

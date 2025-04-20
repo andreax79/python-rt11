@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from rt11.nova.dgdosfs import (
+from xferx.nova.dgdosfs import (
     START_DATE,
     DGDOSFilesystem,
     date_to_rdos,
@@ -11,7 +11,7 @@ from rt11.nova.dgdosfs import (
     rdos_to_date,
     swap_bytes,
 )
-from rt11.shell import Shell
+from xferx.shell import Shell
 
 DSK = "tests/dsk/rdos.dsk"
 

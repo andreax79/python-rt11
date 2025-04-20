@@ -1,7 +1,7 @@
 # import pytest
 
-from rt11.nova.dgdosmagtapefs import DGDOSMagTapeFilesystem
-from rt11.shell import Shell
+from xferx.nova.dgdosmagtapefs import DGDOSMagTapeFilesystem
+from xferx.shell import Shell
 
 DSK = "tests/dsk/nova_magtape.tap"
 DSK_DUMP = "tests/dsk/nova_magtape_dump.tap"
@@ -38,6 +38,7 @@ def test_dgdos_magtape_dump_read():
     fs = shell.volumes.get('D')
     x = fs.read_bytes("Z20")
     assert x == b'\0' * 10240
+
 
 #
 #

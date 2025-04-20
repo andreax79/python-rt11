@@ -1,7 +1,7 @@
 import pytest
 
-from rt11.pdp11.dos11magtapefs import DOS11MagTapeFilesystem
-from rt11.shell import Shell
+from xferx.pdp11.dos11magtapefs import DOS11MagTapeFilesystem
+from xferx.shell import Shell
 
 DSK = "tests/dsk/dos11_magtape.tap"
 

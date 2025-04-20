@@ -1,8 +1,12 @@
 import pytest
 
-from rt11.apple2.appledosfs import AppleDOSFilesystem
-from rt11.apple2.commons import ProDOSFileInfo, decode_apple_single, encode_apple_single
-from rt11.shell import Shell
+from xferx.apple2.appledosfs import AppleDOSFilesystem
+from xferx.apple2.commons import (
+    ProDOSFileInfo,
+    decode_apple_single,
+    encode_apple_single,
+)
+from xferx.shell import Shell
 
 DSK = "tests/dsk/appledos.dsk"
 

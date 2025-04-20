@@ -3,8 +3,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from rt11.apple2.pascalfs import PascalFilesystem, date_to_pascal, pascal_to_date
-from rt11.shell import Shell
+from xferx.apple2.pascalfs import PascalFilesystem, date_to_pascal, pascal_to_date
+from xferx.shell import Shell
 
 DSK = "tests/dsk/pascal.dsk"
 

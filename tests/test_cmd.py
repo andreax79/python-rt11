@@ -1,8 +1,8 @@
 import pytest
 
-from rt11.native import NativeFilesystem
-from rt11.pdp11.rt11fs import RT11Filesystem
-from rt11.shell import Shell
+from xferx.native import NativeFilesystem
+from xferx.pdp11.rt11fs import RT11Filesystem
+from xferx.shell import Shell
 
 
 def test_help():

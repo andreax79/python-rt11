@@ -1,5 +1,5 @@
-from rt11.shell import Shell
-from rt11.unixfs import UNIXFilesystem
+from xferx.shell import Shell
+from xferx.unixfs import UNIXFilesystem
 
 DSK = "tests/dsk/unixv6.dsk"
 

@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from rt11.pdp8.os8fs import (
+from xferx.pdp8.os8fs import (
     OS8DirectoryEntry,
     OS8Filesystem,
     OS8Segment,
@@ -15,14 +15,14 @@ from rt11.pdp8.os8fs import (
     os8_to_date,
     rad50_word12_to_asc,
 )
-from rt11.rx import (
+from xferx.rx import (
     RX01_SECTOR_SIZE,
     RX01_SIZE,
     RX02_SECTOR_SIZE,
     rx_extract_12bit_words,
     rx_pack_12bit_words,
 )
-from rt11.shell import Shell
+from xferx.shell import Shell
 
 DSK = "tests/dsk/os8.rx01"
 

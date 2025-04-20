@@ -2,13 +2,13 @@ from datetime import date
 
 import pytest
 
-from rt11.pdp11.rstsfs import (  # UserFileDirectoryBlock,; date_to_rsts,; rsts_to_date,
+from xferx.pdp11.rstsfs import (  # UserFileDirectoryBlock,; date_to_rsts,; rsts_to_date,
     ANY_GROUP,
     ANY_USER,
     PPN,
     RSTSFilesystem,
 )
-from rt11.shell import Shell
+from xferx.shell import Shell
 
 DSK = "tests/dsk/rsts.dsk"
 
