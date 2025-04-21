@@ -152,3 +152,24 @@ def test_date_combined():
     dos11_date = date_to_dos11(original_date)
     converted_date = dos11_to_date(dos11_date)
     assert original_date == converted_date
+
+
+def test_dos11_create_uic():
+    shell = Shell(verbose=True)
+    shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
+    shell.onecmd(f"mount t: /dos11 {DSK}.mo", batch=True)
+    fs = shell.volumes.get('T')
+    assert isinstance(fs, DOS11Filesystem)
+    # Delete the UIC
+    shell.onecmd("create /directory t:[10,20]", batch=True)
+    with pytest.raises(Exception):
+        shell.onecmd("create /directory t:[10,20]", batch=True)
+    shell.onecmd("create t:[10,20]test /allocate:5", batch=True)
+    fs.get_file_entry("[10,20]test")
+    shell.onecmd("dir t:[10,20]", batch=True)
+    # Delete the UIC
+    shell.onecmd("delete t:[10,20]", batch=True)
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_entry("[10,20]test")
+    with pytest.raises(Exception):
+        shell.onecmd("delete t:[10,20]", batch=True)

@@ -700,52 +700,38 @@ class UserFileDirectoryBlock(object):
         return buf.getvalue()
 
 
-class MasterFileDirectoryEntry:
+class MasterFileDirectoryEntry(AbstractDirectoryEntry):
     """
-    Master File Directory Block
-
-    MFD Block 1:
+    Master File Directory Entry in the MFD block
 
           +-------------------------------------+
-          |        Block # of MFD Block 2       |
+          |      User Identification Code       |
           +-------------------------------------+
-          |           Interleave factor         |
+          |         UFD start block #           |
           +-------------------------------------+
-          |         Bitmap start block #        |
-          +-------------------------------------+
-          | Bitmap block                      1 |
-          | .                                   |
-          | .                                 n |
+          |      # of words in UFD entry        |
           +-------------------------------------+
           |                    0                |
           +-------------------------------------+
-          |                                     |
 
-    MFD Block 2 - N:
-          +-------------------------------------+
-       0  |          Link to next MFD           |
-          +-------------------------------------+
-       2  | UDF Entries                       1 |
-          | .                                   |
-          | .                                28 |
-          +-------------------------------------+
-
-    Disk Operating System Monitor - System Programmers Manual, Pag 135
-    http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
+    Disk Operating System Monitor - System Programmers Manual, Pag 201
+    https://bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
     """
 
-    fs: "DOS11Filesystem"
+    mfd_block: "AbstractMasterFileDirectoryBlock"
     uic: UIC = DEFAULT_UIC  # User Identification Code
     ufd_block: int = 0  # UFD start block
     num_words: int = 0  # num of words in UFD entry, always 9
     zero: int = 0  # always 0
 
-    def __init__(self, fs: "DOS11Filesystem"):
-        self.fs = fs
+    def __init__(self, mfd_block: "AbstractMasterFileDirectoryBlock"):
+        self.mfd_block = mfd_block
 
     @classmethod
-    def read(cls, fs: "DOS11Filesystem", buffer: bytes, position: int) -> "MasterFileDirectoryEntry":
-        self = cls(fs)
+    def read(
+        cls, mfd_block: "AbstractMasterFileDirectoryBlock", buffer: bytes, position: int
+    ) -> "MasterFileDirectoryEntry":
+        self = cls(mfd_block)
         (
             mfd_uic,  # UIC
             self.ufd_block,  # UFD start block
@@ -755,6 +741,17 @@ class MasterFileDirectoryEntry:
         self.uic = UIC.from_word(mfd_uic)
         return self
 
+    def write(self, buffer: bytearray, position: int) -> None:
+        struct.pack_into(
+            MFD_ENTRY_FORMAT,
+            buffer,
+            position,
+            self.uic.to_word(),  # UIC
+            self.ufd_block,  # UFD start block
+            self.num_words,  # number of words in UFD entry
+            self.zero,  # always 0
+        )
+
     def read_ufd_blocks(self) -> t.Iterator["UserFileDirectoryBlock"]:
         """Read User File Directory blocks"""
         next_block_number = self.ufd_block
@@ -763,8 +760,167 @@ class MasterFileDirectoryEntry:
             next_block_number = ufd_block.next_block_number
             yield ufd_block
 
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        wildcard: bool = False,
+    ) -> t.Iterator["DOS11DirectoryEntry"]:
+        for ufd_block in self.read_ufd_blocks():
+            for entry in ufd_block.entries_list:
+                if filename_match(entry.basename, pattern, wildcard):
+                    if include_all or not entry.is_empty:
+                        yield entry
+
+    @property
+    def is_empty(self) -> bool:
+        return self.num_words == 0
+
+    @property
+    def fullname(self) -> str:
+        return f"{self.uic}"
+
+    @property
+    def basename(self) -> str:
+        return f"{self.uic}"
+
+    def get_length(self) -> int:
+        """
+        Get the length in blocks
+        """
+        return len(list(self.read_ufd_blocks()))
+
+    def get_size(self) -> int:
+        """
+        Get entry size in bytes
+        """
+        return self.get_length() * self.get_block_size()
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
+    def open(self, file_mode: t.Optional[str] = None) -> DOS11File:
+        raise OSError(errno.EINVAL, "Invalid operation on directory")
+
+    def delete(self) -> bool:
+        # Delete all entries in the UFD
+        for entry in self.iterdir():
+            if not entry.delete():
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
+        # Free space
+        bitmap = self.mfd_block.fs.read_bitmap()
+        bitmap.clear_bit(self.ufd_block)
+        # Write an empty Master File Directory Entry
+        self.uic = UIC(0, 0)
+        self.ufd_block = 0
+        self.num_words = 0
+        self.zero = 0
+        self.mfd_block.write()  # type: ignore
+        # Write the bitmap
+        bitmap.write()
+        return True
+
+    @property
+    def fs(self) -> "DOS11Filesystem":
+        return self.mfd_block.fs
+
     def __str__(self) -> str:
         return f"{self.uic} ufd_block={self.ufd_block} num_words={self.num_words} zero={self.zero}"
+
+
+class AbstractMasterFileDirectoryBlock:
+    """
+    DOS-11/XXDP+ Master File Directory Block
+    """
+
+    fs: "DOS11Filesystem"
+    # Master File Directory Block entries
+    entries_list: t.List["MasterFileDirectoryEntry"] = []
+
+
+class MasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
+    """
+    Master File Directory Block 2 - N
+
+    MFD Block 2 - N:
+          +-------------------------------------+
+       0  |          Link to next MFD           |
+          +-------------------------------------+
+       2  | MFD Entries                       1 |
+          | .                                   |
+          | .                                28 |
+          +-------------------------------------+
+
+    Disk Operating System Monitor - System Programmers Manual, Pag 135
+    http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DEC-11-OSPMA-A-D_PDP-11_DOS_Monitor_V004A_System_Programmers_Manual_May72.pdf
+    """
+
+    # Block number of this Master File Directory block
+    block_number = 0
+    # Block number of the next Master File Directory block
+    next_block_number = 0
+
+    def __init__(self, fs: "DOS11Filesystem"):
+        self.fs = fs
+
+    @classmethod
+    def read(cls, fs: "DOS11Filesystem", block_number: int) -> "MasterFileDirectoryBlock":
+        """
+        Read a Master File Directory Block from disk
+        """
+        self = MasterFileDirectoryBlock(fs)
+        self.block_number = block_number
+        buffer = self.fs.read_block(self.block_number)
+        if not buffer:
+            raise OSError(errno.EIO, f"Failed to read block {self.block_number}")
+        self.next_block_number = bytes_to_word(buffer, 0)  # link to next MFD
+        self.entries_list = []
+        for position in range(2, BLOCK_SIZE - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
+            entry = MasterFileDirectoryEntry.read(self, buffer, position)
+            self.entries_list.append(entry)
+        return self
+
+    def write(self) -> None:
+        """
+        Write a Master File Directory Block to disk
+        """
+        buffer = bytearray(BLOCK_SIZE)
+        # Write the next block number to the buffer
+        struct.pack_into("<H", buffer, 0, self.next_block_number)
+        # Write each directory entry to the buffer
+        for i, entry in enumerate(self.entries_list):
+            position = 2 + i * MFD_ENTRY_SIZE
+            entry.write(buffer, position)
+        # Write the buffer to the disk
+        self.fs.write_block(buffer, self.block_number)
+
+    def get_empty_entry(self) -> t.Optional["MasterFileDirectoryEntry"]:
+        """
+        Get the first empty directory entry
+        """
+        for entry in self.entries_list:
+            if entry.is_empty:
+                return entry
+        return None
+
+
+class XXDPMasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
+    """
+    XXDP Master File Directory
+
+    XXDP has only one UFD in the MFD
+    """
+
+    def __init__(self, fs: "DOS11Filesystem", ufd_block: int):
+        self.fs = fs
+        entry = MasterFileDirectoryEntry(self)
+        entry.ufd_block = ufd_block
+        entry.uic = self.fs.uic
+        entry.num_words = UFD_ENTRY_SIZE // 2
+        self.entries_list = [entry]
 
 
 class DOS11Filesystem(AbstractFilesystem, BlockDevice):
@@ -833,8 +989,38 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         mfd_block: int = MFD_BLOCK,
         uic: UIC = ANY_UIC,
     ) -> t.Iterator["MasterFileDirectoryEntry"]:
-        """Read master file directory"""
+        """Read Master File Directory entries"""
+        for mfd in self.read_mfd(mfd_block=mfd_block):
+            for entry in mfd.entries_list:
+                if not entry.is_empty and uic.match(entry.uic):  # Filter by UIC
+                    yield entry
 
+    def read_mfd(
+        self,
+        mfd_block: int = MFD_BLOCK,
+    ) -> t.Iterator["AbstractMasterFileDirectoryBlock"]:
+        """
+        Read Master File Directory Block 1
+
+        MFD Block 1:
+
+              +-------------------------------------+
+              |        Block # of MFD Block 2       |
+              +-------------------------------------+
+              |           Interleave factor         |
+              +-------------------------------------+
+              |         Bitmap start block #        |
+              +-------------------------------------+
+              | Bitmap block                      1 |
+              | .                                   |
+              | .                                 n |
+              +-------------------------------------+
+              |                    0                |
+              +-------------------------------------+
+              |                                     |
+
+
+        """
         # Check DECtape format
         self.dectape = False
         t = self.read_block(DECTAPE_MFD1_BLOCK)
@@ -861,33 +1047,20 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
             ) = struct.unpack_from(MFD_BLOCK_FORMAT, t)
 
         if mfd2 != 0:  # MFD Variety #1 (DOS-11)
-            # DOS Course Handouts, Pag 13
-            # http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DOS_CourseHandouts.pdf
-            self.xxdp = False
-            next_mfd = mfd2
-            while next_mfd:
-                t = self.read_block(next_mfd)
-                if not t:
-                    raise OSError(errno.EIO, f"Failed to read block {next_mfd}")
-                next_mfd = bytes_to_word(t[0:2])  # link to next MFD
-                for i in range(2, BLOCK_SIZE - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
-                    entry = MasterFileDirectoryEntry.read(self, t, i)
-                    if entry.num_words:
-                        # Filter by UIC
-                        if uic.match(entry.uic):
-                            yield entry
-
-        else:  # MFD Variery #2 (XXDP+)
+            mfd_block = mfd2
+            while mfd_block:
+                mfd = MasterFileDirectoryBlock.read(self, mfd_block)
+                mfd_block = mfd.next_block_number
+                yield mfd
+        else:  # MFD Variety #2 (XXDP+)
             self.xxdp = True
-            entry = MasterFileDirectoryEntry(self)
             (
                 _,  # Zero
-                entry.ufd_block,  # First UFD
+                ufd_block,  # First UFD
                 _,  # Number of UFD
                 self.bitmap_start_block,  # Bitmap start block
             ) = struct.unpack_from(MFD_BLOCK_FORMAT_V2, t)
-            entry.uic = self.uic
-            yield entry
+            yield XXDPMasterFileDirectoryBlock(self, ufd_block)
 
     def read_bitmap(self) -> DOS11Bitmap:
         bitmap = DOS11Bitmap.read(self, self.bitmap_start_block)
@@ -897,27 +1070,31 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
         self,
         pattern: t.Optional[str],
         include_all: bool = False,
-        expand: bool = True,
+        expand: bool = True,  # expand directories
         wildcard: bool = True,
         uic: t.Optional[UIC] = None,
     ) -> t.Iterator["DOS11DirectoryEntry"]:
         if uic is None:
             uic = self.uic
-        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
+        uic, filename_pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
+        if pattern and not filename_pattern and not expand:
+            # If expand is False, check if the pattern is an UIC
+            try:
+                uic = UIC.from_str(pattern)
+                for mfd_block in self.read_mfd():
+                    for entry in mfd_block.entries_list:
+                        if not entry.is_empty and uic.match(entry.uic):
+                            yield entry  # type: ignore
+                return
+            except Exception:
+                pass
         for mfd in self.read_mfd_entries(uic=uic):
-            for ufd_block in mfd.read_ufd_blocks():
-                for entry in ufd_block.entries_list:
-                    if filename_match(entry.basename, pattern, wildcard):
-                        if include_all or not entry.is_empty:
-                            yield entry
+            yield from mfd.iterdir(pattern=filename_pattern, include_all=include_all, wildcard=wildcard)
 
     @property
     def entries_list(self) -> t.Iterator["DOS11DirectoryEntry"]:
         for mfd in self.read_mfd_entries(uic=self.uic):
-            for ufd_block in mfd.read_ufd_blocks():
-                for entry in ufd_block.entries_list:
-                    if not entry.is_empty:
-                        yield entry
+            yield from mfd.iterdir()
 
     def get_file_entry(self, fullname: str) -> DOS11DirectoryEntry:
         """
@@ -1027,6 +1204,43 @@ class DOS11Filesystem(AbstractFilesystem, BlockDevice):
                 struct.pack_into("<H", buffer, 0, next_block_number)
                 self.write_block(buffer, block)
         return new_entry
+
+    def create_directory(
+        self,
+        fullname: str,
+        options: t.Dict[str, t.Union[bool, str]],
+    ) -> t.Optional["MasterFileDirectoryEntry"]:
+        """
+        Create a User File Directory
+        """
+        if self.xxdp:
+            raise OSError(errno.EINVAL, "Invalid operation on XXDP+ filesystem")
+        try:
+            uic = UIC.from_str(fullname)
+        except Exception:
+            raise OSError(errno.EINVAL, "Invalid UIC")
+        # Check if the UIC already exists
+        if list(self.read_mfd_entries(uic=uic)):
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST))
+        found = False
+        mfd: "MasterFileDirectoryBlock"
+        for mfd in self.read_mfd():  # type: ignore
+            entry: MasterFileDirectoryEntry = mfd.get_empty_entry()  # type: ignore
+            if entry is not None:
+                found = True
+                break
+        if not found:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        # Create a new UFD block
+        bitmap = self.read_bitmap()
+        blocks = bitmap.allocate(1)
+        bitmap.write()
+        # Write the new entry
+        entry.uic = uic
+        entry.ufd_block = blocks[0]
+        entry.num_words = UFD_ENTRY_SIZE // 2
+        mfd.write()
+        return entry
 
     def isdir(self, fullname: str) -> bool:
         return False

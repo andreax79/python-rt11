@@ -3,31 +3,31 @@ XFERX
 
 XFERX is an utility for transferring files between various file systems.
 
-| Fs / Features     | Read file         | Write file        | Delete file       | Initialize        | Create dir/UIC/...|
+| Fs / Features     | Read file         | Write file        | Delete file       | Initialize        | Create dir/special|
 | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | 
-| RT-11             | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| DOS-11            | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
-| DOS-11 DecTape    | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
-| DOS-11 MagTape    | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| XXDP              | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
-| CAPS-11           | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| Files-11          | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
-| SOLO              | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| PDP-7 UNIX v0     | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
-| PDP-7 DECSys      | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
-| UNIX v1           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
-| UNIX v5           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
-| UNIX v6           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
-| UNIX v7           | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
-| RSTS/E            | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
-| OS/8              | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| 4k Disk Monitor   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| Apple II ProDOS   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:|
-| Apple II Pascal   | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| Apple DOS 3.x     | :white_check_mark:| :white_check_mark:| :white_check_mark:| :white_check_mark:| :heavy_minus_sign:|
-| Data General DOS/RDOS         | :white_check_mark:| :white_check_mark:| :white_check_mark:| :x:               | :x:               |
-| Data General DOS/RDOS MagTape | :white_check_mark:| :x:               | :x:               | :white_check_mark:| :heavy_minus_sign:|
-| Data General DOS/RDOS Dump    | :white_check_mark:| :x:               | :x:               | :x:               | :x:               |
+| RT-11             | Yes               | Yes               | Yes               | Yes               | N/A               |
+| DOS-11            | Yes               | Yes               | Yes               | No                | Yes               |
+| DOS-11 DecTape    | Yes               | Yes               | Yes               | No                | No                |
+| DOS-11 MagTape    | Yes               | Yes               | Yes               | Yes               | No                |
+| XXDP              | Yes               | Yes               | Yes               | No                | N/A               |
+| CAPS-11           | Yes               | Yes               | Yes               | Yes               | N/A               |
+| Files-11          | Yes               | No                | No                | No                | No                |
+| SOLO              | Yes               | Yes               | Yes               | Yes               | N/A               |
+| PDP-7 UNIX v0     | Yes               | No                | No                | No                | No                |
+| PDP-7 DECSys      | Yes               | Yes               | Yes               | No                | No                |
+| UNIX v1           | Yes               | No                | No                | No                | No                |
+| UNIX v5           | Yes               | No                | No                | No                | No                |
+| UNIX v6           | Yes               | No                | No                | No                | No                |
+| UNIX v7           | Yes               | No                | No                | No                | No                |
+| RSTS/E            | Yes               | No                | No                | No                | No                |
+| OS/8              | Yes               | Yes               | Yes               | Yes               | N/A               |
+| 4k Disk Monitor   | Yes               | Yes               | Yes               | Yes               | N/A               |
+| Apple II ProDOS   | Yes               | Yes               | Yes               | Yes               | Yes               |
+| Apple II Pascal   | Yes               | Yes               | Yes               | Yes               | N/A               |
+| Apple DOS 3.x     | Yes               | Yes               | Yes               | Yes               | N/A               |
+| Data General DOS/RDOS         | Yes               | Yes               | Yes               | No                | No                |
+| Data General DOS/RDOS MagTape | Yes               | No                | No                | Yes               | N/A               |
+| Data General DOS/RDOS Dump    | Yes               | No                | No                | No                | No                |
 
 Commands
 --------
