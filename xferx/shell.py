@@ -21,6 +21,7 @@
 import argparse
 import cmd
 import functools
+import importlib.resources
 import os
 import shlex
 import sys
@@ -404,17 +405,11 @@ COPY            Copies files
    ASCII                Copy as ASCII text
    TYPE:type
         Specifies that the output file type, if supported by the target filesystem
-   TYPE:CONTIGUOUS      Contiguous
-   TYPE:NOCONTIGUOUS    Noncontiguous
-   TYPE:ASCII           Ascii file
-   TYPE:SCRATCH         Scratch file (SOLO)
-   TYPE:SEQCODE         Sequential Pascal code file (SOLO)
-   TYPE:CONCODE         Concurrent Pascal code file (SOLO)
-
+        See the SHOW TYPES command for a list of filesystems.
 
   EXAMPLES
         COPY *.TXT DK:
-        COPY /TYPE:ASCII LICENSE DK:
+        COPY /ASCII /TYPE:CONTIGUOUS LICENSE DK:
 
         """
         # fmt: on
@@ -576,6 +571,7 @@ CREATE          Creates files or directories
         Specifies the number of blocks to allocate to the created file
    TYPE:type
         Specifies the file type
+        See the SHOW TYPES command for a list of filesystems.
 
   EXAMPLES
         CREATE NEW.DSK /ALLOCATE:200
@@ -847,13 +843,14 @@ PWD             Displays the current working drive and directory
         sys.stdout.write("%s\n" % self.volumes.get_pwd())
 
     @flgtxt("SH_OW")
-    @flgtxt("SH_OW V_OLUMES")
     @flgtxt("SH_OW T_YPES")
     @flgtxt("SH_OW F_ILESYSTEMS")
+    @flgtxt("SH_OW VE_RSION")
+    @flgtxt("SH_OW VO_LUMES")
     def do_show(self, args: t.List[str]) -> None:
         # fmt: off
         """
-SHOW		    Displays software status
+SHOW            Displays software status
 
   SYNTAX
         SHOW [options] [volume:]
@@ -863,12 +860,14 @@ SHOW		    Displays software status
 	    is displayed by specifying one or more option names.
 
   OPTIONS
-   VOLUMES
-        Show the device assignments
    FILESYSTEMS
         Show the supported filesystems
    TYPES
         Show the file types of a volume
+   VERSION
+        Show the version of XFERX
+   VOLUMES
+        Show the device assignments
 
   EXAMPLES
         SHOW
@@ -904,6 +903,10 @@ SHOW		    Displays software status
             sys.stdout.write("-----------\n")
             for k, v in sorted(FILESYSTEMS.items()):  # type: ignore
                 sys.stdout.write(f"{k.upper():<10} {v.fs_description}\n")
+        elif action == "VERSION":
+            with importlib.resources.files("xferx").joinpath("VERSION").open("r", encoding="utf-8") as f:
+                version = f.read().strip()
+            sys.stdout.write(f"XFERX {version}\n")
         else:
             sys.stdout.write("?SHOW-F-Too many arguments\n")
 
