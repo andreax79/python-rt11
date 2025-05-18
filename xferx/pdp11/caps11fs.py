@@ -266,7 +266,10 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.size = size - self.continued
         return self
 
-    def write(self, skip_file: bool = True) -> None:
+    def write(self, skip_file: bool = True) -> bool:
+        """
+        Write the directory entry
+        """
         buffer = bytearray(HEADER_RECORD_SIZE)
         if not self.filename:  # Sentinel file
             filename = b"\0"
@@ -293,6 +296,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.fs.tape_write_forward(buffer)
         if skip_file:
             self.fs.tape_skip_file()
+        return True
 
     def get_length(self) -> int:
         """

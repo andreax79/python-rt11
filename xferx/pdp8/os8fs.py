@@ -370,7 +370,7 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
         self.file_position = file_position
         return self
 
-    def write(self) -> t.List[int]:
+    def to_words(self) -> t.List[int]:
         """
         Write the directory entry
         """
@@ -450,6 +450,13 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
         self.extension = ""
         self.extra_words = []
         self.segment.compact()
+        self.segment.write()
+        return True
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
         self.segment.write()
         return True
 
@@ -556,7 +563,7 @@ class OS8Segment:
         words.append(self.tentative_last_word)
         words.append(0o10000 - self.extra_words)
         for entry in self.entries_list:
-            words.extend(entry.write())
+            words.extend(entry.to_words())
         words += [0] * (DIRECTORY_SEGMENT_SIZE - len(words))
         self.partition.write_12bit_words_block(self.block_number, words)
 

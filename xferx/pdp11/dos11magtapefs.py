@@ -194,7 +194,10 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         self.size = size - HEADER_RECORD_SIZE
         return self
 
-    def write(self, skip_file: bool = True) -> None:
+    def write(self, skip_file: bool = True) -> bool:
+        """
+        Write the directory entry
+        """
         buffer = bytearray(HEADER_RECORD_SIZE)
         # Convert filename to RAD50 words
         fnam1 = asc_to_rad50_word(self.filename[:3])
@@ -210,6 +213,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         self.fs.tape_write_forward(buffer)
         if skip_file:
             self.fs.tape_skip_file()
+        return True
 
     @property
     def length(self) -> int:

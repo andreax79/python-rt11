@@ -292,6 +292,13 @@ class RT11DirectoryEntry(AbstractDirectoryEntry):
         self.segment.write()
         return True
 
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        self.segment.write()
+        return True
+
     def open(self, file_mode: t.Optional[str] = None) -> RT11File:
         """
         Open a file

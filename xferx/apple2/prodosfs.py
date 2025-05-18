@@ -520,7 +520,13 @@ class ProDOSAbstractDirEntry(AbstractDirectoryEntry):
 
     def delete(self) -> bool:
         """
-        Delete the file
+        Delete the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
         """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
@@ -543,7 +549,7 @@ class ProDOSAbstractDirEntry(AbstractDirectoryEntry):
         raise OSError(errno.EISDIR, os.strerror(errno.EISDIR))
 
     @abstractmethod
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         """
         Write the entry to a buffer
         """
@@ -632,7 +638,7 @@ class VolumeDirectoryHeader(ProDOSAbstractDirEntry):
         self.filename = raw_filename[:filename_length].decode("ascii", errors="ignore")
         return self
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         """
         Write the entry to a buffer
         """
@@ -742,7 +748,7 @@ class SubdirectoryHeader(ProDOSAbstractDirEntry):
         self.filename = raw_filename[:filename_length].decode("ascii", errors="ignore")
         return self
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         """
         Write the entry to a buffer
         """
@@ -883,7 +889,7 @@ class FileEntry(ProDOSAbstractDirEntry):
         """
         pass
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         """
         Write the entry to a buffer
         """
@@ -963,6 +969,16 @@ class FileEntry(ProDOSAbstractDirEntry):
         for block in allocated_blocks:
             bitmap.set_free(block)
         bitmap.write()
+        return True
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        if not isinstance(self.parent, AbstractDirectoryFileEntry):
+            return False
+        if not self.parent.update_dir_entry(self):
+            return False
         return True
 
     def __str__(self) -> str:
@@ -1272,7 +1288,7 @@ class DirectoryFileEntry(AbstractDirectoryFileEntry):
                 if create:
                     if block_data[position] == 0:
                         found = True
-                        entry.write(block_data, position)
+                        entry.write_buffer(block_data, position)
                         break
                 else:
                     child = ProDOSAbstractDirEntry.read(self.fs, self, block_data, position)
@@ -1283,7 +1299,7 @@ class DirectoryFileEntry(AbstractDirectoryFileEntry):
                             struct.pack_into(f"<{ENTRY_SIZE}B", block_data, position, *([0] * ENTRY_SIZE))
                         else:
                             # Update the entry
-                            entry.write(block_data, position)
+                            entry.write_buffer(block_data, position)
                         break
                 entry_number += 1
             # If the entry was found, write the block back
@@ -1487,8 +1503,8 @@ class ExtendedFileEntry(FileEntry):
         )
         # Write block
         extended_key_block = bytearray(BLOCK_SIZE)
-        data_fork_entry.write(extended_key_block, EXTENDED_DATA_FORK_POS)
-        resource_fork_entry.write(extended_key_block, EXTENDED_RESOURCE_FORK_POS)
+        data_fork_entry.write_buffer(extended_key_block, EXTENDED_DATA_FORK_POS)
+        resource_fork_entry.write_buffer(extended_key_block, EXTENDED_RESOURCE_FORK_POS)
         self.fs.write_block(extended_key_block, self.key_pointer)
         # Write the entry
         if parent is not None:
@@ -1591,7 +1607,7 @@ class ExtendedFileFork(RegularFileEntry):
         self.length = (eof2 << 16) | (eof1 << 8) | eof0
         return self
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         """
         Write the entry to a buffer
         """

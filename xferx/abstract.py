@@ -183,7 +183,11 @@ class AbstractDirectoryEntry(ABC):
 
     @abstractmethod
     def delete(self) -> bool:
-        """Delete the file"""
+        """Delete the directory entry"""
+
+    @abstractmethod
+    def write(self) -> bool:
+        """Write the directory entry"""
 
     @abstractmethod
     def open(self, file_mode: t.Optional[str] = None) -> AbstractFile:

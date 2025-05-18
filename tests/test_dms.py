@@ -191,7 +191,7 @@ def test_directory_entry():
     assert d.high_core_addr == 0
     assert d.system_program
     assert d.program_type == FILE_TYPE_SYS_USER
-    assert d.write() == t
+    assert d.to_words() == t
 
 
 def test_directory_name_block():

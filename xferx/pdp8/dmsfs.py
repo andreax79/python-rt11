@@ -627,7 +627,7 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
         self.system_program = bool(flags >> 6 & 1)
         return self
 
-    def write(self) -> t.List[int]:
+    def to_words(self) -> t.List[int]:
         """
         Write the directory entry
         """
@@ -727,6 +727,13 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
             self.dn.write()
             return True
 
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        self.dn.write()
+        return True
+
     def open(self, file_mode: t.Optional[str] = None) -> DMSFile:
         """
         Open a file
@@ -813,7 +820,7 @@ class DirectorNameBlock:
         for file_number in range(self.block_seq_nr * DN_ENTRIES + 1, (self.block_seq_nr + 1) * DN_ENTRIES + 1):
             entry = self.entries.get(file_number)
             if entry is not None and not entry.is_empty:
-                words.extend(entry.write())
+                words.extend(entry.to_words())
             else:
                 words.extend([0] * DN_ENTRY_SIZE)
         words.append(self.next_directory_name)

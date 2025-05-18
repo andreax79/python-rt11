@@ -809,7 +809,7 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         entry.sys_dir_block.write()
         return entry
 
-    def write(self, buffer: bytearray, position: int) -> None:
+    def write_buffer(self, buffer: bytearray, position: int) -> None:
         """
         Write the UFD entry to the buffer
         """
@@ -998,6 +998,13 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         self.sys_dir_block.write()
         return True
 
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        self.sys_dir_block.write()
+        return True
+
     def examine(self) -> str:
         if self.is_directory:  # Directory
             file_type = "Directory"
@@ -1156,7 +1163,7 @@ class SystemDirectoryBlock:
         buffer[0:2] = word_to_bytes(self.number_of_files)
         # Write the UFD entries
         for i, entry in enumerate(self.entries_list):
-            entry.write(buffer, 2 + i * UFD_ENTRY_LEN)
+            entry.write_buffer(buffer, 2 + i * UFD_ENTRY_LEN)
         # Write the last word
         buffer[-2:] = word_to_bytes(self.max_ufd)
         return bytes(buffer)

@@ -41,7 +41,7 @@ def test_write_directory_entry():
     segment.entries_list.append(e)
     assert segment.number_of_entries == 1
     assert e.is_empty
-    words1 = e.write()
+    words1 = e.to_words()
     assert words == words1
 
     assert len(words1) == 2
@@ -51,12 +51,12 @@ def test_write_directory_entry():
     e.length = 123
     e.extra_words = [342]
     assert not e.is_empty
-    words2 = e.write()
+    words2 = e.to_words()
     assert len(words2) == 6
 
     e2 = OS8DirectoryEntry.read(segment, words2, 0, 0)
     assert not e2.is_empty
-    assert e2.write() == words2
+    assert e2.to_words() == words2
 
 
 def test_os8_to_date():

@@ -328,7 +328,7 @@ class UFDLabelEntry:
         self.ufd = rad50_word_to_asc(blockette[7])
         return self
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         rad50_ufd = asc_to_rad50_word(self.ufd)
         struct.pack_into(
             BLOCKETTE_FORMAT,
@@ -389,7 +389,7 @@ class UFDAccountEntry:
         self.urst = rad50_word_to_asc(urst1) + rad50_word_to_asc(urst2)
         return self
 
-    def write(self, buffer: bytearray, position: int) -> None:
+    def write_buffer(self, buffer: bytearray, position: int) -> None:
         urst1 = asc_to_rad50_word(self.urst[:3])
         urst2 = asc_to_rad50_word(self.urst[3:6])
         struct.pack_into(
@@ -450,7 +450,7 @@ class UFDNameEntry(AbstractDirectoryEntry):
         self.extension = rad50_word_to_asc(filetype)
         return self
 
-    def write(self, buffer: bytearray, position: int) -> None:
+    def write_buffer(self, buffer: bytearray, position: int) -> None:
         filename1 = asc_to_rad50_word(self.filename[:3])
         filename2 = asc_to_rad50_word(self.filename[3:6])
         filetype = asc_to_rad50_word(self.extension)
@@ -533,6 +533,15 @@ class UFDNameEntry(AbstractDirectoryEntry):
         return BLOCK_SIZE
 
     def delete(self) -> bool:
+        """
+        Delete the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def open(self, file_mode: t.Optional[str] = None) -> RSTSFile:
@@ -591,7 +600,7 @@ class MFDNameEntry:
         self.passwd = rad50_word_to_asc(passwd0) + rad50_word_to_asc(passwd1)
         return self
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         passwd0 = asc_to_rad50_word(self.passwd[:3])
         passwd1 = asc_to_rad50_word(self.passwd[3:6])
         struct.pack_into(

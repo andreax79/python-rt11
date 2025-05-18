@@ -307,7 +307,7 @@ class PPMDirectoryEntry(AbstractDirectoryFileEntry):
         # Write the volumes
         for volume_number, volume in enumerate(volumes, start=1):
             position = volume_number * PPM_INFO_SIZE
-            volume.write(buffer, position)
+            volume.write_buffer(buffer, position)
         self.fs.write_block(bytes(buffer), self.key_pointer, number_of_blocks=PPM_HEADER_BLOCKS)
 
     def blocks(self, include_indexes: bool = False) -> t.Iterator[int]:
@@ -405,7 +405,7 @@ class PPMVolumeEntry(RegularFileEntry):
             parent.update_dir_entry(self, create=True)  # Set volume_number and position
         return self
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         """
         Write the Volume entry to a buffer
         """
@@ -431,11 +431,21 @@ class PPMVolumeEntry(RegularFileEntry):
 
     def delete(self) -> bool:
         """
-        Delete the file
+        Delete the directory end
         """
         if not isinstance(self.parent, PPMDirectoryEntry):
             return False
         if not self.parent.update_dir_entry(self, delete=True):
+            return False
+        return True
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        if not isinstance(self.parent, PPMDirectoryEntry):
+            return False
+        if not self.parent.update_dir_entry(self):
             return False
         return True
 

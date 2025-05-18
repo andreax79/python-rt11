@@ -474,7 +474,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
             self.contiguous = False
         return self
 
-    def write(self, buffer: bytearray, position: int) -> None:
+    def write_buffer(self, buffer: bytearray, position: int) -> None:
         # Create filename and extension in RAD50 format
         fnam0 = asc_to_rad50_word(self.filename[:3])
         fnam1 = asc_to_rad50_word(self.filename[3:6])
@@ -567,6 +567,13 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
                 t = self.ufd_block.fs.read_block(next_block_number)
                 next_block_number = bytes_to_word(t, 0)
         bitmap.write()
+        return True
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        self.ufd_block.write()
         return True
 
     def open(self, file_mode: t.Optional[str] = None) -> DOS11File:
@@ -674,7 +681,7 @@ class UserFileDirectoryBlock(object):
         # Write each directory entry to the buffer
         for i, dir_entry in enumerate(self.entries_list):
             position = 2 + i * UFD_ENTRY_SIZE
-            dir_entry.write(buffer, position)
+            dir_entry.write_buffer(buffer, position)
         # Write the buffer to the disk
         self.fs.write_block(buffer, self.block_number, 2)
 
@@ -741,7 +748,7 @@ class MasterFileDirectoryEntry(AbstractDirectoryEntry):
         self.uic = UIC.from_word(mfd_uic)
         return self
 
-    def write(self, buffer: bytearray, position: int) -> None:
+    def write_buffer(self, buffer: bytearray, position: int) -> None:
         struct.pack_into(
             MFD_ENTRY_FORMAT,
             buffer,
@@ -823,6 +830,12 @@ class MasterFileDirectoryEntry(AbstractDirectoryEntry):
         bitmap.write()
         return True
 
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        raise OSError(errno.EINVAL, "Invalid operation on directory")
+
     @property
     def fs(self) -> "DOS11Filesystem":
         return self.mfd_block.fs
@@ -893,7 +906,7 @@ class MasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
         # Write each directory entry to the buffer
         for i, entry in enumerate(self.entries_list):
             position = 2 + i * MFD_ENTRY_SIZE
-            entry.write(buffer, position)
+            entry.write_buffer(buffer, position)
         # Write the buffer to the disk
         self.fs.write_block(buffer, self.block_number)
 

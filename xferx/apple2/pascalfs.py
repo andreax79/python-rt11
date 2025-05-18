@@ -503,6 +503,17 @@ class PascalDirectoryEntry(AbstractDirectoryEntry):
                 return True
         return False
 
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        volume_dir = VolumeDirectory.read(self.fs)
+        for entry in volume_dir.directory_entries:
+            if entry.start_block == self.start_block:
+                volume_dir.write()
+                return True
+        return False
+
     def open(self, file_mode: t.Optional[str] = None) -> PascalFile:
         """
         Open a file

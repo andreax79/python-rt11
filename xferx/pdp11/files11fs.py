@@ -476,6 +476,15 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         return BLOCK_SIZE
 
     def delete(self) -> bool:
+        """
+        Delete the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
     def open(self, file_mode: t.Optional[str] = None) -> Files11File:

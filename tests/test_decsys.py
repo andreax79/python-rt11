@@ -65,7 +65,7 @@ def test_directory_entry():
     assert entry.filename == "CONTEN"
     assert entry.block_number == 7
     assert entry.starting_address == 63
-    assert entry.write() == t
+    assert entry.to_words() == t
 
     t = [1, 76838, 132224, 9, 64]
     entry = DECSysDirectoryEntry.read(directory, t, 0)
@@ -73,7 +73,7 @@ def test_directory_entry():
     assert entry.filename == "LABEL"
     assert entry.block_number == 9
     assert entry.starting_address == 63
-    assert entry.write() == t
+    assert entry.to_words() == t
 
     t = [2, 10280, 8192, 146, 147, 148]
     entry = DECSysDirectoryEntry.read(directory, t, 0)
@@ -82,7 +82,7 @@ def test_directory_entry():
     assert entry.fortran_block_number == 146
     assert entry.assembler_block_number == 147
     assert entry.block_number == 148
-    assert entry.write() == t
+    assert entry.to_words() == t
 
 
 def test_program_directory():

@@ -215,7 +215,13 @@ class DGDOSMagTapeDirectoryEntry(AbstractDirectoryEntry):
 
     def delete(self) -> bool:
         """
-        Delete the file
+        Delete the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
         """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 

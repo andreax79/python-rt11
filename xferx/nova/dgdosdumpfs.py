@@ -314,7 +314,7 @@ class DGDOSDumpEntry(AbstractDirectoryEntry):
         """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def write(self, buffer: bytearray, position: int) -> None:
+    def write_buffer(self, buffer: bytearray, position: int) -> None:
         """
         Write the UFD entry to the buffer
         """
@@ -411,7 +411,13 @@ class DGDOSDumpEntry(AbstractDirectoryEntry):
 
     def delete(self) -> bool:
         """
-        Delete the file
+        Delete the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
         """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 

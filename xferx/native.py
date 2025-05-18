@@ -160,11 +160,20 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
         return BLOCK_SIZE
 
     def delete(self) -> bool:
+        """
+        Delete the directory entry
+        """
         try:
             os.unlink(self.native_fullname)
             return True
         except:
             return False
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        raise OSError(errno.EINVAL, "Invalid operation on native filesystem")
 
     def open(self, file_mode: t.Optional[str] = None) -> NativeFile:
         """

@@ -353,9 +353,9 @@ class DECSysDirectoryEntry(AbstractDirectoryEntry):
             return WorkingDirectoryEntry.read(directory, words, position)
 
     @abstractmethod
-    def write(self) -> t.List[int]:
+    def to_words(self) -> t.List[int]:
         """
-        Write the directory entry
+        Dump the directory entry to words
         """
         pass
 
@@ -396,7 +396,7 @@ class DECSysDirectoryEntry(AbstractDirectoryEntry):
 
     def delete(self) -> bool:
         """
-        Delete the file
+        Delete the directory entry
         """
         l = len(self.directory.entries)
         self.directory.entries = [x for x in self.directory.entries if x.filename != self.filename]
@@ -405,6 +405,13 @@ class DECSysDirectoryEntry(AbstractDirectoryEntry):
             return True
         else:
             return False
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        self.directory.write()
+        return True
 
     def deallocate(self) -> None:
         """
@@ -504,9 +511,9 @@ class SystemDirectoryEntry(DECSysDirectoryEntry):
         self.raw_file_type = FileType.SYSTEM
         return self
 
-    def write(self) -> t.List[int]:
+    def to_words(self) -> t.List[int]:
         """
-        Write the directory entry
+        Dump the directory entry to words
         """
         return (
             [self.raw_file_type.value]
@@ -574,9 +581,9 @@ class WorkingDirectoryEntry(DECSysDirectoryEntry):
         self.raw_file_type = FileType.WORKING
         return self
 
-    def write(self) -> t.List[int]:
+    def to_words(self) -> t.List[int]:
         """
-        Write the directory entry
+        Dump the directory entry to words
         """
         return (
             [FileType.WORKING.value]
@@ -649,9 +656,9 @@ class LibraryDirectoryEntry(DECSysDirectoryEntry):
         self.raw_file_type = FileType.LIBRARY
         return self
 
-    def write(self) -> t.List[int]:
+    def to_words(self) -> t.List[int]:
         """
-        Write the directory entry
+        Dump the directory entry to words
         """
         # Directory entries names are variable length,
         # depending on the number of entry points
@@ -753,7 +760,7 @@ class ProgramDirectory(DECSysAbstractDirectory):
         """
         words = [0]
         for entry in self.entries:
-            words += entry.write()
+            words += entry.to_words()
         words[0] = len(words) - 1  # Directory length, in words
         words += [0] * (255 - len(words))  # pad
         words += [self.first_free_block]  # First free block number
@@ -800,7 +807,7 @@ class LibraryDirectory(DECSysAbstractDirectory):
         """
         words = [0]
         for entry in self.entries:
-            words += entry.write()
+            words += entry.to_words()
         words[0] = len(words) - 1  # Directory length, in words
         words += [0] * (256 - len(words))  # pad
         self.fs.write_18bit_words_block(LIBRARY_DIRECTORY_BLOCK, words)

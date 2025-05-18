@@ -590,7 +590,7 @@ class AppleDOSCatalog:
                 if not entries:
                     break
                 entry = entries.pop(0)
-                entry.write(buffer, FILE_DESCRIPTIVE_ENTRY_OFFSET + j * FILE_DESCRIPTIVE_ENTRY_SIZE)
+                entry.write_buffer(buffer, FILE_DESCRIPTIVE_ENTRY_OFFSET + j * FILE_DESCRIPTIVE_ENTRY_SIZE)
             # Write the catalog sector
             self.fs.write_sector(buffer, self.catalog_addresses[i])
 
@@ -739,7 +739,7 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
         self.length = 0
         return self
 
-    def write(self, buffer: bytearray, position: int = 0) -> None:
+    def write_buffer(self, buffer: bytearray, position: int = 0) -> None:
         """
         Write the directory entry
         """
@@ -871,6 +871,17 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
                 vtoc.set_free(address)
         vtoc.write()
         return True
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        catalog = AppleDOSCatalog.read(self.fs)
+        for entry in catalog.iterdir():
+            if entry.address == self.address:
+                catalog.write()
+                return True
+        return False
 
     def open(self, file_mode: t.Optional[str] = None) -> AppleDOSFile:
         """

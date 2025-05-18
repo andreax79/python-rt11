@@ -392,7 +392,7 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
             self.page_map = self.cat_page.fs.read_page_map(self.page_map_block_number)
         return self
 
-    def write(self, buffer: bytearray, position: int) -> None:
+    def write_buffer(self, buffer: bytearray, position: int) -> None:
         file_id = self.filename.encode("ascii", errors="ignore").ljust(ID_LENGTH)
         raw_protected = 1 if self.protected else 0
         struct.pack_into(
@@ -463,6 +463,12 @@ class SOLODirectoryEntry(SOLOAbstractSortableDirectoryEntry):
         # Decrement the counter of files with the same key
         self.fs.update_searchlength(old_key, -1)
         return True
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        raise OSError(errno.EINVAL, "Invalid operation on SOLO filesystem")
 
     def open(self, file_mode: t.Optional[str] = None) -> SOLOFile:
         """
@@ -541,6 +547,12 @@ class SOLOSegmentDirectoryEntry(SOLOAbstractSortableDirectoryEntry):
 
     def delete(self) -> bool:
         return False
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        raise OSError(errno.EINVAL, "Invalid operation on segment")
 
     def open(self, file_mode: t.Optional[str] = None) -> SOLOSegment:
         """
@@ -715,7 +727,7 @@ class SOLOCatalogPage:
         buffer = bytearray(BLOCK_SIZE)
         for i, entry in enumerate(self.entries):
             pos = i * ENTRY_LENGTH
-            entry.write(buffer, pos)
+            entry.write_buffer(buffer, pos)
         self.fs.write_block(buffer, self.block_number)
 
     def create_entry(
