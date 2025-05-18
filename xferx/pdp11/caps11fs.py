@@ -37,12 +37,16 @@ __all__ = [
     "CAPS11Filesystem",
 ]
 
-HEADER_RECORD = ">6s3sBHBB6s12s"
+HEADER_RECORD = ">6s3sBHBB6sB11s"
 HEADER_RECORD_SIZE = 32
 RECORD_SIZE = 128
 SENTINEL_FILE = b"\0" * HEADER_RECORD_SIZE
 
-FILE_TYPE_ASCII = 0o1
+# CAPS-11 uses file type codes 0o1 (ASCII), 0o2 (BIN), and 0o14 (BAD)
+# CAPS-11 Users Guide, Pag 290
+# http://bitsavers.org/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
+
+FILE_TYPE_ASCII = 0o1  # ASCII (seven bits per character)
 FILE_TYPE_BIN = 0o2
 FILE_TYPE_CORE1 = 0o3  # One 36-bit word in 5 bytes
 FILE_TYPE_CORE2 = 0o4  # One 12-bit word in 2 bytes
@@ -52,8 +56,8 @@ FILE_TYPE_CORE5 = 0o7  # One 16-bit word in 2 bytes
 FILE_TYPE_CORE6 = 0o10  # 2 x 12-bit words in 3 bytes
 FILE_TYPE_CORE7 = 0o11  # 2 x 36-bit words in 9 bytes
 FILE_TYPE_CORE8 = 0o12  # 4 x 18-bit words in 9 bytes
-FILE_TYPE_BOOT = 0o13
-FILE_TYPE_BAD = 0o14
+FILE_TYPE_BOOT = 0o13  # Bootstrap
+FILE_TYPE_BAD = 0o14  # Bad file
 
 STANDARD_FILE_TYPES = {
     FILE_TYPE_ASCII: "ASCII",
@@ -73,14 +77,14 @@ STANDARD_FILE_TYPES = {
 
 def caps11_to_date(val: bytes) -> t.Optional[date]:
     """
-    Translate CAPS-11 date to Python date
+    Translate CAPS-11 date (stored in ASCII as ddmmyy) to Python date
     """
     try:
         date_str = val.decode("ascii", errors="ignore")
         day = int(date_str[0:2])
         month = int(date_str[2:4])
-        year = int(date_str[4:6]) + 1900
-        return date(year, month, day)
+        year = int(date_str[4:6])
+        return date(year + (1900 if year >= 60 else 2000), month, day)
     except:
         return None
 
@@ -93,7 +97,7 @@ def date_to_caps11(d: t.Optional[date]) -> bytes:
         return b"     "
     day = f"{d.day:02}"
     month = f"{d.month:02}"
-    year = f"{d.year - 1900:02}"
+    year = f"{d.year:04}"[2:4]
     date_str = f"{day}{month}{year}"
     return date_str.encode("ascii")
 
@@ -167,13 +171,24 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
     """
     CAPS-11 File Header
 
-      9 bytes   1 byte  2 bytes        1 bye  1 byte  6 bytes  12 bytes
+      9 bytes   1 byte  2 bytes        1 byte 1 byte  6 bytes  12 bytes
     +----------+------+---------------+------+-------+--------+--------+
     | Filename | Type | Record length | Seq. | Cont. |  Data  |  Spare |
     +----------+------+---------------+------+-------+--------+--------+
 
     CAPS-11 Users Guide, Pag 289
-    http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
+    http://bitsavers.org/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
+
+    CAPS-8 File Header
+
+      9 bytes   1 byte  2 bytes        1 byte  1 byte  6 bytes   1 byte  11 bytes
+    +----------+------+---------------+------+-------+--------+---------+---------+
+    | Filename | Type | Record length | Seq. | Cont. |  Data  | Version |  Spare  |
+    +----------+------+---------------+------+-------+--------+---------+---------+
+
+    CAPS-8 Users Guide, Pag 205
+    https://bitsavers.org/pdf/dec/pdp8/caps8/DEC-8E-OCASA-B-D_CAPS8_UG.pdf
+
     """
 
     fs: "CAPS11Filesystem"
@@ -184,7 +199,8 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
     sequence: int = 0  #              1 byte  - file sequence number for multi volume files (0)
     continued: int = 0  #             1 byte  - header auxiliary header record (0)
     raw_creation_date: bytes = b""  # 6 char  - file creation date as DDMMYY
-    unused: bytes = b""  #           12 char  - spare
+    version: int = 0  #               1 byte  - version number (incremented by the editor) - CAPS-8 only
+    unused: bytes = b""  #           11 char  - spare
 
     file_number: int = 0
     size: int = 0  # size in bytes
@@ -214,7 +230,8 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.raw_creation_date = date_to_caps11(creation_date)
         self.sequence = 0
         self.continued = 0
-        self.unused = b"\0" * 12
+        self.version = 0
+        self.unused = b"\0" * 11
         return self
 
     @classmethod
@@ -237,8 +254,10 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
             self.sequence,
             self.continued,
             self.raw_creation_date,
+            self.version,
             self.unused,
         ) = struct.unpack_from(HEADER_RECORD, buffer, 0)
+        # print(" ".join([f"{b:02x}" for b in buffer]))
         self.filename = filename.decode("ascii", errors="ignore").rstrip(" ")
         self.extension = extension.decode("ascii", errors="ignore").rstrip(" ")
         if not self.filename or self.filename.startswith("\0"):  # Sentinel file
@@ -267,6 +286,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
             self.sequence,
             self.continued,
             self.raw_creation_date,
+            self.version,
             self.unused,
         )
         self.fs.tape_seek(self.tape_pos)
@@ -347,7 +367,8 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
             f"{self.sequence:>4} "
             f"{self.continued:>4}  "
             f"{self.creation_date or '          '} "
-            f"{self.size:>8}"
+            f"{self.size:>8} "
+            f"{(self.version if self.fs.caps8 else ''):>3}"
         )
 
     def __repr__(self) -> str:
@@ -371,19 +392,22 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         +-------------------------------------+
 
     CAPS-11 Users Guide, Pag 287
-    http://bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
+    http://bitsavers.org/pdf/dec/pdp11/caps-11/DEC-11-OTUGA-A-D_CAPS-11_Users_Guide_Oct73.pdf
     """
 
     fs_name = "caps11"
     fs_description = "PDP-11 CAPS-11"
+    caps8 = False  # Is CAPS-8 ?
 
     @classmethod
     def mount(cls, file: "AbstractFile", strict: bool = True) -> "AbstractFilesystem":
         self = cls(file)
         if strict:
             for entry in self.read_file_headers(include_eot=False):
-                if entry.record_length != RECORD_SIZE or entry.size < 0:
-                    raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
+                if not entry.is_sentinel_file and entry.version != 0:
+                    self.caps8 = True
+                if entry.record_length not in [0, RECORD_SIZE] or entry.size < 0:
+                    raise OSError(errno.EIO, f"Invalid record length ({entry.record_length}) {entry}")
         return self
 
     def read_file_headers(self, include_eot: bool = False) -> t.Iterator["CAPS11DirectoryEntry"]:
@@ -494,14 +518,26 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
 
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         if not options.get("brief"):
-            dt = date.today().strftime('%d-%B-%y').upper()
-            sys.stdout.write(f" {dt}\n\n")
+            if self.caps8:
+                dt = date.today().strftime('%m/%d/%y').upper()
+                sys.stdout.write(f"{dt}\n")
+            else:
+                dt = date.today().strftime('%d-%B-%y').upper()
+                sys.stdout.write(f" {dt}\n\n")
+
         for x in self.filter_entries_list(pattern, include_all=True):
             if options.get("brief"):
-                # Lists only file names and file types
+                # Omit creation date and version number
                 if x.is_empty:
                     continue
-                sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s}\n")
+                elif self.caps8:
+                    sys.stdout.write(f"{x.filename:<6s}.{(x.extension or 'BIN'):<3s}\n")
+                else:
+                    sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s}\n")
+            elif self.caps8:
+                version = f"V{x.version}" if x.version else ""
+                creation_date = x.creation_date and x.creation_date.strftime("%m/%d/%y").upper() or ""
+                sys.stdout.write(f"{x.filename:<6s}.{(x.extension or 'BIN'):<3s} {creation_date:<8s} {version}\n")
             else:
                 creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or "--"
                 sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s} {creation_date:<9s}\n")
@@ -510,8 +546,12 @@ class CAPS11Filesystem(AbstractFilesystem, Tape):
         if arg:
             self.dump(arg)
         else:
-            sys.stdout.write("Num    Filename    Type     Rec  Seq Cont        Date     Size\n")
-            sys.stdout.write("---    --------    ----     ---  --- ----        ----     ----\n")
+            if self.caps8:
+                sys.stdout.write("Num    Filename    Type     Rec  Seq Cont        Date     Size Ver\n")
+                sys.stdout.write("---    --------    ----     ---  --- ----        ----     ---- ---\n")
+            else:
+                sys.stdout.write("Num    Filename    Type     Rec  Seq Cont        Date     Size\n")
+                sys.stdout.write("---    --------    ----     ---  --- ----        ----     ----\n")
             for entry in self.read_file_headers(include_eot=True):
                 sys.stdout.write(f"{entry}\n")
 

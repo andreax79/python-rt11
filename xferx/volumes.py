@@ -55,6 +55,7 @@ DEFAULT_VOLUME = "DK"
 SYSTEM_VOLUME = "SY"
 FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "caps11": CAPS11Filesystem,
+    "caps8": CAPS11Filesystem,
     "dos11": DOS11Filesystem,
     "dos11mt": DOS11MagTapeFilesystem,
     "files11": Files11Filesystem,
