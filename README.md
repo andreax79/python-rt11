@@ -22,6 +22,7 @@ XFERX is an utility for transferring files between various file systems.
 | RSTS/E            | Yes               | No                | No                | No                | No                |
 | OS/8              | Yes               | Yes               | Yes               | Yes               | N/A               |
 | 4k Disk Monitor   | Yes               | Yes               | Yes               | Yes               | N/A               |
+| CAPS-8            | Yes               | Yes               | Yes               | Yes               | N/A               |
 | Apple II ProDOS   | Yes               | Yes               | Yes               | Yes               | Yes               |
 | Apple II Pascal   | Yes               | Yes               | Yes               | Yes               | N/A               |
 | Apple DOS 3.x     | Yes               | Yes               | Yes               | Yes               | N/A               |
@@ -164,6 +165,11 @@ XXDP
 ----
 
 * [XXDP File Structure Guide](https://raw.githubusercontent.com/rust11/xxdp/main/XXDP%2B%20File%20Structure.pdf)
+
+CAPS-8
+------
+
+* [CAPS-8 Users Manual](https://bitsavers.org/pdf/dec/pdp8/caps8/DEC-8E-OCASA-B-D_CAPS8_UG.pdf)
 
 CAPS-11
 -------
