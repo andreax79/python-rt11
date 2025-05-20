@@ -40,7 +40,7 @@ from ..commons import (
     filename_match,
     word_to_bytes,
 )
-from ..unixfs import unix_join, unix_split
+from ..unix.commons import unix_join, unix_split
 
 __all__ = [
     "DGDOSFile",

@@ -20,6 +20,7 @@
 
 import errno
 import io
+import math
 import os
 import sys
 import typing as t
@@ -27,7 +28,14 @@ from functools import reduce
 
 from ..abstract import AbstractFile, AbstractFilesystem
 from ..commons import ASCII, IMAGE, READ_FILE_FULL
-from ..unixfs import UNIXDirectoryEntry, UNIXFile, UNIXFilesystem, UNIXInode, unix_join
+from ..unix.commons import (
+    UNIXDirectory,
+    UNIXDirectoryEntry,
+    UNIXFile,
+    UNIXFilesystem,
+    UNIXInode,
+    unix_join,
+)
 from .block import BYTES_PER_WORD_18BIT, BlockDevice18Bit, from_18bit_words_to_bytes
 
 __all__ = [
@@ -36,17 +44,21 @@ __all__ = [
     "UNIX0Filesystem",
 ]
 
+V0_SUPER_BLOCK = 0  # Superblock
+
 V0_IO_BYTES_PER_WORD = 3  # When files are exported, each word is encoded in 3 bytes
 V0_WORDS_PER_BLOCK = 64  # Number of words per block
 V0_BLOCK_SIZE = BYTES_PER_WORD_18BIT * V0_WORDS_PER_BLOCK  # Block size (in bytes)
 
 V0_BLOCKS_PER_SURFACE = 8000  # Number of blocks on a surface
-V0_NUMINODEBLKS = 710  # Number of i-node blocks
-V0_FIRSTINODEBLK = 2  # First i-node block number
+V0_FILESYSTEM_SIZE = 6400  # Number of blocks in the filesystem
+V0_INODE_BLOCKS = 710  # Number of i-node blocks
+V0_FIRST_INODE_BLOCK = 2  # First i-node block number
 V0_INODE_SIZE = 12  # Inode size (in words)
 V0_INODES_PER_BLOCK = V0_WORDS_PER_BLOCK // V0_INODE_SIZE  # Number of inodes per block
 V0_DIRENT_SIZE = 8  # Size of a directory entry (in words)
 V0_SURFACE_SIZE = V0_BLOCKS_PER_SURFACE * V0_WORDS_PER_BLOCK * BYTES_PER_WORD_18BIT
+V0_FREE_BLOCKS_LIST_SIZE = 9  # Number of free blocks in a block (in words)
 
 V0_MAXINT = 0o777777  # Biggest unsigned integer
 
@@ -76,7 +88,7 @@ def get_v0_inode_block_offset(inode_num: int) -> t.Tuple[int, int]:
     """
     Return block number and offset for an inode number
     """
-    block_num = V0_FIRSTINODEBLK + (inode_num // V0_INODES_PER_BLOCK)
+    block_num = V0_FIRST_INODE_BLOCK + (inode_num // V0_INODES_PER_BLOCK)
     offset = V0_INODE_SIZE * (inode_num % V0_INODES_PER_BLOCK)
     return block_num, offset
 
@@ -106,14 +118,13 @@ class UNIXFile0(UNIXFile):
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         data = bytearray()
-        for i, next_block_number in enumerate(self.inode.blocks()):
-            if i >= block_number:
-                words = self.inode.fs.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + next_block_number)
-                t = from_18bit_words_to_bytes(words, self.file_mode)
-                data.extend(t)
-                number_of_blocks -= 1
-                if number_of_blocks == 0:
-                    break
+        # Get the blocks to be read
+        blocks = list(self.inode.blocks())[block_number : block_number + number_of_blocks]
+        # Read the blocks
+        for disk_block_number in blocks:
+            words = self.inode.fs.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + disk_block_number)
+            t = from_18bit_words_to_bytes(words, self.file_mode)
+            data.extend(t)
         return bytes(data)
 
     def get_size(self) -> int:
@@ -169,12 +180,39 @@ class UNIXInode0(UNIXInode):
         self.addr = words[position + V0_ADDR : position + V0_ADDR + V0_NUMBLKS]  # Indirect blocks or data blocks
         return self
 
-    def blocks(self) -> t.Iterator[int]:
+    def write(self) -> None:
+        """
+        Write inode
+        """
+        block_number, offset = get_v0_inode_block_offset(self.inode_num)
+        words = self.fs.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + block_number)
+        words[offset : offset + V0_INODE_SIZE] = self.to_words()
+        self.fs.write_18bit_words_block(V0_BLOCKS_PER_SURFACE + block_number, words)
+
+    def to_words(self) -> t.List[int]:
+        """
+        Convert inode data to 18bit words
+        """
+        words = [0] * V0_INODE_SIZE
+        words[V0_FLAGS] = self.flags
+        if self.uid == -1:
+            words[V0_UID] = V0_MAXINT
+        else:
+            words[V0_UID] = self.uid
+        words[V0_NLINKS] = V0_MAXINT - self.nlinks + 1
+        words[V0_SIZE] = self.size
+        words[V0_UNIQ] = self.uniq
+        words[V0_ADDR : V0_ADDR + V0_NUMBLKS] = self.addr
+        return words
+
+    def blocks(self, include_indexes: bool = False) -> t.Iterator[int]:
         if self.is_large:
             # Large file
             for block_number in self.addr:
                 if block_number == 0:
                     break
+                if include_indexes:
+                    yield block_number
                 for n in self.fs.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + block_number):
                     if n == 0:
                         break
@@ -261,6 +299,19 @@ class UNIXInode0(UNIXInode):
         else:
             return f"{self.inode_num:>4}# uid: {self.uid:>3}  nlinks: {self.nlinks:>3}  size: {self.size:>5} words  flags: {self.flags:o}"
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, UNIXInode0):
+            return False
+        return (
+            self.inode_num == other.inode_num
+            and self.uniq == other.uniq
+            and self.flags == other.flags
+            and self.uid == other.uid
+            and self.nlinks == other.nlinks
+            and self.size == other.size
+            and self.addr == other.addr
+        )
+
 
 class UNIXDirectoryEntry0(UNIXDirectoryEntry):
     inode: "UNIXInode0"
@@ -272,6 +323,148 @@ class UNIXDirectoryEntry0(UNIXDirectoryEntry):
         return UNIXFile0(self.inode, file_mode)
 
 
+class UNIX0Directory(UNIXDirectory):
+
+    @classmethod
+    def read(cls, fs: "UNIXFilesystem", inode: "UNIXInode") -> "UNIXDirectory":
+        """
+        Read the directory
+        """
+        self = UNIX0Directory(fs, inode)
+        if self.inode.isdir:
+            self.entries = []
+            data = inode.read_words()  # type: ignore
+            for i in range(0, len(data), V0_DIRENT_SIZE):
+                inum = data[i]
+                name = from_18bit_words_to_bytes(data[i + 1 : i + 2 + 4])
+                if inum > 0:
+                    name_ascii = name.decode("ascii", errors="ignore").rstrip(" \x00")
+                    self.entries.append((inum, name_ascii))
+        return self
+
+    def write(self) -> None:
+        """
+        Write the directory
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+
+class UNIX0FreeStorageMap:
+    """
+    Free-Storage Map
+
+    Each block in the free-storage map is structured as follows:
+
+    - the first word is the block number of the next block
+      in the free-storage map, or zero if this is the end of
+      the free-storage map;
+    - the next 9 words hold free block numbers,
+      or 0 (no block number).
+    """
+
+    fs: "UNIX0Filesystem"
+    map_blocks: t.List[int]  # List of map blocks
+    free_blocks: t.List[int]  # List of free blocks
+
+    def __init__(self, fs: "UNIX0Filesystem"):
+        self.fs = fs
+        self.map_blocks = []
+        self.free_blocks = []
+
+    @classmethod
+    def read(cls, fs: "UNIX0Filesystem") -> "UNIX0FreeStorageMap":
+        self = UNIX0FreeStorageMap(fs)
+        block_number = fs.storage_map_block
+        while block_number != 0:
+            self.map_blocks.append(block_number)
+            words = fs.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + block_number)
+            block_number = words[0]
+            self.free_blocks.extend(words[1 : V0_FREE_BLOCKS_LIST_SIZE + 1])
+        return self
+
+    def write(self) -> None:
+        # Check if the map blocks are enough
+        required_map_blocks = math.ceil(len(self.free_blocks) / V0_FREE_BLOCKS_LIST_SIZE)
+        for _ in range(len(self.map_blocks), required_map_blocks):
+            # Allocate a new block for the map
+            self.map_blocks.append(self.allocate(1)[0])
+        tmp = list(self.free_blocks)
+        for i, map_block_number in enumerate(self.map_blocks):
+            # Write the map block
+            words = [0] * V0_WORDS_PER_BLOCK
+            words[0] = self.map_blocks[i + 1] if i + 1 < len(self.map_blocks) else 0
+            for j in range(1, V0_FREE_BLOCKS_LIST_SIZE + 1):
+                if tmp:
+                    words[j] = tmp.pop(0)
+                else:
+                    words[j] = 0
+            self.fs.write_18bit_words_block(V0_BLOCKS_PER_SURFACE + map_block_number, words)
+
+    def is_free(self, block_number: int) -> bool:
+        """
+        Check if the block is free
+        """
+        return block_number in self.free_blocks
+
+    def set_free(self, block_number: int) -> None:
+        """
+        Mark the block as free
+        """
+        # Check if the block is already free
+        if block_number not in self.free_blocks:
+            # Update the free block list
+            for i in range(0, len(self.free_blocks)):
+                if self.free_blocks[i] == 0:
+                    self.free_blocks[i] = block_number
+                    return
+            # If there is no free block, add it to the end of the list
+            self.free_blocks.append(block_number)
+
+    def set_used(self, block_number: int) -> None:
+        """
+        Mark the block as used
+        """
+        # Check if the block is already used
+        if block_number in self.free_blocks:
+            # Update the free block list
+            for i in range(0, len(self.free_blocks)):
+                if self.free_blocks[i] == block_number:
+                    self.free_blocks[i] = 0
+                    break
+
+    def allocate(self, size: int) -> t.List[int]:
+        """
+        Allocate blocks
+        """
+        blocks = []
+        for block_number in self.free_blocks:
+            if block_number != 0:
+                blocks.append(block_number)
+                self.set_used(block_number)
+            if len(blocks) == size:
+                break
+        if len(blocks) < size:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        return blocks
+
+    def used(self) -> int:
+        """
+        Count the number of used blocks
+        """
+        return V0_FILESYSTEM_SIZE - self.free()
+
+    def free(self) -> int:
+        """
+        Count the number of free blocks
+        """
+        return len([x for x in self.free_blocks if x != 0])
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, UNIX0FreeStorageMap):
+            return False
+        return self.map_blocks == other.map_blocks and self.free_blocks == other.free_blocks
+
+
 class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
     """
     UNIX version 0 Filesystem
@@ -281,6 +474,8 @@ class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
     fs_description = "UNIX version 0"
     version: int = 0
     words_per_block = V0_WORDS_PER_BLOCK
+    directory_class = UNIX0Directory
+    storage_map_block: int = 0  # First block of the free-storage map
 
     @classmethod
     def mount(cls, file: "AbstractFile") -> "AbstractFilesystem":
@@ -295,10 +490,8 @@ class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
     def read_superblock(self) -> None:
         """Read superblock"""
         # The first word of block 0 points to the first block of the free-storage map.
-        # Each block in the free-storage map is structured as follows:
-        # - the first word is the block number of the next block in the free-storage map,
-        #   or zero if this is the end of the free-storage map.
-        # - The next nine words hold free block numbers, or zero (no block number).
+        words = self.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + V0_SUPER_BLOCK)
+        self.storage_map_block = words[0]
 
     def read_inode(self, inode_num: int) -> UNIXInode:
         """
@@ -307,19 +500,6 @@ class UNIX0Filesystem(UNIXFilesystem, BlockDevice18Bit):
         block_number, offset = get_v0_inode_block_offset(inode_num)
         words = self.read_18bit_words_block(V0_BLOCKS_PER_SURFACE + block_number)[offset : offset + V0_INODE_SIZE]
         return UNIXInode0.read(self, inode_num, words)
-
-    def list_dir(self, inode: UNIXInode0) -> t.List[t.Tuple[int, str]]:  # type: ignore
-        if not inode.isdir:
-            return []
-        files = []
-        data = inode.read_words()
-        for i in range(0, len(data), V0_DIRENT_SIZE):
-            inum = data[i]
-            name = from_18bit_words_to_bytes(data[i + 1 : i + 2 + 4])
-            if inum > 0:
-                name_ascii = name.decode("ascii", errors="ignore").rstrip(" \x00")
-                files.append((inum, name_ascii))
-        return files
 
     def read_dir_entries(self, dirname: str) -> t.Iterator["UNIXDirectoryEntry"]:
         inode: UNIXInode0 = self.get_inode(dirname)  # type: ignore

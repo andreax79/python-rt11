@@ -43,7 +43,10 @@ from .pdp11.files11fs import Files11Filesystem
 from .pdp11.rstsfs import RSTSFilesystem
 from .pdp11.rt11fs import RT11Filesystem
 from .pdp11.solofs import SOLOFilesystem
-from .unixfs import UNIX1Filesystem, UNIX5Filesystem, UNIX6Filesystem, UNIX7Filesystem
+from .unix.unix1fs import UNIX1Filesystem
+from .unix.unix5fs import UNIX5Filesystem
+from .unix.unix6fs import UNIX6Filesystem
+from .unix.unix7fs import UNIX7Filesystem
 
 __all__ = [
     "Volumes",

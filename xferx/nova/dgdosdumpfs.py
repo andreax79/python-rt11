@@ -27,7 +27,7 @@ from datetime import date, datetime
 
 from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, IMAGE, READ_FILE_FULL, dump_struct, filename_match
-from ..unixfs import unix_join, unix_split
+from ..unix.commons import unix_join, unix_split
 from .dgdosfs import (
     ATCHA,
     ATCON,

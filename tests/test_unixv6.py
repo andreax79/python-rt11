@@ -1,5 +1,5 @@
 from xferx.shell import Shell
-from xferx.unixfs import UNIXFilesystem
+from xferx.unix.unix6fs import UNIXFilesystem
 
 DSK = "tests/dsk/unixv6.dsk"
 
