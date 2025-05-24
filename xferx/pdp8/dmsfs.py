@@ -321,9 +321,10 @@ class DMSFile(AbstractFile):
         if self.closed or block_number < 0 or number_of_blocks < 0 or block_number + number_of_blocks > length:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         data = bytearray()
-        blocks = self.entry.get_blocks()
-        for i in range(block_number, block_number + number_of_blocks):
-            words = self.entry.dn.fs.read_12bit_words_block(blocks[i])
+        # Get the blocks to be read
+        blocks = list(self.entry.get_blocks())[block_number : block_number + number_of_blocks]
+        for disk_block_number in blocks:
+            words = self.entry.dn.fs.read_12bit_words_block(disk_block_number)
             # Skip the last word of the block (the link to the next block)
             t = from_12bit_words_to_bytes(words[:-1], self.file_mode)
             data.extend(t)
@@ -346,13 +347,15 @@ class DMSFile(AbstractFile):
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         words = from_bytes_to_12bit_words(buffer, self.file_mode)
-        blocks = self.entry.get_blocks()
-        for i in range(block_number, block_number + number_of_blocks):
+        # Get the blocks to be written
+        blocks = list(self.entry.get_blocks())[block_number : block_number + number_of_blocks]
+        # Write the blocks
+        for i, disk_block_number in enumerate(blocks):
             block_words = words[i * DATA_BLOCK_SIZE_WORD : (i + 1) * DATA_BLOCK_SIZE_WORD]
             block_words.extend([0] * (BLOCK_SIZE_WORD - len(block_words)))
             # The last word of the block is the link to the next block
             block_words[-1] = blocks[i + 1] if i + 1 < len(blocks) else 0
-            self.entry.dn.fs.write_12bit_words_block(blocks[i], block_words)
+            self.entry.dn.fs.write_12bit_words_block(disk_block_number, block_words)
 
     def get_size(self) -> int:
         """

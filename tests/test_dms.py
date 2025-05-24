@@ -343,3 +343,53 @@ def test_dms():
     shell.onecmd("init ou:", batch=True)
     with pytest.raises(Exception):
         fs.read_bytes("50.ascii")
+
+
+def test_dms_write_file():
+    shell = Shell(verbose=True)
+    shell.onecmd(f"copy {DSK} {DSK}.mo", batch=True)
+    shell.onecmd(f"mount t: /dms {DSK}.mo", batch=True)
+    fs = shell.volumes.get('T')
+    assert isinstance(fs, DMSFilesystem)
+
+    block_size = 256
+    blocks = 5
+    filename = "data.ascii"
+    data = b""
+    for i in range(0, blocks):
+        data += chr(i + 65).encode("ascii") * block_size
+    fs.write_bytes(filename, data)
+
+    data_read = fs.read_bytes(filename)
+    assert data_read == data
+
+    f = fs.open_file(filename)
+    for i in range(0, blocks):
+        block_data = f.read_block(i)
+        assert len(block_data) == block_size
+        assert block_data == chr(i + 65).encode("ascii") * block_size
+    f.close()
+
+    f = fs.open_file(filename)
+    for i in range(0, blocks):
+        tmp = chr(i + 85).encode("ascii") * block_size
+        f.write_block(tmp, i)
+    f.close()
+
+    f = fs.open_file(filename)
+    for i in range(0, blocks):
+        block_data = f.read_block(i)
+        assert block_data == chr(i + 85).encode("ascii") * block_size
+    f.close()
+
+    f = fs.open_file(filename)
+    for i in range(0, blocks // 2):
+        tmp = chr(i + 65).encode("ascii") * block_size * 2
+        f.write_block(tmp, i * 2, number_of_blocks=2)
+    f.close()
+
+    f = fs.open_file(filename)
+    for i in range(0, blocks // 2):
+        block_data = f.read_block(i * 2, number_of_blocks=2)
+        assert block_data == chr(i + 65).encode("ascii") * block_size * 2
+    f.close()
