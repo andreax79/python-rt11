@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 line-length = 120
 
 [tool.coverage.run]
-source = ["rt11"]
+source = ["xferx"]
 
 [tool.coverage.report]
 exclude_lines = [ "# pragma: no cover", "if TYPE_CHECKING:" ]

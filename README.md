@@ -23,6 +23,7 @@ XFERX is an utility for transferring files between various file systems.
 | OS/8              | Yes               | Yes               | Yes               | Yes               | N/A               |
 | 4k Disk Monitor   | Yes               | Yes               | Yes               | Yes               | N/A               |
 | CAPS-8            | Yes               | Yes               | Yes               | Yes               | N/A               |
+| TSS/8             | Yes               | Yes               | Yes               | Yes               | Yes               |
 | Apple II ProDOS   | Yes               | Yes               | Yes               | Yes               | Yes               |
 | Apple II Pascal   | Yes               | Yes               | Yes               | Yes               | N/A               |
 | Apple DOS 3.x     | Yes               | Yes               | Yes               | Yes               | N/A               |
@@ -215,7 +216,15 @@ PDP-8 4k Disk Monitor
 
 * [PDP-8 4K Disk Monitor System](https://svn.so-much-stuff.com/svn/trunk/pdp8/src/dec/dec-08-odsma/dec-08-odsma-a-d.pdf)
 * [PDP-8 Disc System Builder](https://svn.so-much-stuff.com/svn/trunk/pdp8/src/dec/dec-d8-sba/dec-d8-sbab-d.pdf)
-    
+
+PDP-8 TSS/8
+-------------
+ 
+
+* [TSS/8 TIME-SHARING SYSTEM USER'S GUIDE](https://bitsavers.org/pdf/dec/pdp8/tss8/DEC-T8-MRFB-D_UserGde_Feb70.pdf)
+* [System Manager's Guide for PDP-8E TSS 8.24 Monitor](https://bitsavers.org/pdf/dec/pdp8/tss8/TSS8_8.24_ManagersGuide.pdf)
+
+
 Apple II ProDOS / Apple III SOS (Sophisticated Operating System)
 ----------------------------------------------------------------
 

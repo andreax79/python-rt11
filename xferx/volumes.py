@@ -36,6 +36,7 @@ from .pdp7.decsysfs import DECSysFilesystem
 from .pdp7.unix0fs import UNIX0Filesystem
 from .pdp8.dmsfs import DMSFilesystem
 from .pdp8.os8fs import OS8Filesystem
+from .pdp8.tss8fs import TSS8Filesystem
 from .pdp11.caps11fs import CAPS11Filesystem
 from .pdp11.dos11fs import DOS11Filesystem
 from .pdp11.dos11magtapefs import DOS11MagTapeFilesystem
@@ -72,6 +73,7 @@ FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "rsts": RSTSFilesystem,
     "os8": OS8Filesystem,
     "dms": DMSFilesystem,
+    "tss8": TSS8Filesystem,
     "prodos": ProDOSFilesystem,
     "pascal": PascalFilesystem,
     "appledos": AppleDOSFilesystem,

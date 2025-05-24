@@ -22,5 +22,9 @@ appledos.dsk:
 solo.dsk:
 	../../xferx.py -vc "@solo.com"
 
+.PHONY: tss8.dsk
+tss8.dsk:
+	../../xferx.py -vc "@tss8.com"
+
 ciao.apple2:
 	cl65 -v -t apple2 -u __EXEHDR__ --start-addr 8192 ciao.apple2.c -o ciao.apple2
