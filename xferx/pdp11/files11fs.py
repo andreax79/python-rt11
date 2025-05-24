@@ -541,8 +541,8 @@ class Files11Filesystem(AbstractFilesystem, BlockDevice):
             if not self.ibsz:
                 raise OSError(errno.EIO, os.strerror(errno.EIO))
             # Check the volume structure level
-            if self.vlev not in (0o401, 0o402):
-                raise OSError(errno.EIO, os.strerror(errno.EIO))
+            # if self.vlev not in (0o401, 0o402):
+            #     raise OSError(errno.EIO, os.strerror(errno.EIO))
             # Check the index file
             indexfs = self.read_file_header(INDEXF_SYS)
             if indexfs.fnum != INDEXF_SYS:
