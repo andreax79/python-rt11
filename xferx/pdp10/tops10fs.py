@@ -27,7 +27,7 @@ import typing as t
 from dataclasses import dataclass, fields, field
 from datetime import datetime, timedelta, date
 
-from ..abstract import AbstractBlockFilesystem, AbstractDirectoryEntry, AbstractFile
+from ..abstract import AbstractBlockFilesystem, XFERXPath, AbstractFile
 from ..device.abstract import AbstractDevice
 from ..device.block_36bit import BlockDevice36Bit
 from ..commons import filename_match, READ_FILE_FULL, IMAGE, ASCII
@@ -108,7 +108,6 @@ class PPN(UIC):
 
 
 ANY_PPN = PPN.from_str("[*,*]")
-DEFAULT_PPN = PPN.from_str("[1,2]")
 MFD_PPN = PPN.from_str("[1,1]")
 
 
@@ -274,13 +273,13 @@ def tops10_canonical_filename(fullname: str, wildcard: bool = False) -> str:
     if fullname:
         fullname = (fullname or "").upper()
         try:
-            filename, extension = fullname.split(".", 1)
+            stem, extension = fullname.split(".", 1)
         except Exception:
-            filename = fullname
+            stem = fullname
             extension = "*" if wildcard else ""
-        filename = sixbit_to_ascii(ascii_to_sixbit(filename))
+        stem = sixbit_to_ascii(ascii_to_sixbit(stem))
         extension = sixbit_to_ascii(ascii_to_sixbit(extension[:3]))
-        fullanme = f"{filename}.{extension}"
+        fullanme = f"{stem}.{extension}"
     return f"{ppn or ''}{fullname}"
 
 
@@ -298,11 +297,10 @@ def tops10_split_fullname(ppn: PPN, fullname: t.Optional[str], wildcard: bool = 
 
 
 class TOPS10File(AbstractFile):
-    entry: "TOPS10DirectoryEntry"
+    entry: "TOPS10Path"
     file_mode: str
-    closed: bool
 
-    def __init__(self, entry: "TOPS10DirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "TOPS10Path", file_mode: t.Optional[str] = None):
         if file_mode is None:
             # Determine file mode based on the file extension
             if entry.extension in TEXT_EXTENSIONS:
@@ -312,7 +310,6 @@ class TOPS10File(AbstractFile):
         else:
             self.file_mode = file_mode
         self.entry = entry
-        self.closed = False
 
     def read_block(
         self,
@@ -363,12 +360,6 @@ class TOPS10File(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return str(self.entry)
 
@@ -406,11 +397,11 @@ class MasterFileDirectoryEntry:
         )
 
     @property
-    def filename(self) -> str:
+    def stem(self) -> str:
         return str(self.ppn)
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return str(self.ppn)
 
     def __str__(self) -> str:
@@ -433,7 +424,7 @@ class UserFileDirectoryEntry:
           +---------------+---------------+
     """
 
-    filename: str = field(metadata={"description": "File name"})
+    stem: str = field(metadata={"description": "File name"})
     extension: str = field(metadata={"description": "File extension"})
     cfp: int = field(metadata={"description": "Compressed file pointer to the file RIB"})
 
@@ -444,23 +435,23 @@ class UserFileDirectoryEntry:
         ufdname = words[position]
         ufdext = words[position + 1]
         return cls(
-            filename=sixbit_to_ascii(ufdname),
+            stem=sixbit_to_ascii(ufdname),
             extension=sixbit_to_ascii(left_half(ufdext) << 18),
             cfp=right_half(ufdext),
         )
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
 
     def __str__(self) -> str:
-        return f"{self.basename:<12} {self.cfp:06o}"
+        return f"{self.name:<12} {self.cfp:06o}"
 
     def __repr__(self) -> str:
-        return f"<UFD entry: {self.basename} {self.cfp:06o}>"
+        return f"<UFD entry: {self.name} {self.cfp:06o}>"
 
 
-class TOPS10DirectoryEntry(AbstractDirectoryEntry):
+class TOPS10Path(XFERXPath):
     fs: "TOPS10Filesystem"
     dir_entry: t.Union["UserFileDirectoryEntry", "MasterFileDirectoryEntry"]
     rib: "RetrievalInformationBlock"
@@ -480,7 +471,7 @@ class TOPS10DirectoryEntry(AbstractDirectoryEntry):
         cls,
         fs: "TOPS10Filesystem",
         dir_entry: t.Union["UserFileDirectoryEntry", "MasterFileDirectoryEntry"],
-    ) -> "TOPS10DirectoryEntry":
+    ) -> "TOPS10Path":
         rib = fs.read_rib(cfp=dir_entry.cfp)
         return cls(fs=fs, dir_entry=dir_entry, rib=rib)
 
@@ -512,24 +503,37 @@ class TOPS10DirectoryEntry(AbstractDirectoryEntry):
         return left_half(self.rib.ribver) >> 0o6
 
     @property
-    def filename(self) -> str:
-        return self.dir_entry.filename
+    def stem(self) -> str:
+        return self.dir_entry.stem
 
     @property
     def extension(self) -> str:
         return self.dir_entry.extension
 
     @property
-    def basename(self) -> str:
-        return self.dir_entry.basename
+    def name(self) -> str:
+        return self.dir_entry.name
 
     @property
     def fullname(self) -> str:
-        return f"{self.ppn or ''}{self.basename}"
+        if isinstance(self.dir_entry, MasterFileDirectoryEntry):
+            return f"{self.ppn or ''}"
+        else:
+            return f"{self.ppn or ''}{self.name}"
+
+    def is_dir(self) -> bool:
+        """
+        Is a directory entry
+        """
+        return isinstance(self.dir_entry, MasterFileDirectoryEntry)
 
     @property
-    def is_directory(self) -> bool:
-        return isinstance(self.dir_entry, MasterFileDirectoryEntry)
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        if self.is_dir():
+            return self.fs.get_root()
+        else:
+            return self.fs.get_root().get_entry(self.ppn)
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -560,6 +564,25 @@ class TOPS10DirectoryEntry(AbstractDirectoryEntry):
         Open a file
         """
         return TOPS10File(self, file_mode)
+
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        wildcard: bool = True,
+    ) -> t.Iterator["TOPS10Path"]:
+        """
+        Iterate over all entries in the User File Directory
+        """
+        if not self.is_dir():
+            raise NotADirectoryError(self.fullname)
+        if self.ppn == MFD_PPN:
+            mfd = self.fs.get_root()
+            yield from mfd.iterdir(pattern=pattern, include_all=include_all, wildcard=wildcard)
+        else:
+            for ufd_entry in self.fs.parse_ufd_entries(self.rib.read_words()):
+                if filename_match(ufd_entry.name, pattern, wildcard):
+                    yield TOPS10Path.read(self.fs, ufd_entry)
 
     def __str__(self) -> str:
         return self.fullname
@@ -1150,6 +1173,76 @@ class RetrievalInformationBlock:
         return buf.getvalue()
 
 
+class MasterFileDirectory(XFERXPath):
+    fs: "TOPS10Filesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "MasterFileDirectory":
+        """The logical parent"""
+        return self
+
+    @classmethod
+    def parse_mfd_entries(cls, words: t.Sequence[int]) -> t.Iterator[MasterFileDirectoryEntry]:
+        for position in range(0, len(words) - 1, MFD_ENTRY_SIZE):
+            if words[position] == 0 and words[position + 1] == 0:
+                break
+            entry = MasterFileDirectoryEntry.parse(words, position)
+            if entry is not None:
+                yield entry
+
+    def read_mfd_entries(
+        self,
+        ppn: PPN = ANY_PPN,
+    ) -> t.Iterator[MasterFileDirectoryEntry]:
+        """
+        Read Master File Directory entries
+        """
+        rib = self.fs.read_rib(block_number=self.fs.mfd_block)
+        for mfd_entry in self.parse_mfd_entries(rib.read_words()):
+            if ppn.match(mfd_entry.ppn):
+                yield mfd_entry
+
+    def get_entry(self, ppn: PPN) -> TOPS10Path:
+        """
+        Get a Master File Directory entry
+        """
+        for mfd_entry in self.read_mfd_entries(ppn=ppn):
+            return TOPS10Path.read(self.fs, mfd_entry)
+        raise FileNotFoundError(errno.ENOENT, f"File not found: {ppn}")
+
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        wildcard: bool = True,
+        ppn: PPN = ANY_PPN,
+    ) -> t.Iterator[TOPS10Path]:
+        """
+        Iterate over all entries in the Master File Directory
+        """
+        for mfd_entry in self.read_mfd_entries(ppn=ppn):
+            if filename_match(mfd_entry.name, pattern, wildcard):
+                yield TOPS10Path.read(self.fs, mfd_entry)
+
+
 class TOPS10Filesystem(AbstractBlockFilesystem):
     """
     TOPS-10 Filesystem
@@ -1191,7 +1284,7 @@ class TOPS10Filesystem(AbstractBlockFilesystem):
         **kwargs: t.Union[bool, str],
     ) -> "TOPS10Filesystem":
         self = cls(file_or_dev)
-        self.ppn = DEFAULT_PPN
+        self.ppn = MFD_PPN
         size = self.dev.get_size()
         if size % DISK_IMAGE_BLOCK_SIZE:
             raise OSError(errno.EIO, "Not a SIMH TOPS-10 word image")
@@ -1218,15 +1311,6 @@ class TOPS10Filesystem(AbstractBlockFilesystem):
         return TOPS10HomeBlock.parse(words)
 
     @classmethod
-    def parse_mfd_entries(cls, words: t.Sequence[int]) -> t.Iterator[MasterFileDirectoryEntry]:
-        for position in range(0, len(words) - 1, MFD_ENTRY_SIZE):
-            if words[position] == 0 and words[position + 1] == 0:
-                break
-            entry = MasterFileDirectoryEntry.parse(words, position)
-            if entry is not None:
-                yield entry
-
-    @classmethod
     def parse_ufd_entries(cls, words: t.Sequence[int]) -> t.Iterator[UserFileDirectoryEntry]:
         for position in range(0, len(words) - 1, UFD_ENTRY_SIZE):
             if words[position] == 0 and words[position + 1] == 0:
@@ -1245,18 +1329,6 @@ class TOPS10Filesystem(AbstractBlockFilesystem):
             words.extend(self.dev.read_words_block(block))
         return words
 
-    def read_mfd_entries(
-        self,
-        ppn: PPN = ANY_PPN,
-    ) -> t.Iterator[MasterFileDirectoryEntry]:
-        """
-        Read Master File Directory entries
-        """
-        rib = self.read_rib(block_number=self.mfd_block)
-        for mfd_entry in self.parse_mfd_entries(rib.read_words()):
-            if ppn.match(mfd_entry.ppn):
-                yield mfd_entry
-
     def filter_entries_list(
         self,
         pattern: t.Optional[str],
@@ -1264,46 +1336,55 @@ class TOPS10Filesystem(AbstractBlockFilesystem):
         expand: bool = True,  # expand directories
         wildcard: bool = True,
         ppn: t.Optional[PPN] = None,
-    ) -> t.Iterator["TOPS10DirectoryEntry"]:
+    ) -> t.Iterator[TOPS10Path]:
         if ppn is None:
             ppn = self.ppn
         ppn, filename_pattern = tops10_split_fullname(fullname=pattern, wildcard=wildcard, ppn=ppn)
-        # if pattern and not filename_pattern and not expand:
-        #     # If expand is False, check if the pattern is an PPN
-        #     try:
-        #         ppn = PPN.from_str(pattern)
-        #         yield from self.read_mfd_entries(ppn=ppn)  # TODO
-        #         return
-        #     except Exception:
-        #         pass
+        if pattern and not filename_pattern and not expand:
+            # If expand is False, check if the pattern is an PPN
+            try:
+                ppn = PPN.from_str(pattern)
+                yield from self.get_root().iterdir(ppn=ppn)
+                return
+            except Exception:
+                pass
         if ppn == MFD_PPN:
-            for mfd_entry in self.read_mfd_entries():
-                if filename_match(mfd_entry.basename, filename_pattern, wildcard):
-                    yield TOPS10DirectoryEntry.read(self, mfd_entry)
-            return
-
-        for mfd_entry in self.read_mfd_entries(ppn=ppn):
-            rib = self.read_rib(cfp=mfd_entry.cfp)
-            for ufd_entry in self.parse_ufd_entries(rib.read_words()):
-                if filename_match(ufd_entry.basename, filename_pattern, wildcard):
-                    yield TOPS10DirectoryEntry.read(self, ufd_entry)
+            mfd = self.get_root()
+            yield from mfd.iterdir(pattern=filename_pattern, wildcard=wildcard)
+        else:
+            for mfd_entry in self.get_root().read_mfd_entries(ppn=ppn):
+                rib = self.read_rib(cfp=mfd_entry.cfp)
+                for ufd_entry in self.parse_ufd_entries(rib.read_words()):
+                    if filename_match(ufd_entry.name, filename_pattern, wildcard):
+                        yield TOPS10Path.read(self, ufd_entry)
 
     @property
-    def entries_list(self) -> t.Iterator["TOPS10DirectoryEntry"]:
+    def entries_list(self) -> t.Iterator[TOPS10Path]:
         yield from self.filter_entries_list(pattern=None, wildcard=True, ppn=self.ppn)
 
-    def get_file_entry(self, fullname: str) -> "TOPS10DirectoryEntry":
+    def get_file_entry(self, fullname: str) -> TOPS10Path:
         """
         Get the directory entry for a file
         """
         fullname = tops10_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        ppn, basename = tops10_split_fullname(fullname=fullname, wildcard=False, ppn=self.ppn)
+        ppn, name = tops10_split_fullname(fullname=fullname, wildcard=False, ppn=self.ppn)
+        dir_entry = self.get_root().get_entry(ppn=ppn)
+        if not name:
+            # If the name is empty, it means the fullname is just a PPN,
+            # so we return the MFD entry for that PPN
+            return dir_entry
         try:
-            return next(self.filter_entries_list(basename, wildcard=False, ppn=ppn))
+            return next(dir_entry.iterdir(pattern=name, wildcard=False))
         except StopIteration:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> MasterFileDirectory:
+        """
+        Get the root directory
+        """
+        return MasterFileDirectory(self)
 
     def show_accounts(self, volume_id: str, options: t.Dict[str, bool]) -> None:
         """
@@ -1319,19 +1400,19 @@ class TOPS10Filesystem(AbstractBlockFilesystem):
         """
         files = 0
         blocks = 0
-        ppn, basename = tops10_split_fullname(fullname=pattern, wildcard=True, ppn=self.ppn)
-        for entry in self.filter_entries_list(basename, wildcard=True, ppn=ppn):
-            if entry.is_directory:
-                filename = f"{entry.ppn.group:>6o},{entry.ppn.user:<7o}"
+        ppn, name = tops10_split_fullname(fullname=pattern, wildcard=True, ppn=self.ppn)
+        for entry in self.filter_entries_list(name, wildcard=True, ppn=ppn):
+            if entry.is_dir():
+                stem = f"{entry.ppn.group:>6o},{entry.ppn.user:<7o}"
             else:
-                filename = f"{entry.filename:<6}  {entry.extension:<3}"
+                stem = f"{entry.stem:<6}  {entry.extension:<3}"
             creation_date = entry.creation_date if entry.creation_date else "(undated)"
             blocks += entry.get_length()
             files += 1
             version = f"{entry.last_programmer:o}({entry.version:o})" if entry.version else ""
             post = f"    {volume_id}:   {ppn}" if files == 1 else ""
             sys.stdout.write(
-                f"{filename} "
+                f"{stem} "
                 f"{entry.get_length():>5}  "
                 f"<{entry.access_code:>03o}>  "
                 f"{creation_date} "
@@ -1357,11 +1438,11 @@ class TOPS10Filesystem(AbstractBlockFilesystem):
             sys.stdout.write(rib.examine())
             sys.stdout.write("\nMFD entries:\n")
             sys.stdout.write("  PPN             CFP\n")
-            for mfd_entry in self.read_mfd_entries():
+            for mfd_entry in self.get_root().read_mfd_entries():
                 sys.stdout.write(f"  {mfd_entry}\n")
         else:
-            ppn, basename = tops10_split_fullname(fullname=arg, wildcard=False, ppn=self.ppn)
-            if basename:
+            ppn, name = tops10_split_fullname(fullname=arg, wildcard=False, ppn=self.ppn)
+            if name:
                 entry = self.get_file_entry(arg)
                 sys.stdout.write(entry.rib.examine())
                 sys.stdout.write(f"Length: {entry.get_length()}.\n")
@@ -1373,44 +1454,29 @@ class TOPS10Filesystem(AbstractBlockFilesystem):
                 sys.stdout.write(f"RIB block number: {entry.rib.ribslf}.\n")
                 sys.stdout.write(f"Blocks: {entry.rib.get_blocks()}\n")
             else:
-                for mfd_entry in self.read_mfd_entries(ppn=ppn):
+                entry = self.get_file_entry(arg)
+                for mfd_entry in self.get_root().read_mfd_entries(ppn=ppn):
                     rib = self.read_rib(cfp=mfd_entry.cfp)
                     sys.stdout.write(rib.examine())
                     sys.stdout.write("\nFile entries:\n")
                     for ufd_entry in self.parse_ufd_entries(rib.read_words()):
                         sys.stdout.write(f"  {ufd_entry}\n")
 
-    def get_size(self) -> int:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
-        Get filesystem size in bytes
+        Change the current Project-Programmer Number (PPN)
         """
-        return self.dev.get_size()
-
-    def chdir(self, fullname: str) -> bool:
-        """
-        Change the current User Identification Code
-        """
-        try:
-            self.ppn = PPN.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
+        if entry is None:
+            self.ppn = MFD_PPN
+        else:
+            assert isinstance(entry, TOPS10Path) and entry.is_dir()
+            self.ppn = entry.ppn
 
     def get_pwd(self) -> str:
         """
         Get the current Project-Programmer Number
         """
         return str(self.ppn)
-
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the given path is an PPN
-        """
-        try:
-            PPN.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
 
     def path_join(self, path: str, *paths: str) -> str:
         """

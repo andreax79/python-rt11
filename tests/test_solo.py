@@ -36,6 +36,9 @@ def test_solo_write():
     shell.onecmd(f"mount ou: /solo {DSK}.mo", batch=True)
     fs = shell.volumes.get_volume('OU')
     assert isinstance(fs, SOLOFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     d = fs.get_file_entry("50.TXT")
     assert d is not None

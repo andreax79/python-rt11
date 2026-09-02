@@ -24,7 +24,7 @@ import sys
 import typing as t
 from dataclasses import dataclass
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import (
     ASCII,
     IMAGE,
@@ -48,7 +48,7 @@ from .iops import (
 __all__ = [
     "ADSSFilesystem",
     "ADSSFile",
-    "ADSSDirectoryEntry",
+    "ADSSPath",
 ]
 
 # PDP-9 ADVANCED SOFTWARE SYSTEM MONITORS, Pag 95
@@ -125,8 +125,8 @@ def adss_split_ext(fullname: str) -> t.Tuple[str, str]:
     """
     fullname = fullname.upper()
     try:
-        filename, extension = fullname.replace(" ", ";").split(";", 1)
-        return filename.strip(), extension.strip()
+        stem, extension = fullname.replace(" ", ";").split(";", 1)
+        return stem.strip(), extension.strip()
     except Exception:
         return fullname, ""
 
@@ -141,10 +141,10 @@ def adss_canonical_filename(fullname: str, wildcard: bool = False) -> str:
     with the exception of a space, ":", ";", ",", "(" and ")".
     Filename and extension are separated by a ";"
     """
-    filename, extension = adss_split_ext(fullname)
-    filename = sixbit_to_ascii(ascii_to_sixbit(filename[0:3])) + sixbit_to_ascii(ascii_to_sixbit(filename[3:6]))
+    stem, extension = adss_split_ext(fullname)
+    stem = sixbit_to_ascii(ascii_to_sixbit(stem[0:3])) + sixbit_to_ascii(ascii_to_sixbit(stem[3:6]))
     extension = sixbit_to_ascii(ascii_to_sixbit(extension))
-    return f"{filename};{extension}"
+    return f"{stem};{extension}"
 
 
 def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
@@ -160,14 +160,12 @@ def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
 
 
 class ADSSFile(AbstractFile):
-    entry: "ADSSDirectoryEntry"
+    entry: "ADSSPath"
     file_mode: str  # ASCII of IMAGE
-    closed: bool
 
-    def __init__(self, entry: "ADSSDirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "ADSSPath", file_mode: t.Optional[str] = None):
         self.entry = entry
-        self.file_mode = file_mode or get_file_mode(entry.basename)
-        self.closed = False
+        self.file_mode = file_mode or get_file_mode(entry.name)
 
     def read_block(
         self,
@@ -277,17 +275,11 @@ class ADSSFile(AbstractFile):
         """
         return (WORDS_PER_BLOCK - 1) * 3
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class ADSSDirectoryEntry(AbstractDirectoryEntry):
+class ADSSPath(XFERXPath):
     """
     Directory Entry
 
@@ -307,7 +299,7 @@ class ADSSDirectoryEntry(AbstractDirectoryEntry):
     fs: "ADSSFilesystem"
     directory: "ADSSDirectory"
     file_number: int = 0  # File number in the directory
-    filename: str  # Filename
+    stem: str  # Filename
     extension: str = ""  # File extension
     raw_data_link: int = 0  # Raw data link (active bit, block number)
 
@@ -316,24 +308,22 @@ class ADSSDirectoryEntry(AbstractDirectoryEntry):
         self.directory = directory
 
     @classmethod
-    def new(cls, directory: "ADSSDirectory", file_number: int) -> "ADSSDirectoryEntry":
+    def new(cls, directory: "ADSSDirectory", file_number: int) -> "ADSSPath":
         """
         Create a new empty Directory Entry
         """
         self = cls(directory)
         self.file_number = file_number
-        self.filename = ""
+        self.stem = ""
         self.extension = ""
         self.raw_data_link = 0
         return self
 
     @classmethod
-    def read(
-        cls, directory: "ADSSDirectory", words: t.List[int], file_number: int, position: int
-    ) -> "ADSSDirectoryEntry":
+    def read(cls, directory: "ADSSDirectory", words: t.List[int], file_number: int, position: int) -> "ADSSPath":
         self = cls(directory)
         self.file_number = file_number
-        self.filename = sixbit_to_ascii(words[position]) + sixbit_to_ascii(words[position + 1])
+        self.stem = sixbit_to_ascii(words[position]) + sixbit_to_ascii(words[position + 1])
         self.extension = sixbit_to_ascii(words[position + 2])
         self.raw_data_link = words[position + 3]
         return self
@@ -343,8 +333,8 @@ class ADSSDirectoryEntry(AbstractDirectoryEntry):
         Dump the directory entry to words
         """
         return [
-            ascii_to_sixbit(self.filename[0:3]),
-            ascii_to_sixbit(self.filename[3:6]),
+            ascii_to_sixbit(self.stem[0:3]),
+            ascii_to_sixbit(self.stem[3:6]),
             ascii_to_sixbit(self.extension),
             self.raw_data_link,
         ]
@@ -391,11 +381,16 @@ class ADSSDirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return self.basename
+        return self.name
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename};{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem};{self.extension}"
+
+    @property
+    def parent(self) -> "ADSSDirectory":
+        """Parent directory"""
+        return self.fs.get_root()
 
     def get_file_bitmap(self) -> "ADSSBitmap":
         """
@@ -547,7 +542,7 @@ class ADSSDirectoryEntry(AbstractDirectoryEntry):
 
     def read_bytes(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> bytes:
         """Get the content of the file"""
-        file_mode = file_mode or get_file_mode(self.basename)
+        file_mode = file_mode or get_file_mode(self.name)
         result = bytearray()
         for block in self.get_block_contents():
             if self.is_sys:
@@ -557,10 +552,10 @@ class ADSSDirectoryEntry(AbstractDirectoryEntry):
         return bytes(result)
 
     def __str__(self) -> str:
-        return f"{self.file_number:>2}  {self.filename:<6} {self.extension:<3}  {self.raw_data_link:06o} {'N' if self.is_empty else 'Y'}  {self.block_number:4}"
+        return f"{self.file_number:>2}  {self.stem:<6} {self.extension:<3}  {self.raw_data_link:06o} {'N' if self.is_empty else 'Y'}  {self.block_number:4}"
 
 
-class ADSSDirectory:
+class ADSSDirectory(XFERXPath):
     """
     Directory
 
@@ -587,11 +582,34 @@ class ADSSDirectory:
     """
 
     fs: "ADSSFilesystem"
-    entries: t.List["ADSSDirectoryEntry"]
+    entries: t.List[ADSSPath]
     command_table: "CommandTable"  # Command table for system tapes
 
     def __init__(self, fs: "ADSSFilesystem"):
         self.fs = fs
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "ADSSDirectory":
+        """Parent directory"""
+        return self
 
     @classmethod
     def new(cls, fs: "ADSSFilesystem") -> "ADSSDirectory":
@@ -600,7 +618,7 @@ class ADSSDirectory:
         """
         self = cls(fs)
         self.command_table = CommandTable.new(fs)
-        self.entries = [ADSSDirectoryEntry.new(self, i) for i in range(DIRECTORY_ENTRIES)]
+        self.entries = [ADSSPath.new(self, i) for i in range(DIRECTORY_ENTRIES)]
         return self
 
     @classmethod
@@ -613,7 +631,7 @@ class ADSSDirectory:
         self.entries = []
         words = self.fs.read_words_block(DIRECTORY_BLOCK)
         for i, position in enumerate(range(BITMAP_WORDS, len(words), DIRECTORY_ENTRY_WORDS)):
-            entry = ADSSDirectoryEntry.read(self, words, i, position)
+            entry = ADSSPath.read(self, words, i, position)
             self.entries.append(entry)
         # On a system tape, read the command table
         if self.fs.is_system_tape:
@@ -634,7 +652,7 @@ class ADSSDirectory:
         assert len(words) == 256
         self.fs.write_words_block(DIRECTORY_BLOCK, words)
 
-    def get_file_entry(self, fullname: str) -> "ADSSDirectoryEntry":
+    def get_file_entry(self, fullname: str) -> ADSSPath:
         """
         Get a file entry by its fullname
         """
@@ -644,7 +662,7 @@ class ADSSDirectory:
                 return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
-    def get_free_entry(self) -> t.Optional[ADSSDirectoryEntry]:
+    def get_free_entry(self) -> t.Optional[ADSSPath]:
         """
         Get the first free entry in the directory
         """
@@ -652,6 +670,14 @@ class ADSSDirectory:
             if entry.is_empty:
                 return entry
         return None
+
+    def iterdir(self, include_all: bool = False) -> t.Iterator[ADSSPath]:
+        """
+        Iterate over the directory entries
+        """
+        for entry in self.entries:
+            if include_all or not entry.is_empty:
+                yield entry
 
 
 class CommandTableEntry:
@@ -680,7 +706,7 @@ class CommandTableEntry:
     command_table: "CommandTable"
     file_number: int  # File number in the directory
     is_empty: bool
-    filename: str  # Filename
+    stem: str  # Filename
     block_number: int  # First file block number
     length: int  # Length in blocks
     load_address: int
@@ -697,7 +723,7 @@ class CommandTableEntry:
         self = cls(command_table)
         self.file_number = file_number
         self.is_empty = not bool(words[position])
-        self.filename = sixbit_to_ascii(words[position]) + sixbit_to_ascii(words[position + 1])
+        self.stem = sixbit_to_ascii(words[position]) + sixbit_to_ascii(words[position + 1])
         self.block_number = words[position + 2]
         self.length = words[position + 3]
         self.load_address = words[position + 4]
@@ -707,11 +733,11 @@ class CommandTableEntry:
 
     @property
     def fullname(self) -> str:
-        return self.basename
+        return self.name
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename};SYS"
+    def name(self) -> str:
+        return f"{self.stem};SYS"
 
     def get_block_contents(self) -> t.Iterator[BlockContent]:
         """
@@ -768,7 +794,7 @@ class CommandTableEntry:
 
     def __str__(self) -> str:
         return (
-            f"{self.file_number:>2}  {self.filename:<6}  {self.block_number:<3}  {self.length:>5}  "
+            f"{self.file_number:>2}  {self.stem:<6}  {self.block_number:<3}  {self.length:>5}  "
             f"{'N' if self.is_empty else 'Y'} {self.load_address:06o}  {self.program_size:06o}  {self.start_address:06o}"
         )
 
@@ -1109,17 +1135,9 @@ class ADSSFilesystem(AbstractFilesystem):
         """
         self.dev.write_words_block(block, words)
 
-    def read_dir_entries(self) -> t.Iterator["ADSSDirectoryEntry"]:
-        """
-        Read directory entries
-        """
-        yield from ADSSDirectory.read(self).entries
-
     @property
-    def entries_list(self) -> t.Iterator["ADSSDirectoryEntry"]:
-        for entry in self.read_dir_entries():
-            if not entry.is_empty:
-                yield entry
+    def entries_list(self) -> t.Iterator[ADSSPath]:
+        yield from self.get_root().iterdir(include_all=False)
 
     def filter_entries_list(
         self,
@@ -1127,13 +1145,13 @@ class ADSSFilesystem(AbstractFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["ADSSDirectoryEntry"]:
+    ) -> t.Iterator[ADSSPath]:
         pattern = adss_canonical_filename(pattern, wildcard=True) if pattern else ""
-        for entry in self.read_dir_entries():
-            if not entry.is_empty and filename_match(entry.basename, pattern, wildcard):
+        for entry in self.get_root().iterdir(include_all=include_all):
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> "ADSSDirectoryEntry":
+    def get_file_entry(self, fullname: str) -> ADSSPath:
         """
         Get the directory entry for a file
         """
@@ -1141,12 +1159,18 @@ class ADSSFilesystem(AbstractFilesystem):
             return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
+    def get_root(self) -> "ADSSDirectory":
+        """
+        Get the root directory
+        """
+        return ADSSDirectory.read(self)
+
     def create_file(
         self,
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> "ADSSDirectoryEntry":
+    ) -> ADSSPath:
         """
         Create a new file with a given length in number of blocks
         """
@@ -1161,12 +1185,11 @@ class ADSSFilesystem(AbstractFilesystem):
             entry.delete()
         except FileNotFoundError:
             # Seach for a free entry in the directory
-            directory = ADSSDirectory.read(self)
-            entry = directory.get_free_entry()  # type: ignore
+            entry = self.get_root().get_free_entry()  # type: ignore
             if entry is None:
                 raise OSError(errno.ENOSPC, "Directory full")
-            filename, extension = adss_split_ext(fullname)
-            entry.filename = filename
+            stem, extension = adss_split_ext(fullname)
+            entry.stem = stem
             entry.extension = extension
         # Allocate space and write the entry
         entry.allocate(number_of_blocks)
@@ -1203,7 +1226,7 @@ class ADSSFilesystem(AbstractFilesystem):
         sys.stdout.write("DIRECTORY LISTING\n")
         for x in entries:
             if not x.is_empty:
-                sys.stdout.write(f"{x.filename:<6} {x.extension:<3}  {x.block_number:>4o}\n")
+                sys.stdout.write(f"{x.stem:<6} {x.extension:<3}  {x.block_number:>4o}\n")
         bitmap = ADSSBitmap.read(self)
         sys.stdout.write(f"{bitmap.free():<4o} FREE BLOCKS\n")
 
@@ -1222,7 +1245,7 @@ class ADSSFilesystem(AbstractFilesystem):
             entries = self.filter_entries_list(arg, wildcard=True)
             for entry in entries:
                 sys.stdout.write(f"File number:              {entry.file_number}\n")
-                sys.stdout.write(f"Filename:                 {entry.filename}\n")
+                sys.stdout.write(f"Filename:                 {entry.stem}\n")
                 sys.stdout.write(f"Extension:                {entry.extension}\n")
                 sys.stdout.write(f"Raw data link:            {entry.raw_data_link:06o}\n")
                 sys.stdout.write(f"Empty:                    {'Y' if entry.is_empty else 'N'}\n")
@@ -1240,21 +1263,20 @@ class ADSSFilesystem(AbstractFilesystem):
                 blocks = str(list(entry.get_blocks()))
                 sys.stdout.write(f"Blocks:                   {blocks}\n")
                 sys.stdout.write("\n")
-                if entry.basename == SYSBLK_SYS:
+                if entry.name == SYSBLK_SYS:
                     # Display the command table
                     sys.stdout.write("Command Table:\n\n")
                     sys.stdout.write("Num  Filename  Block  Length  Load Addr  Prog Size  Start Addr\n")
                     sys.stdout.write("---  --------  -----  ------  ---------  ---------  ----------\n")
                     for command_entry in entry.directory.command_table.entries:
                         sys.stdout.write(
-                            f"{command_entry.file_number:>2}   {command_entry.filename:<6}   "
+                            f"{command_entry.file_number:>2}   {command_entry.stem:<6}   "
                             f"{command_entry.block_number:>6}  {command_entry.length:>6}     "
                             f"{command_entry.load_address:06o}     {command_entry.program_size:06o}      "
                             f"{command_entry.start_address:06o}\n"
                         )
                         # f"{'N' if command_entry.is_empty else 'Y'} "
         else:
-            entries = self.read_dir_entries()
             directory = ADSSDirectory.read(self)
             bitmap = ADSSBitmap.read(self)
             user_files = len([x for x in directory.entries if not x.is_empty and not x.is_sys])
@@ -1275,14 +1297,14 @@ class ADSSFilesystem(AbstractFilesystem):
                         ftype = '  -'
                     elif entry.is_sys:
                         ftype = 'System'
-                    elif get_file_mode(entry.basename) == IMAGE:
+                    elif get_file_mode(entry.name) == IMAGE:
                         ftype = 'Binary'
                     else:
                         ftype = 'ASCII'
                     block_number = f"{entry.block_number:4d}" if not entry.is_empty else "-"
                     length = f"{entry.get_length():4d}" if not entry.is_empty else "-"
                     sys.stdout.write(
-                        f"{entry.file_number:>2}  {entry.filename:>6};{entry.extension:<3}  "
+                        f"{entry.file_number:>2}  {entry.stem:>6};{entry.extension:<3}  "
                         f"{entry.raw_data_link:06o} {block_number:>8}  {length:>4}  {ftype}\n"
                     )
 
@@ -1333,9 +1355,3 @@ class ADSSFilesystem(AbstractFilesystem):
         # Create an empty directory
         ADSSDirectory.new(self).write()
         return self
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()

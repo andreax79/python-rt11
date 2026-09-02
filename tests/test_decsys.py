@@ -8,7 +8,7 @@ from xferx.pdp7.codes import (
     str_to_fiodec,
 )
 from xferx.pdp7.decsysfs import (  # LibraryDirectory,
-    DECSysDirectoryEntry,
+    DECSysPath,
     DECSysFilesystem,
     ProgramDirectory,
     from_18bit_words_to_bytes,
@@ -61,9 +61,13 @@ def test_baudot():
 
 def test_directory_entry():
     fs = MockFilesytem({})
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
+
     directory = ProgramDirectory(fs)
     t = [1, 115084, 10252, 7, 64]
-    entry = DECSysDirectoryEntry.read(directory, t, 0)
+    entry = DECSysPath.read(directory, t, 0)
     assert entry.file_type == "SYSTEM"
     assert entry.filename == "CONTEN"
     assert entry.block_number == 7
@@ -71,7 +75,7 @@ def test_directory_entry():
     assert entry.to_words() == t
 
     t = [1, 76838, 132224, 9, 64]
-    entry = DECSysDirectoryEntry.read(directory, t, 0)
+    entry = DECSysPath.read(directory, t, 0)
     assert entry.file_type == "SYSTEM"
     assert entry.filename == "LABEL"
     assert entry.block_number == 9
@@ -79,7 +83,7 @@ def test_directory_entry():
     assert entry.to_words() == t
 
     t = [2, 10280, 8192, 146, 147, 148]
-    entry = DECSysDirectoryEntry.read(directory, t, 0)
+    entry = DECSysPath.read(directory, t, 0)
     assert entry.file_type == "WORKING"
     assert entry.filename == "TEST"
     assert entry.fortran_block_number == 146

@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 from datetime import date
 from enum import Enum
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, IMAGE, READ_FILE_FULL, filename_match
 from ..device.abstract import AbstractDevice
 from ..device.block_18bit import (
@@ -47,7 +47,7 @@ from .opcodes import disassemble_pdp7
 
 __all__ = [
     "DECSysFile",
-    "DECSysDirectoryEntry",
+    "DECSysPath",
     "DECSysFilesystem",
 ]
 
@@ -157,17 +157,15 @@ def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
 
 
 class DECSysFile(AbstractFile):
-    entry: "DECSysDirectoryEntry"
+    entry: "DECSysPath"
     file_mode: str  # ASCII of IMAGE
-    closed: bool
 
-    def __init__(self, entry: "DECSysDirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "DECSysPath", file_mode: t.Optional[str] = None):
         self.entry = entry
         if file_mode is not None:
             self.file_mode = file_mode
         else:
             self.file_mode = entry.raw_file_type.file_mode
-        self.closed = False
 
     def read_block(
         self,
@@ -188,7 +186,7 @@ class DECSysFile(AbstractFile):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         data = bytearray()
         i_blocks = list(enumerate(self.entry.get_blocks()))[block_number : block_number + number_of_blocks]
-        if self.entry.is_contiguous:
+        if self.entry.is_contiguous():
             # System files (contiguous) - the first block starts with 2 words header:
             # word 0 - two's complement of number of words
             # word 1 - initial load address – 1
@@ -239,7 +237,7 @@ class DECSysFile(AbstractFile):
         """
         blocks = list(self.entry.get_blocks())
         i_blocks = list(enumerate(blocks))[block_number : block_number + number_of_blocks]
-        if self.entry.is_contiguous:
+        if self.entry.is_contiguous():
             # System files (contiguous)
             # word 0 - two's complement of number of words
             # word 1 - initial load address – 1
@@ -282,22 +280,16 @@ class DECSysFile(AbstractFile):
         """
         Get file block size in bytes
         """
-        if self.entry.is_contiguous:
+        if self.entry.is_contiguous():
             return WORDS_PER_BLOCK * 3
         else:
             return LINKED_FILE_WORDS_PER_BLOCK * 3
-
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
 
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class DECSysDirectoryEntry(AbstractDirectoryEntry):
+class DECSysPath(XFERXPath):
     """
     System file Directory Entry
     ---------------------------
@@ -371,7 +363,7 @@ class DECSysDirectoryEntry(AbstractDirectoryEntry):
         self.fs = directory.fs
 
     @classmethod
-    def read(cls, directory: "DECSysAbstractDirectory", words: t.List[int], position: int) -> "DECSysDirectoryEntry":
+    def read(cls, directory: "DECSysAbstractDirectory", words: t.List[int], position: int) -> "DECSysPath":
         if words[position] == FileType.SYSTEM.value:
             # System file
             return SystemDirectoryEntry.read(directory, words, position)
@@ -392,11 +384,15 @@ class DECSysDirectoryEntry(AbstractDirectoryEntry):
         return f"{self.raw_file_type.short},{self.filename}"
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         """Filename"""
         return self.filename
 
     @property
+    def parent(self) -> "DECSysRootDirectory":
+        """Parent directory"""
+        return self.fs.get_root()
+
     def is_contiguous(self) -> bool:
         """
         Return True if the file is contiguous
@@ -528,7 +524,7 @@ class DECSysDirectoryEntry(AbstractDirectoryEntry):
             )
 
 
-class KeyboardMonitorEntry(DECSysDirectoryEntry):
+class KeyboardMonitorEntry(DECSysPath):
     """
     Keyboard Monitor Directory Entry
 
@@ -554,7 +550,7 @@ class KeyboardMonitorEntry(DECSysDirectoryEntry):
         return f"{self.filename:<15} Type: {self.file_type}  Block: {self.block_number:04}  Addr: {self.decsys_starting_address:>06}"
 
 
-class SystemDirectoryEntry(DECSysDirectoryEntry):
+class SystemDirectoryEntry(DECSysPath):
     """
     System file Directory Entry
     ----------------------------
@@ -628,7 +624,7 @@ class SystemDirectoryEntry(DECSysDirectoryEntry):
         return f"{self.filename:<15} Type: {self.file_type}  Block: {self.block_number:04}  Addr: {self.decsys_starting_address:>06}"
 
 
-class WorkingDirectoryEntry(DECSysDirectoryEntry):
+class WorkingDirectoryEntry(DECSysPath):
     """
     User file Directory Entry
     -------------------------
@@ -708,7 +704,7 @@ class WorkingDirectoryEntry(DECSysDirectoryEntry):
         return f"{self.filename:<15} Type: {self.file_type}  {addr}"
 
 
-class LibraryDirectoryEntry(DECSysDirectoryEntry):
+class LibraryDirectoryEntry(DECSysPath):
     """
     Library Directory Entry
     -----------------------
@@ -780,7 +776,7 @@ class DECSysAbstractDirectory(ABC):
     """
 
     fs: "DECSysFilesystem"
-    entries: t.List["DECSysDirectoryEntry"]
+    entries: t.List["DECSysPath"]
 
     def __init__(self, fs: "DECSysFilesystem"):
         self.fs = fs
@@ -837,7 +833,7 @@ class ProgramDirectory(DECSysAbstractDirectory):
         self.first_free_block = words[255]  # First free block number
         position = 1
         while position < len(words) - 5 and position < dir_length:
-            entry = DECSysDirectoryEntry.read(self, words, position)
+            entry = DECSysPath.read(self, words, position)
             position += entry.entry_length
             self.entries.append(entry)
         return self
@@ -901,6 +897,45 @@ class LibraryDirectory(DECSysAbstractDirectory):
         words[0] = len(words) - 1  # Directory length, in words
         words += [0] * (256 - len(words))  # pad
         self.fs.write_words_block(LIBRARY_DIRECTORY_BLOCK, words)
+
+
+class DECSysRootDirectory(XFERXPath):
+    fs: "DECSysFilesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "DECSysRootDirectory":
+        """Parent directory"""
+        return self
+
+    def iterdir(self) -> t.Iterator["DECSysPath"]:
+        """
+        Read directory entries
+
+        https://simh.trailing-edge.com/docs/decsys.pdf  Pag 2
+        https://bitsavers.org/pdf/dec/pdp7/DEC-07-SDDA-D_DECSYS7_Nov66.pdf  Pag 12
+        """
+        program_directory = ProgramDirectory.read(self.fs)
+        yield from program_directory.entries
+        library_directory = LibraryDirectory.read(self.fs)
+        yield from library_directory.entries
 
 
 class DECSysFilesystem(AbstractFilesystem):
@@ -1030,21 +1065,9 @@ class DECSysFilesystem(AbstractFilesystem):
         words += [0] * (WORDS_PER_BLOCK - len(words))
         self.write_words_block(TAPE_LABEL_BLOCK, words)
 
-    def read_dir_entries(self) -> t.Iterator["DECSysDirectoryEntry"]:
-        """
-        Read directory entries
-
-        https://simh.trailing-edge.com/docs/decsys.pdf  Pag 2
-        https://bitsavers.org/pdf/dec/pdp7/DEC-07-SDDA-D_DECSYS7_Nov66.pdf  Pag 12
-        """
-        program_directory = ProgramDirectory.read(self)
-        yield from program_directory.entries
-        library_directory = LibraryDirectory.read(self)
-        yield from library_directory.entries
-
     @property
-    def entries_list(self) -> t.Iterator["DECSysDirectoryEntry"]:
-        yield from self.read_dir_entries()
+    def entries_list(self) -> t.Iterator["DECSysPath"]:
+        yield from self.get_root().iterdir()
 
     def filter_entries_list(
         self,
@@ -1052,13 +1075,13 @@ class DECSysFilesystem(AbstractFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["DECSysDirectoryEntry"]:
+    ) -> t.Iterator["DECSysPath"]:
         if pattern:
             raw_file_type, pattern = decsys_split_fullname(pattern, wildcard=True)
         else:
             raw_file_type = None
-        for entry in self.read_dir_entries():
-            if filename_match(entry.basename, pattern, wildcard):
+        for entry in self.get_root().iterdir():
+            if filename_match(entry.name, pattern, wildcard):
                 # Filter by file type
                 if raw_file_type is not None:
                     if raw_file_type in [FileType.ASSEMBLER, FileType.FORTRAN, FileType.BINARY]:
@@ -1070,13 +1093,13 @@ class DECSysFilesystem(AbstractFilesystem):
                     entry.raw_file_type = raw_file_type
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> DECSysDirectoryEntry:
+    def get_file_entry(self, fullname: str) -> DECSysPath:
         """
         Get the directory entry for a file
         """
         # Split file type and filename (e.g. "F,HELLO" -> FileType.FORTRAN, "HELLO")
         raw_file_type, filename = decsys_split_fullname(fullname)
-        for entry in self.read_dir_entries():
+        for entry in self.get_root().iterdir():
             if entry.filename == filename:
                 # Filter by file type
                 if raw_file_type is not None:
@@ -1090,12 +1113,18 @@ class DECSysFilesystem(AbstractFilesystem):
                 return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
 
+    def get_root(self) -> DECSysRootDirectory:
+        """
+        Get the root directory
+        """
+        return DECSysRootDirectory(self)
+
     def get_allocated_blocks(self) -> t.List[int]:
         """
         Get the list of allocated blocks
         """
         blocks = list(range(0, FIRST_FILE_BLOCK))
-        for entry in self.read_dir_entries():
+        for entry in self.get_root().iterdir():
             if entry.raw_file_type == FileType.WORKING:
                 for raw_file_type in [FileType.FORTRAN, FileType.ASSEMBLER, FileType.BINARY]:
                     blocks.extend(entry.get_blocks(raw_file_type))
@@ -1158,7 +1187,7 @@ class DECSysFilesystem(AbstractFilesystem):
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> DECSysDirectoryEntry:
+    ) -> DECSysPath:
         """
         Create a new file with a given length in number of blocks
         The number of blocks can be specified in the metadata dictionary ("number_of_blocks" key).
@@ -1177,7 +1206,7 @@ class DECSysFilesystem(AbstractFilesystem):
             raise ValueError("Specify the file type as FILE_TYPE,FILENAME")
         # If the file already exists, deallocate the blocks
         try:
-            entry: DECSysDirectoryEntry = self.get_file_entry(fullname)  # type: ignore
+            entry: DECSysPath = self.get_file_entry(fullname)  # type: ignore
             entry.deallocate()
         except FileNotFoundError:
             # Create a new entry
@@ -1246,14 +1275,14 @@ class DECSysFilesystem(AbstractFilesystem):
             if x.raw_file_type == FileType.KMON:
                 pass  # Do not show the keyboard monitor entry
             elif x.raw_file_type == FileType.SYSTEM:
-                sys.stdout.write(f"{x.basename} S {x.block_number:04}\n")
+                sys.stdout.write(f"{x.name} S {x.block_number:04}\n")
             elif x.raw_file_type == FileType.LIBRARY:
-                sys.stdout.write(f"{x.basename}, L {x.block_number:04}\n")
+                sys.stdout.write(f"{x.name}, L {x.block_number:04}\n")
             else:
                 # For user files, starting tape-block numbers are shown for,
                 # the FORTRAN source, the assembly source, the relocatable binary
                 sys.stdout.write(
-                    f"{x.basename} W {x.fortran_block_number:04},{x.assembler_block_number:04},{x.block_number:04}\n"
+                    f"{x.name} W {x.fortran_block_number:04},{x.assembler_block_number:04},{x.block_number:04}\n"
                 )
 
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
@@ -1294,7 +1323,7 @@ class DECSysFilesystem(AbstractFilesystem):
             sys.stdout.write(f"First free block number:  {program_directory.first_free_block:04}\n\n")
             sys.stdout.write("Filename        Type     Address  Length\n")
             sys.stdout.write("--------        ----     -------  ------\n")
-            for entry in self.read_dir_entries():
+            for entry in self.get_root().iterdir():
                 if entry.raw_file_type == FileType.WORKING:
                     for raw_file_type in [FileType.FORTRAN, FileType.ASSEMBLER, FileType.BINARY]:
                         blocks = entry.get_blocks(raw_file_type)
@@ -1364,12 +1393,6 @@ class DECSysFilesystem(AbstractFilesystem):
         self.write_words_block(PROGRAM_DIRECTORY_BLOCK, words)
         self.write_words_block(LIBRARY_DIRECTORY_BLOCK, words)
         return self
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     def get_types(self) -> t.List[str]:
         """

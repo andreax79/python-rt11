@@ -24,7 +24,7 @@ import sys
 import traceback
 import typing as t
 
-from ..abstract import AbstractDirectoryEntry, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFilesystem
 from ..commons import BLOCK_SIZE, LoggingLevel
 
 if t.TYPE_CHECKING:
@@ -123,7 +123,7 @@ def get_str_option(
 
 
 def copy_file(
-    from_entry: AbstractDirectoryEntry,
+    from_entry: XFERXPath,
     from_fork: t.Optional[str],
     to_fs: AbstractFilesystem,
     to_path: str,
@@ -151,7 +151,7 @@ def copy_file(
         if level <= LoggingLevel.DEBUG:
             traceback.print_exc()
         message = getattr(ex, "strerror", "") or str(ex)
-        raise CommandError(f"?{cmd}-F-Error copying {from_entry.fullname}: {message}")
+        raise CommandError(f"?{cmd}-F-Error copying {from_entry.fullname} to {to_path}: {message}")
 
 
 def add_slash(fs: AbstractFilesystem, filename: str) -> str:
@@ -159,7 +159,7 @@ def add_slash(fs: AbstractFilesystem, filename: str) -> str:
     Add a trailing slash to a filename if it is a directory
     """
     try:
-        if fs.isdir(filename):
+        if fs.is_dir(filename):
             filename = filename + "/"
         return filename.replace(" ", "\\ ")
     except Exception:

@@ -32,6 +32,9 @@ def test_tss8():
     shell.onecmd(f"mount t: /tss8 {DSK}.mo", batch=True)
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, TSS8Filesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("dir/brief t:[10,20]", batch=True)

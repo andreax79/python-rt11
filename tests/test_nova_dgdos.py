@@ -91,8 +91,8 @@ def test_bitmap():
     shell.onecmd(f"mount t: /dgdos {DSK}", batch=True)
     fs = shell.volumes.get_volume('T')
     bitmap = fs.read_bitmap()
-    for b in fs.read_dir_entries():
-        if not b.is_directory:
+    for b in fs.get_root().iterdir():
+        if not b.is_dir():
             for x in b.blocks():
                 assert not bitmap.is_free(x)
 
@@ -103,6 +103,9 @@ def test_rdos():
     shell.onecmd(f"mount ou: /dgdos {DSK}.mo", batch=True)
     fs = shell.volumes.get_volume('OU')
     assert isinstance(fs, DGDOSFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir ou:", batch=True)
     shell.onecmd("dir/brief ou:", batch=True)

@@ -108,7 +108,7 @@ class UNIXInode1(UNIXInode):
         buffer[position : position + len(data)] = data
 
     def blocks(self, include_indexes: bool = False) -> t.Iterator[int]:
-        if self.is_large:
+        if self.is_large():
             # Large file
             for block_number in self.addr:
                 if block_number == 0:
@@ -127,28 +127,23 @@ class UNIXInode1(UNIXInode):
                     break
                 yield block_number
 
-    @property
-    def isdir(self) -> bool:
+    def is_dir(self) -> bool:
         return (self.flags & V1_DIR) == V1_DIR
 
-    @property
-    def is_regular_file(self) -> bool:
-        return not self.isdir
+    def is_file(self) -> bool:
+        return not self.is_dir()
 
-    @property
     def is_large(self) -> bool:
         return bool(self.flags & V1_LARGE)
 
-    @property
     def is_allocated(self) -> bool:
         return bool(self.flags & V1_USED)
 
-    @property
     def is_special_file(self) -> bool:
         return self.inode_num < V1_ROOT_INODE
 
     def __str__(self) -> str:
-        if not self.is_allocated:
+        if not self.is_allocated():
             return f"{self.inode_num:>4}# ---"
         else:
             mode = format_mode(self.flags, version=self.fs.version, perms=self.fs.perms)
@@ -159,11 +154,11 @@ class UNIXInode1(UNIXInode):
         buf.write("\n*Inode\n")
         buf.write(f"Inode number:         {self.inode_num}\n")
         buf.write(f"Flags:                {self.flags:06o}\n")
-        if self.is_special_file:
+        if self.is_special_file():
             buf.write("Type:                 special file\n")
-        elif self.isdir:
+        elif self.is_dir():
             buf.write("Type:                 directory\n")
-        elif self.is_large:
+        elif self.is_large():
             buf.write("Type:                 large file\n")
         else:
             buf.write("Type:                 file\n")
@@ -172,7 +167,7 @@ class UNIXInode1(UNIXInode):
         buf.write(f"Modification time:    {self.mtime}\n")
         buf.write(f"Link count:           {self.nlinks}\n")
         buf.write(f"Size:                 {self.size}\n")
-        if self.is_large:
+        if self.is_large():
             buf.write(f"Indirect blocks:      {self.addr}\n")
         buf.write(f"Blocks:               {list(self.blocks())}\n")
         return buf.getvalue()
@@ -216,6 +211,7 @@ class UNIX1Filesystem(UNIXFilesystem):
     fs_name = "unix1"
     fs_description = "UNIX version 1"
     fs_platforms = ["pdp-11"]
+    fs_path_separator = "/"
     fs_entry_metadata = [
         "creation_date",
         "last_mod_date",

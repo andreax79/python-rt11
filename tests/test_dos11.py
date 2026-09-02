@@ -17,13 +17,16 @@ def test_dos11():
     shell = Shell(verbose=True)
     shell.onecmd(f"mount t: /dos11 {DSK}", batch=True)
     fs = shell.volumes.get_volume('T')
+    assert fs.is_dir("[1,1]")
+    assert not fs.is_dir("[1,1]1.txt")
+    assert not fs.is_dir("[1,1]notfound")
     assert isinstance(fs, DOS11Filesystem)
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("dir /uic t:", batch=True)
-    shell.onecmd("type t:1.txt", batch=True)
+    shell.onecmd("type t:[1,1]1.txt", batch=True)
 
-    x = fs.read_bytes("50.txt")
+    x = fs.read_bytes("[1,1]50.txt")
     x = x.rstrip(b"\0")
     assert len(x) == 2200
     for i in range(0, 50):
@@ -59,6 +62,9 @@ def test_dos11():
     for i in range(0, 500):
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x3
 
+    l = list(fs.entries_list)
+    assert all(x.is_dir() for x in l)
+
 
 def test_dos11_bitmap():
     shell = Shell(verbose=True)
@@ -66,6 +72,9 @@ def test_dos11_bitmap():
     shell.onecmd(f"mount t: /dos11 {DSK}.mo", batch=True)
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, DOS11Filesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     d = fs.get_file_entry("[200,200]500.TXT")
     assert d is not None
@@ -112,10 +121,10 @@ def test_dos11_bitmap():
 
     # UIC not found
     with pytest.raises(Exception):
-        shell.onecmd("copy /TYPE:CONTIGUOUS t:10.TXT t:[123,321]10NEW.TXT", batch=True)
+        shell.onecmd("copy /TYPE:CONTIGUOUS t:[1,1]10.TXT t:[123,321]10NEW.TXT", batch=True)
 
     # Create a contiguous file
-    shell.onecmd("copy /TYPE:CONTIGUOUS t:10.TXT t:[100,100]10NEW.TXT", batch=True)
+    shell.onecmd("copy /TYPE:CONTIGUOUS t:[1,1]10.TXT t:[100,100]10NEW.TXT", batch=True)
     x2 = fs.read_bytes("[100,100]10NEW.txt")
     x2 = x2.rstrip(b"\0")
     assert len(x2) == 440
@@ -123,10 +132,10 @@ def test_dos11_bitmap():
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890".encode("ascii") in x2
 
     for i in range(0, 100):
-        shell.onecmd(f"copy /TYPE:CONTIGUOUS t:1.TXT t:[100,100]A{i}.TXT", batch=True)
+        shell.onecmd(f"copy /TYPE:CONTIGUOUS t:[1,1]1.TXT t:[100,100]A{i}.TXT", batch=True)
 
     # Create a non-contiguous file
-    shell.onecmd("copy /TYPE:NOCONTIGUOUS t:10.TXT t:[200,200]10NEW.TXT", batch=True)
+    shell.onecmd("copy /TYPE:NOCONTIGUOUS t:[1,1]10.TXT t:[200,200]10NEW.TXT", batch=True)
     x2 = fs.read_bytes("[200,200]10NEW.txt")
     x2 = x2.rstrip(b"\0")
     assert len(x2) == 440
@@ -181,8 +190,8 @@ def test_dos11_init():
     shell.onecmd(f"create /allocate:2400 {DSK}.mo", batch=True)
     shell.onecmd(f"init /dos11 {DSK}.mo", batch=True)
     shell.onecmd(f"mount ou: /dos11 {DSK}.mo", batch=True)
-    shell.onecmd("dir ou:", batch=True)
-    shell.onecmd("copy in:* ou:", batch=True)
+    shell.onecmd("dir ou:[1,1]", batch=True)
+    shell.onecmd("copy in:[1,1]* ou:[1,1]", batch=True)
     fs = shell.volumes.get_volume('OU')
     assert isinstance(fs, DOS11Filesystem)
 

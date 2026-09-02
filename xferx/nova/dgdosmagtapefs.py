@@ -26,14 +26,14 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, IMAGE, READ_FILE_FULL, filename_match
 from ..device.abstract import AbstractDevice
 from ..device.tape import Tape
 
 __all__ = [
     "DGDOSMagTapeFile",
-    "DGDOSMagTapeDirectoryEntry",
+    "DGDOSMagTapePath",
     "DGDOSMagTapeFilesystem",
 ]
 
@@ -63,13 +63,11 @@ def get_file_number(buffer: bytes) -> int:
 
 
 class DGDOSMagTapeFile(AbstractFile):
-    entry: "DGDOSMagTapeDirectoryEntry"
-    closed: bool
+    entry: "DGDOSMagTapePath"
     size: int  # size in bytes
 
-    def __init__(self, entry: "DGDOSMagTapeDirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "DGDOSMagTapePath", file_mode: t.Optional[str] = None):
         self.entry = entry
-        self.closed = False
         self.file_mode = file_mode or IMAGE
         self.size = entry.get_size()
         self._content: t.Optional[bytes] = None
@@ -136,17 +134,11 @@ class DGDOSMagTapeFile(AbstractFile):
         """
         return DATA_BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class DGDOSMagTapeDirectoryEntry(AbstractDirectoryEntry):
+class DGDOSMagTapePath(XFERXPath):
     """
     MagTape Directory Entry
     """
@@ -167,15 +159,14 @@ class DGDOSMagTapeDirectoryEntry(AbstractDirectoryEntry):
         buffer: bytes,
         tape_pos: int,
         size: int,
-    ) -> "DGDOSMagTapeDirectoryEntry":
-        self = DGDOSMagTapeDirectoryEntry(fs)
+    ) -> "DGDOSMagTapePath":
+        self = DGDOSMagTapePath(fs)
         self.file_number = buffer[-1]
         self.tape_pos = tape_pos
         self.length = (len(buffer) + size) // TAPE_BLOCK_SIZE
         self.is_dump = (buffer[0] == DUMP_NAME_BLOCK_ID) if buffer else False
         return self
 
-    @property
     def is_empty(self) -> bool:
         return False
 
@@ -184,8 +175,15 @@ class DGDOSMagTapeDirectoryEntry(AbstractDirectoryEntry):
         return f"{self.file_number}"
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return f"{self.file_number}"
+
+    @property
+    def parent(self) -> XFERXPath:
+        """
+        The logical parent
+        """
+        return self.fs.get_root()
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -237,6 +235,52 @@ class DGDOSMagTapeDirectoryEntry(AbstractDirectoryEntry):
 
     def __repr__(self) -> str:
         return str(self)
+
+
+class DGDOSMagTapeRootDirectory(XFERXPath):
+    """
+    Data General DOS/RDOS MagTape Root Directory
+    """
+
+    fs: "DGDOSMagTapeFilesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self
+
+    def iterdir(self) -> t.Iterator[DGDOSMagTapePath]:
+        """
+        Read the directory entries from the tape
+        """
+        self.fs.dev.tape_rewind()
+        try:
+            while True:
+                tape_pos = self.fs.dev.tape_pos
+                header, size = self.fs.dev.tape_read_header()
+                if not header:
+                    break
+                yield DGDOSMagTapePath.read(self.fs, header, tape_pos, size)
+        except EOFError:
+            pass
 
 
 class DGDOSMagTapeFilesystem(AbstractFilesystem):
@@ -312,43 +356,31 @@ class DGDOSMagTapeFilesystem(AbstractFilesystem):
                 pass
         return self
 
-    def read_dir_entries(self) -> t.Iterator["DGDOSMagTapeDirectoryEntry"]:
-        """
-        Read the directory entries from the tape
-        """
-        self.dev.tape_rewind()
-        try:
-            while True:
-                tape_pos = self.dev.tape_pos
-                header, size = self.dev.tape_read_header()
-                if not header:
-                    break
-                yield DGDOSMagTapeDirectoryEntry.read(self, header, tape_pos, size)
-        except EOFError:
-            pass
-
     def filter_entries_list(
         self,
         pattern: t.Optional[str],
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["DGDOSMagTapeDirectoryEntry"]:
-        for entry in self.read_dir_entries():
-            if filename_match(entry.basename, pattern, wildcard):
+    ) -> t.Iterator[DGDOSMagTapePath]:
+        for entry in self.get_root().iterdir():
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
     @property
-    def entries_list(self) -> t.Iterator["DGDOSMagTapeDirectoryEntry"]:
-        for entry in self.read_dir_entries():
-            if not entry.is_empty:
+    def entries_list(self) -> t.Iterator[DGDOSMagTapePath]:
+        for entry in self.get_root().iterdir():
+            if not entry.is_empty():
                 yield entry
 
-    def get_file_entry(self, fullname: str) -> DGDOSMagTapeDirectoryEntry:
+    def get_file_entry(self, fullname: str) -> DGDOSMagTapePath:
         try:
             return next(self.filter_entries_list(fullname, wildcard=False))
         except StopIteration:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> DGDOSMagTapeRootDirectory:
+        return DGDOSMagTapeRootDirectory(self)
 
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         pattern = pattern.upper() if pattern else None
@@ -363,14 +395,8 @@ class DGDOSMagTapeFilesystem(AbstractFilesystem):
         else:
             sys.stdout.write("Num Type   Tape pos         Size\n")
             sys.stdout.write("--- ----   --------         ----\n")
-            for entry in self.read_dir_entries():
+            for entry in self.get_root().iterdir():
                 sys.stdout.write(f"{entry}\n")
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     @classmethod
     def initialize(
@@ -386,12 +412,3 @@ class DGDOSMagTapeFilesystem(AbstractFilesystem):
         self.dev.tape_write_mark()
         self.dev.tape_truncate()
         return self
-
-    def close(self) -> None:
-        self.dev.close()
-
-    def chdir(self, fullname: str) -> bool:
-        return False
-
-    def get_pwd(self) -> str:
-        return ""

@@ -25,7 +25,7 @@ import struct
 import sys
 import typing as t
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile
+from ..abstract import XFERXPath, AbstractFile
 from ..commons import (
     ASCII,
     IMAGE,
@@ -42,7 +42,7 @@ from .disk import SECTOR_SIZE
 
 __all__ = [
     "AppleDOSFile",
-    "AppleDOSDirectoryEntry",
+    "AppleDOSPath",
     "AppleDOSFilesystem",
 ]
 
@@ -142,13 +142,11 @@ def appledos_filename_to_raw_filename(filename: str) -> bytes:
 
 
 class AppleDOSFile(AbstractFile):
-    entry: "AppleDOSDirectoryEntry"
+    entry: "AppleDOSPath"
     file_mode: str
-    closed: bool
 
-    def __init__(self, entry: "AppleDOSDirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "AppleDOSPath", file_mode: t.Optional[str] = None):
         self.entry = entry
-        self.closed = False
         if file_mode is None:
             self.file_mode = ASCII if entry.raw_file_type == FILE_TYPE_TEXT else IMAGE
         elif file_mode is ASCII or file_mode == FILE_TYPES[FILE_TYPE_TEXT]:
@@ -223,12 +221,6 @@ class AppleDOSFile(AbstractFile):
         Get file block size in bytes
         """
         return self.entry.get_block_size()
-
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
 
     def __str__(self) -> str:
         return self.entry.fullname
@@ -501,7 +493,7 @@ class AppleDOSVTOC:
         return dump_struct(self.__dict__, exclude=["fs", "bitmaps"])
 
 
-class AppleDOSCatalog:
+class AppleDOSCatalog(XFERXPath):
     """
     Each catalog sector contains up to 7 file entries.
     Each sector has a track/sector pointer in bytes 01 and 02
@@ -532,10 +524,30 @@ class AppleDOSCatalog:
 
     fs: "AppleDOSFilesystem"
     catalog_addresses: t.List[TrackSector]  # catalog sectors addresses
-    directory_entries: t.List["AppleDOSDirectoryEntry"]  # 7 file entries per catalog sector
+    directory_entries: t.List["AppleDOSPath"]  # 7 file entries per catalog sector
 
-    def __init__(self, fs: "AppleDOSFilesystem"):
-        self.fs = fs
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "AppleDOSCatalog":
+        """The logical parent"""
+        return self
 
     @classmethod
     def read(cls, fs: "AppleDOSFilesystem", catalog_address: t.Optional[TrackSector] = None) -> "AppleDOSCatalog":
@@ -552,7 +564,7 @@ class AppleDOSCatalog:
             buffer = self.fs.read_sector(address)
             # Read 7 file entries
             for position in range(FILE_DESCRIPTIVE_ENTRY_OFFSET, SECTOR_SIZE, FILE_DESCRIPTIVE_ENTRY_SIZE):
-                entry = AppleDOSDirectoryEntry.read(self.fs, buffer, position)
+                entry = AppleDOSPath.read(self.fs, buffer, position)
                 self.directory_entries.append(entry)
             address = TrackSector(buffer[NEXT_TRACK_OFFSET], buffer[NEXT_SECTOR_OFFSET])
         return self
@@ -567,7 +579,7 @@ class AppleDOSCatalog:
             TrackSector(VTOC_TRACK, sector) for sector in range(self.fs.dev.sectors_per_track - 1, 0, -1)
         ]
         self.directory_entries = [
-            AppleDOSDirectoryEntry.create(self.fs)
+            AppleDOSPath.create(self.fs)
             for x in range(0, FILE_DESCRIPTIVE_ENTRY_PER_SECTOR * len(self.catalog_addresses))
         ]
         return self
@@ -596,7 +608,7 @@ class AppleDOSCatalog:
             # Write the catalog sector
             self.fs.write_sector(buffer, self.catalog_addresses[i])
 
-    def iterdir(self, include_deleted: bool = False) -> t.Iterator["AppleDOSDirectoryEntry"]:
+    def iterdir(self, include_deleted: bool = False) -> t.Iterator["AppleDOSPath"]:
         """
         Iterate over directory entries
         """
@@ -604,7 +616,7 @@ class AppleDOSCatalog:
             if not entry.is_empty and (include_deleted or not entry.is_deleted):
                 yield entry
 
-    def search_empty_entry(self) -> t.Optional["AppleDOSDirectoryEntry"]:
+    def search_empty_entry(self) -> t.Optional["AppleDOSPath"]:
         """
         Search for an empty or deleted catalog entry
         """
@@ -624,7 +636,7 @@ class AppleDOSCatalog:
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> "AppleDOSDirectoryEntry":
+    ) -> "AppleDOSPath":
         """
         Create a new file
         """
@@ -673,7 +685,7 @@ class AppleDOSCatalog:
         return dump_struct(self.__dict__, exclude=["fs", "directory_entries"])
 
 
-class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
+class AppleDOSPath(XFERXPath):
     """
     Apple DOS 3.x Directory Entry
 
@@ -708,7 +720,7 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
         self.fs = fs
 
     @classmethod
-    def read(cls, fs: "AppleDOSFilesystem", buffer: bytes, position: int) -> "AppleDOSDirectoryEntry":
+    def read(cls, fs: "AppleDOSFilesystem", buffer: bytes, position: int) -> "AppleDOSPath":
         self = cls(fs)
         (
             track,  # track
@@ -732,7 +744,7 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
         return self
 
     @classmethod
-    def create(cls, fs: "AppleDOSFilesystem") -> "AppleDOSDirectoryEntry":
+    def create(cls, fs: "AppleDOSFilesystem") -> "AppleDOSPath":
         self = cls(fs)
         self.address = TrackSector(0, 0)
         self.raw_file_type = 0
@@ -835,8 +847,13 @@ class AppleDOSDirectoryEntry(AbstractDirectoryEntry):
         return self.filename
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.filename
+
+    @property
+    def parent(self) -> "AppleDOSCatalog":
+        """The logical parent"""
+        return self.fs.get_root()
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -974,29 +991,32 @@ class AppleDOSFilesystem(AbstractAppleDiskFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["AppleDOSDirectoryEntry"]:
+    ) -> t.Iterator["AppleDOSPath"]:
         if pattern:
             pattern = appledos_canonical_filename(pattern, wildcard=wildcard)
-        catalog = AppleDOSCatalog.read(self)
-        for entry in catalog.iterdir(include_deleted=include_all):
-            if filename_match(entry.basename, pattern, wildcard):
+        for entry in self.get_root().iterdir(include_deleted=include_all):
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
     @property
-    def entries_list(self) -> t.Iterator["AppleDOSDirectoryEntry"]:
-        catalog = AppleDOSCatalog.read(self)
-        yield from catalog.iterdir()
+    def entries_list(self) -> t.Iterator["AppleDOSPath"]:
+        yield from self.get_root().iterdir()
 
-    def get_file_entry(self, fullname: str, include_deleted: bool = False) -> AppleDOSDirectoryEntry:
+    def get_file_entry(self, fullname: str, include_deleted: bool = False) -> AppleDOSPath:
         """
         Get the file entry for a given path
         """
         fullname = appledos_canonical_filename(fullname)  # type: ignore
-        catalog = AppleDOSCatalog.read(self)
-        for entry in catalog.iterdir(include_deleted=include_deleted):
+        for entry in self.get_root().iterdir(include_deleted=include_deleted):
             if entry.fullname == fullname:
                 return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> AppleDOSCatalog:
+        """
+        Get the root directory
+        """
+        return AppleDOSCatalog.read(self)
 
     def write_bytes(
         self,
@@ -1057,7 +1077,7 @@ class AppleDOSFilesystem(AbstractAppleDiskFilesystem):
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> AppleDOSDirectoryEntry:
+    ) -> AppleDOSPath:
         """
         Create a new file
         """
@@ -1166,12 +1186,6 @@ class AppleDOSFilesystem(AbstractAppleDiskFilesystem):
                     data = self.read_sector(TrackSector(track, sector))
                     sys.stdout.write(f"\nTRACK {track:02}  SECTOR {sector:02}\n")
                     hex_dump(data)
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     @classmethod
     def initialize(

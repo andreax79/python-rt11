@@ -53,6 +53,9 @@ def test_rt11():
     shell.onecmd(f"mount t: /rt11 {DSK}", batch=True)
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, RT11Filesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("dir/brief t:", batch=True)
@@ -69,7 +72,7 @@ def test_rt11():
     l = list(fs.filter_entries_list("*.TXT"))
     assert len(l) == 11
     for x in l:
-        assert not x.is_empty
+        assert not x.is_empty()
         assert str(x)
 
 

@@ -25,7 +25,7 @@ import sys
 import typing as t
 from datetime import datetime, timedelta
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile
+from ..abstract import XFERXPath, AbstractFile
 from ..cache import BlockCache
 from ..commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match
 from ..device.abstract import AbstractDevice
@@ -84,8 +84,9 @@ RDS1_FLAGS = 0o20000  # RDS1.1 or RDS1.2
 RDS0_PLVL = 0  # RDS 0 - V7.x and before
 RDS11_PLVL = 257  # RDS 1.1 - V8
 RDS12_PLVL = 258  # RDS 1.2 - V9.0 and beyond
-SAT_FILENAME = "[0,1]SATT.SYS'"  # Storage Allocation Table filename
-BAD_BLOCK_FILENAME = "[0,1]BADB.SYS'"  # Bad Block filename
+SAT_FILENAME = "[0,1]SATT.SYS"  # Storage Allocation Table filename
+BAD_BLOCK_FILENAME = "[0,1]BADB.SYS"  # Bad Block filename
+ACCOUNTING_FILENAME = "[1,2]ACCT.SYS"
 
 
 class PPN(UIC):
@@ -126,13 +127,13 @@ def rsts_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) -
     """
     fullname = (fullname or "").upper()
     try:
-        filename, extension = fullname.split(".", 1)
+        stem, extension = fullname.split(".", 1)
     except Exception:
-        filename = fullname
+        stem = fullname
         extension = "*" if wildcard else ""
-    filename = rad2asc(asc2rad(filename[0:3])) + rad2asc(asc2rad(filename[3:6]))
+    stem = rad2asc(asc2rad(stem[0:3])) + rad2asc(asc2rad(stem[3:6]))
     extension = rad2asc(asc2rad(extension))
-    return f"{filename}.{extension}"
+    return f"{stem}.{extension}"
 
 
 def rsts_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
@@ -149,7 +150,9 @@ def rsts_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
     return f"{ppn or ''}{fullname}"
 
 
-def rsts_split_fullname(ppn: PPN, fullname: t.Optional[str], wildcard: bool = True) -> t.Tuple[PPN, t.Optional[str]]:
+def rsts_split_fullname(
+    ppn: t.Optional[PPN], fullname: t.Optional[str], wildcard: bool = True
+) -> t.Tuple[t.Optional[PPN], t.Optional[str]]:
     if fullname:
         if "[" in fullname:
             try:
@@ -182,11 +185,9 @@ class RTFSBlockCache(BlockCache):
 
 class RSTSFile(AbstractFile):
     ufd_name_entry: "UFDNameEntry"
-    closed: bool
 
     def __init__(self, ufd_name_entry: "UFDNameEntry"):
         self.ufd_name_entry = ufd_name_entry
-        self.closed = False
 
     def read_block(
         self,
@@ -235,12 +236,6 @@ class RSTSFile(AbstractFile):
         Get file block size in bytes
         """
         return self.ufd_name_entry.get_block_size()
-
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
 
     def __str__(self) -> str:
         return str(self.ufd_name_entry)
@@ -400,12 +395,18 @@ class UFDAccountEntry:
         return f"USIZ: {self.usiz} UCLUS: {self.uclus:}"
 
 
-class UFDNameEntry(AbstractDirectoryEntry):
+class RSTSPath(XFERXPath):
+    """
+    Abstract class for RSTS/E directory entries
+    """
+
+
+class UFDNameEntry(RSTSPath):
     fs: "RSTSFilesystem"
     ppn: PPN = DEFAULT_PPN
     account_entry: UFDAccountEntry
     ulnk: Link  # Link to first name entry in UFD
-    filename: str  # File name
+    stem: str  # File name
     extension: str  # File type
     uprot: int  # Protection code
     ustat: int  # Status
@@ -435,13 +436,13 @@ class UFDNameEntry(AbstractDirectoryEntry):
         self.ulnk = Link(self.fs, ulnk)
         self.uaa = Link(self.fs, uaa)
         self.uar = Link(self.fs, uar)
-        self.filename = rad50_word_to_asc(filename1) + rad50_word_to_asc(filename2)
+        self.stem = rad50_word_to_asc(filename1) + rad50_word_to_asc(filename2)
         self.extension = rad50_word_to_asc(filetype)
         return self
 
     def write_buffer(self, buffer: bytearray, position: int) -> None:
-        filename1 = asc_to_rad50_word(self.filename[:3])
-        filename2 = asc_to_rad50_word(self.filename[3:6])
+        filename1 = asc_to_rad50_word(self.stem[:3])
+        filename2 = asc_to_rad50_word(self.stem[3:6])
         filetype = asc_to_rad50_word(self.extension)
         struct.pack_into(
             UFD_ENTRY_FORMAT,
@@ -509,11 +510,16 @@ class UFDNameEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return f"{self.ppn or ''}{self.filename}.{self.extension}"
+        return f"{self.ppn or ''}{self.stem}.{self.extension}"
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
+
+    @property
+    def parent(self) -> RSTSPath:
+        """Parent directory"""
+        return self.fs.get_ufd(self.ppn)
 
     @property
     def creation_date(self) -> datetime:
@@ -555,16 +561,19 @@ class UFDNameEntry(AbstractDirectoryEntry):
         """
         return RSTSFile(self)
 
+    def is_dir(self) -> bool:
+        return False
+
     @property
     def is_ufd_name_entry(self) -> bool:
         return (self.ustat & 64) == 0
 
     def __str__(self) -> str:
         date = self.creation_date.strftime("%d-%b-%y %H:%M")
-        return f"{self.filename:<6}.{self.extension:<3} {self.account_entry.usiz:>5}   <{self.uprot:>3}> {date}  ULNK: {self.ulnk} UAA: {self.uaa} UAR: {self.uar} USTAT: {self.ustat}"
+        return f"{self.stem:<6}.{self.extension:<3} {self.account_entry.usiz:>5}   <{self.uprot:>3}> {date}  ULNK: {self.ulnk} UAA: {self.uaa} UAR: {self.uar} USTAT: {self.ustat}"
 
 
-class MFDNameEntry:
+class UserFileDirectory(RSTSPath):
     """
     The MFD Name Entry is used to catalog all the accounts.
     Each account on the disk has a MFD Name Entry associated with it.
@@ -586,8 +595,8 @@ class MFDNameEntry:
         self.fs = fs
 
     @classmethod
-    def read(cls, fs: "RSTSFilesystem", buffer: bytes, position: int = 0) -> "MFDNameEntry":
-        self = MFDNameEntry(fs)
+    def read(cls, fs: "RSTSFilesystem", buffer: bytes, position: int = 0) -> "UserFileDirectory":
+        self = UserFileDirectory(fs)
         (
             ulnk,  #       2 bytes  Link to first name entry in MFD
             unam,  #       2 bytes  PPN project / PPN programmer
@@ -622,6 +631,50 @@ class MFDNameEntry:
             self.uaa.ulnk,
             self.uar,
         )
+
+    @property
+    def name(self) -> str:
+        return str(self.ppn)
+
+    @property
+    def fullname(self) -> str:
+        return self.name
+
+    @property
+    def parent(self) -> XFERXPath:
+        """Parent directory"""
+        return self.fs.get_root()
+
+    # @property
+    # def creation_date(self) -> datetime:
+    #     return rsts_to_date(self.account_entry.udc, self.account_entry.utc)
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
+    def delete(self) -> bool:
+        """
+        Delete the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def write(self) -> bool:
+        """
+        Write the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def open(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> RSTSFile:
+        """
+        Open a file
+        """
+        raise OSError(errno.EISDIR, os.strerror(errno.EISDIR))
+
+    def is_dir(self) -> bool:
+        return True
 
     @property
     def is_mfd_name_entry(self) -> bool:
@@ -690,13 +743,13 @@ class GFD:
         self.gfd_cluster_size = blockette[0]
         self.gfd_cluster_map = list(blockette[1:])
 
-    def read_gfd_name_entries(self, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["MFDNameEntry"]:
+    def iterdir(self, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["UserFileDirectory"]:
         if cache is None:
             cache = self.fs.new_cache()
         for user, link in enumerate(self.name_entry_pointer_map):
             if not link.is_null:
                 buffer = cache.read_block(link.to_lbn(self.gfd_cluster_map))
-                yield MFDNameEntry.read(self.fs, buffer, MFD_ENTRY_LEN * link.entry)
+                yield UserFileDirectory.read(self.fs, buffer, MFD_ENTRY_LEN * link.entry)
 
     def read_dir_entries(
         self,
@@ -715,7 +768,7 @@ class GFD:
                 yield from self.fs.read_ufd_name_entries(ufd_label.ulnk, ufd_pointer, ppn=ufd_ppn, cache=cache)
 
 
-class MFD:
+class MFD(XFERXPath):
     """
     Master File Directory (RDS1.1 or later)
 
@@ -726,8 +779,28 @@ class MFD:
     gfd_pointer_map: t.List[int]  # Pointers to Group File Directories (RDS1.1)
     dcn: int  # Device Cluster Number of the MFD
 
-    def __init__(self, fs: "RSTSFilesystem"):
-        self.fs = fs
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self
 
     @classmethod
     def read(cls, fs: "RSTSFilesystem", dcn: int) -> "MFD":
@@ -753,6 +826,69 @@ class MFD:
             if dcn != 0 and (ppn is None or ppn.group == PPN.ANY_GROUP or ppn.group == group):
                 yield GFD.read(self, group, cache)
 
+    def iterdir(
+        self, ppn: t.Optional[PPN] = None, cache: t.Optional[RTFSBlockCache] = None
+    ) -> t.Iterator["UserFileDirectory"]:
+        """
+        Read MFD name entries
+        http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 20
+        """
+        if cache is None:
+            cache = self.fs.new_cache()
+        for gfd in self.read_gfds(ppn=ppn, cache=cache):
+            yield from gfd.iterdir(cache=cache)
+
+
+class RDS0RootDirectory(XFERXPath):
+    fs: "RSTSFilesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self
+
+    def iterdir(
+        self, ppn: t.Optional[PPN] = None, cache: t.Optional[RTFSBlockCache] = None
+    ) -> t.Iterator["UserFileDirectory"]:
+        """
+        Read MFD name entries
+        http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 20
+        """
+        if cache is None:
+            cache = self.fs.new_cache()
+        link = self.fs.mfd_first_name_entry
+        while not link.is_null:
+            buffer = cache.read_block(link.to_lbn(self.fs.mfd_cluster_map))
+            mfd_entry = UserFileDirectory.read(self.fs, buffer, MFD_ENTRY_LEN * link.entry)
+            link = mfd_entry.ulnk
+            if mfd_entry.is_mfd_name_entry:
+                match = True
+                if ppn is not None:
+                    if ppn.group != PPN.ANY_GROUP:
+                        match &= mfd_entry.ppn.group == ppn.group
+                    if ppn.user != PPN.ANY_USER:
+                        match &= mfd_entry.ppn.user == ppn.user
+                if match:
+                    yield mfd_entry
+
 
 class StorageAllocationTable:
     """
@@ -777,7 +913,7 @@ class StorageAllocationTable:
         Read the bitmap blocks
         """
         self = StorageAllocationTable(fs)
-        satt_sys = fs.get_file_entry(SAT_FILENAME)
+        satt_sys: UFDNameEntry = fs.get_file_entry(SAT_FILENAME)  # type: ignore
 
         # Check SAT size
         self.num_of_pack_clusters = (fs.device_size - fs.device_cluster_size) // fs.pack_cluster_size
@@ -978,7 +1114,7 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
         "creation_date",
     ]
 
-    ppn: PPN  # Current Project Programmer Number
+    ppn: t.Optional[PPN]  # Current Project Programmer Number
 
     device_size: int  # Device size in blocks
     device_cluster_size: int  # Device Cluster Size
@@ -1001,7 +1137,7 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
     ) -> "RSTSFilesystem":
         self = cls(file_or_dev)
         self.read_disk_pack_label()
-        self.ppn = DEFAULT_PPN
+        self.ppn = None
         if strict:
             # Check if the SATT.SYS file exists
             try:
@@ -1106,25 +1242,6 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
         blockette = words[FDCM_BLOCKETTE * BLOCKETTE_WORDS : (FDCM_BLOCKETTE + 1) * BLOCKETTE_WORDS]
         return list(blockette[1:])
 
-    def read_mfd_name_entries(self, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["MFDNameEntry"]:
-        """
-        Read MFD name entries
-        http://elvira.stacken.kth.se/rstsdoc/rsts-doc-v80/extra/mayfieldRSTS8internals.pdf Pag 20
-        """
-        if cache is None:
-            cache = self.new_cache()
-        if self.mfd is not None:  # RDS1.x
-            for gfd in self.mfd.read_gfds(cache=cache):
-                yield from gfd.read_gfd_name_entries(cache=cache)
-        else:  # RDS0
-            link = self.mfd_first_name_entry
-            while not link.is_null:
-                buffer = cache.read_block(link.to_lbn(self.mfd_cluster_map))
-                mfd_entry = MFDNameEntry.read(self, buffer, MFD_ENTRY_LEN * link.entry)
-                link = mfd_entry.ulnk
-                if mfd_entry.is_mfd_name_entry:
-                    yield mfd_entry
-
     def read_ufd_name_entries(
         self,
         link: Link,
@@ -1202,34 +1319,30 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
         bitmap = StorageAllocationTable.read(self)
         return bitmap
 
-    def read_dir_entries(self, ppn: PPN, cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator["UFDNameEntry"]:
+    def read_dir_entries(self, ppn: t.Optional[PPN], cache: t.Optional[RTFSBlockCache] = None) -> t.Iterator[RSTSPath]:
         if cache is None:
             cache = self.new_cache()
-        if self.mfd is not None:  # RDS1.x
+        if ppn is None:
+            yield from self.get_root().iterdir(cache=cache)
+        elif self.mfd is not None:  # RDS1.x
             for gfd in self.mfd.read_gfds(ppn=ppn, cache=cache):
                 yield from gfd.read_dir_entries(ppn=ppn, cache=cache)
         else:  # RDS0
-            for mfd_entry in self.read_mfd_name_entries(cache):
-                match = True
-                if ppn.group != PPN.ANY_GROUP:
-                    match &= mfd_entry.ppn.group == ppn.group
-                if ppn.user != PPN.ANY_USER:
-                    match &= mfd_entry.ppn.user == ppn.user
-                if match:
-                    if mfd_entry.ppn == ACCOUNT_1_1_PPN:
-                        for ufd_entry in self.read_ufd_name_entries(
-                            mfd_entry.ulnk, mfd_entry.uar, ppn=mfd_entry.ppn, cache=cache
-                        ):
-                            if ufd_entry.is_ufd_name_entry:
-                                yield ufd_entry
-                    elif mfd_entry.uar != 0:
-                        ufd_label = self.read_ufd_label_entry(mfd_entry.uar)
-                        yield from self.read_ufd_name_entries(
-                            ufd_label.ulnk,
-                            mfd_entry.uar,
-                            ppn=mfd_entry.ppn,
-                            cache=cache,
-                        )
+            for mfd_entry in self.get_root().iterdir(ppn=ppn, cache=cache):
+                if mfd_entry.ppn == ACCOUNT_1_1_PPN:
+                    for ufd_entry in self.read_ufd_name_entries(
+                        mfd_entry.ulnk, mfd_entry.uar, ppn=mfd_entry.ppn, cache=cache
+                    ):
+                        if ufd_entry.is_ufd_name_entry:
+                            yield ufd_entry
+                elif mfd_entry.uar != 0:
+                    ufd_label = self.read_ufd_label_entry(mfd_entry.uar)
+                    yield from self.read_ufd_name_entries(
+                        ufd_label.ulnk,
+                        mfd_entry.uar,
+                        ppn=mfd_entry.ppn,
+                        cache=cache,
+                    )
 
     def filter_entries_list(
         self,
@@ -1238,33 +1351,53 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
         expand: bool = True,
         wildcard: bool = True,
         ppn: t.Optional[PPN] = None,
-    ) -> t.Iterator["UFDNameEntry"]:
+    ) -> t.Iterator[RSTSPath]:
         if ppn is None:
             ppn = self.ppn
         ppn, pattern = rsts_split_fullname(fullname=pattern, wildcard=wildcard, ppn=ppn)
         for entry in self.read_dir_entries(ppn=ppn):
-            if filename_match(entry.basename, pattern, wildcard):
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
     @property
-    def entries_list(self) -> t.Iterator[UFDNameEntry]:
+    def entries_list(self) -> t.Iterator[RSTSPath]:
         yield from self.read_dir_entries(ppn=self.ppn)
 
-    def get_file_entry(self, fullname: str) -> UFDNameEntry:
+    def get_file_entry(self, fullname: str) -> RSTSPath:
         fullname = rsts_canonical_fullname(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        ppn, basename = rsts_split_fullname(fullname=fullname, wildcard=False, ppn=self.ppn)
+        ppn, name = rsts_split_fullname(fullname=fullname, wildcard=False, ppn=self.ppn)
+        if ppn is None:
+            raise FileNotFoundError(errno.ENOENT, "No PPN specified")
+        if name is None:
+            return self.get_ufd(ppn)
+        else:
+            try:
+                return next(self.filter_entries_list(name, wildcard=False, ppn=ppn))
+            except StopIteration:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_ufd(self, ppn: PPN) -> UserFileDirectory:
+        """
+        Get the User File Directory for a given PPN
+        """
         try:
-            return next(self.filter_entries_list(basename, wildcard=False, ppn=ppn))
+            return next(self.read_dir_entries(ppn=ppn))  # type: ignore
         except StopIteration:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), ppn)
+
+    def get_root(self) -> t.Union[RDS0RootDirectory, MFD]:
+        if self.mfd is not None:
+            return self.mfd
+        else:
+            return RDS0RootDirectory(self)
 
     def show_accounts(self, volume_id: str, options: t.Dict[str, bool]) -> None:
         """
         Listing of all PPN
         """
-        for mfd_entry in self.read_mfd_name_entries():
+        for mfd_entry in self.get_root().iterdir():
             sys.stdout.write(f"{mfd_entry.ppn}\n")
         return
 
@@ -1275,12 +1408,16 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
         files = 0
         blocks = 0
         ppn, pattern = rsts_split_fullname(fullname=pattern, wildcard=True, ppn=self.ppn)
+        if ppn is None:
+            self.show_accounts(volume_id, options)
+            return
         sys.stdout.write(f" Name .Ext  Size    Prot   Date       {volume_id}:{ppn}\n")
         for x in self.filter_entries_list(pattern, ppn=ppn, include_all=True, wildcard=True):
-            dt = x.creation_date.strftime("%d-%b-%y %H:%M")
-            sys.stdout.write(f"{x.filename:<6}.{x.extension:<3} {x.account_entry.usiz:>5}   <{x.uprot:>3}> {dt}\n")
-            blocks += x.account_entry.usiz
-            files += 1
+            if isinstance(x, UFDNameEntry):
+                dt = x.creation_date.strftime("%d-%b-%y %H:%M")
+                sys.stdout.write(f"{x.stem:<6}.{x.extension:<3} {x.account_entry.usiz:>5}   <{x.uprot:>3}> {dt}\n")
+                blocks += x.account_entry.usiz
+                files += 1
         sys.stdout.write("\n")
         sys.stdout.write(f" Total of {blocks} blocks in {files} files in {volume_id}:{ppn}\n")
 
@@ -1301,7 +1438,7 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
             except Exception:
                 return
         if ppn is not None:
-            for mfd_entry in self.read_mfd_name_entries():
+            for mfd_entry in self.get_root().iterdir():
                 match = True
                 if ppn.group != PPN.ANY_GROUP:
                     match &= mfd_entry.ppn.group == ppn.group
@@ -1338,40 +1475,24 @@ class RSTSFilesystem(AbstractRXBlockFilesystem):
             # Listing of all PPN
             sys.stdout.write("\nProject Programmer Numbers\n")
             sys.stdout.write("--------------------------\n\n")
-            for mfd_entry in self.read_mfd_name_entries():
+            for mfd_entry in self.get_root().iterdir():
                 sys.stdout.write(f"{mfd_entry}\n")
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current Project Programmer Number
         """
-        try:
-            self.ppn = PPN.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
+        if entry is None:
+            self.uic = None
+        else:
+            assert isinstance(entry, UserFileDirectory)
+            self.ppn = entry.ppn
 
     def get_pwd(self) -> str:
         """
         Get the current Project Programmer Number
         """
-        return str(self.ppn)
-
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the given path is a Project Programmer Number (PPN)
-        """
-        try:
-            PPN.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
+        return str(self.ppn) if self.ppn is not None else ""
 
     def path_join(self, path: str, *paths: str) -> str:
         """

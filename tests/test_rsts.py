@@ -16,6 +16,9 @@ def test_rsts():
     shell.onecmd(f"mount t: /rsts {DSK}", batch=True)
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, RSTSFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("dir /uic t:", batch=True)

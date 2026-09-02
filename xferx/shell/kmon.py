@@ -141,7 +141,7 @@ class Shell:
             fs = self.volumes.get_volume(volume_id)
             result: t.List[str] = []
             for x in fs.filter_entries_list(pattern):
-                tmp = add_slash(fs, x.basename)
+                tmp = add_slash(fs, x.name)
                 result.append(f"{volume_id}:{tmp}" if has_volume_id else tmp)
             return result
         except Exception:

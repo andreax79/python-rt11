@@ -21,7 +21,7 @@ def test_os32mt_read():
     for i in range(0, 1000):
         assert f"{i:5d} ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890" in x
 
-    l = list(fs.entries_list)
+    l = list(fs.get_root().iterdir())
     assert len(l) == 11
 
 
@@ -32,6 +32,9 @@ def test_os32mt_write():
     shell.onecmd(f"mount ou: /os32mt {DSK}.mo", batch=True)
     fs = shell.volumes.get_volume('OU')
     assert isinstance(fs, OS32TapeFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     d = fs.get_file_entry("d500.TXT")
     for k in fs.fs_entry_metadata:
@@ -64,7 +67,7 @@ def test_os32mt_init():
     shell.onecmd("dir ou:", batch=True)
 
     fs = shell.volumes.get_volume('OU')
-    l = list(fs.entries_list)
+    l = list(fs.get_root().iterdir())
     assert len(l) == 11
 
     x = fs.read_text("d1000.txt")

@@ -28,10 +28,10 @@ from ..abstract import AbstractFile
 from ..commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL
 from ..device.abstract import AbstractDevice
 from ..device.block_12bit import BlockDevice12Bit, COSRXBlockDevice12Bit
-from .os8fs import OS8DirectoryEntry, OS8Filesystem, OS8Segment, os8_split_fullname
+from .os8fs import OS8Path, OS8Filesystem, OS8Segment, os8_split_fullname
 
 __all__ = [
-    "COS300DirectoryEntry",
+    "COS300Path",
     "COS300Filesystem",
 ]
 
@@ -59,16 +59,16 @@ COS_CODES = [
 COS_INDEX = {ch: i for i, ch in enumerate(COS_CODES) if ch}
 
 
-def split_ext(fullname: str) -> t.Tuple[str, str]:
+def split_ext(name: str) -> t.Tuple[str, str]:
     """
-    Split a fullname into the filename and extension.
+    Split a name into the stem and extension.
     """
-    fullname = fullname.upper()
+    name = name.upper()
     try:
-        filename, extension = fullname.split(".", 1)
-        return filename, extension
+        stem, extension = name.split(".", 1)
+        return stem, extension
     except Exception:
-        return (fullname, "")
+        return (name, "")
 
 
 def cos_file_type_to_os8_extension(file_type: str) -> str:
@@ -182,7 +182,7 @@ def ascii_to_cos_codes(text: t.Union[bytes, bytearray]) -> t.List[int]:
     return words
 
 
-class COS300DirectoryEntry(OS8DirectoryEntry):
+class COS300Path(OS8Path):
     @property
     def file_type(self) -> t.Optional[str]:
         """File type"""
@@ -202,8 +202,8 @@ class COS300DirectoryEntry(OS8DirectoryEntry):
             return "PERM"
 
     @classmethod
-    def read(cls, segment: "OS8Segment", words: t.List[int], position: int, file_position: int) -> "OS8DirectoryEntry":
-        self = super().read(segment, words, position, file_position)
+    def read(cls, segment: "OS8Segment", words: t.List[int], position: int, first_block_number: int) -> "OS8Path":
+        self = super().read(segment, words, position, first_block_number)
         # Convert the extension to a COS 1 character extension
         self.extension = COS_EXTENSIONS.get(self.extension, self.extension)
         return self
@@ -235,7 +235,7 @@ class COS300DirectoryEntry(OS8DirectoryEntry):
                 return data
 
     def __str__(self) -> str:
-        return f"{self.fullname:<10} {self.file_type:<6} {self.creation_date or '          '} {self.length:>6} {self.file_position:6d}"
+        return f"{self.fullname:<10} {self.file_type:<6} {self.creation_date or '          '} {self.length:>6} {self.first_block_number:6d}"
 
 
 class COS300Filesystem(OS8Filesystem):
@@ -263,7 +263,7 @@ class COS300Filesystem(OS8Filesystem):
         "file_type",
     ]
 
-    directory_entry_class: t.Type[OS8DirectoryEntry] = COS300DirectoryEntry
+    directory_entry_class: t.Type[OS8Path] = COS300Path
 
     def __init__(self, file_or_device: t.Union["AbstractFile", "AbstractDevice"]):
         if isinstance(file_or_device, AbstractFile):
@@ -302,9 +302,9 @@ class COS300Filesystem(OS8Filesystem):
         sys.stdout.write("NAME   TYPE LN    DATE\n\n")
         for segment in part.read_dir_segments():
             for x in segment.filter_entries_list(pattern):
-                fullname = f"{x.filename:<6}.{x.extension:<2}"
+                fullname = f"{x.stem:<6}.{x.extension:<2}"
                 file_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
-                sys.stdout.write(f"{x.filename:<6}  {x.extension:>2}  {x.length:>02}  {file_date:<9}\n")
+                sys.stdout.write(f"{x.stem:<6}  {x.extension:>2}  {x.length:>02}  {file_date:<9}\n")
         unused = part.free()
         sys.stdout.write(f" <{unused:>04} FREE BLOCKS>\n")
 

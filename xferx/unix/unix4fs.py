@@ -101,7 +101,7 @@ class UNIXInode4(UNIXInode):
         return self
 
     def blocks(self) -> t.Iterator[int]:
-        if self.is_large:
+        if self.is_large():
             # Large file
             for block_number in self.addr:
                 if block_number == 0:
@@ -118,24 +118,20 @@ class UNIXInode4(UNIXInode):
                     break
                 yield block_number
 
-    @property
-    def isdir(self) -> bool:
+    def is_dir(self) -> bool:
         return (self.flags & V4_DIR) == V4_DIR
 
-    @property
-    def is_regular_file(self) -> bool:
-        return not self.isdir
+    def is_file(self) -> bool:
+        return not self.is_dir()
 
-    @property
     def is_large(self) -> bool:
         return bool(self.flags & V4_LARGE)
 
-    @property
     def is_allocated(self) -> bool:
         return bool(self.flags & V4_USED)
 
     def __str__(self) -> str:
-        if not self.is_allocated:
+        if not self.is_allocated():
             return f"{self.inode_num:>4}# ---"
         else:
             mode = format_mode(self.flags, version=self.fs.version, perms=self.fs.perms)
@@ -150,12 +146,7 @@ class UNIX4Filesystem(UNIXFilesystem):
     fs_name = "unix4"
     fs_description = "UNIX version 4"
     fs_platforms = ["pdp-11"]
-    version: int = 4  # UNIX version
-    inode_size = V4_INODE_SIZE
-    dir_format = V4_DIR_FORMAT
-    root_inode = V4_ROOT_INODE
-    perms = V4_PERMS
-    unix_inode_class = UNIXInode4
+    fs_path_separator = "/"
     fs_entry_metadata = [
         "creation_date",
         "last_access",
@@ -164,6 +155,13 @@ class UNIX4Filesystem(UNIXFilesystem):
         "unix_uid",
         "unix_gid",
     ]
+
+    version: int = 4  # UNIX version
+    inode_size = V4_INODE_SIZE
+    dir_format = V4_DIR_FORMAT
+    root_inode = V4_ROOT_INODE
+    perms = V4_PERMS
+    unix_inode_class = UNIXInode4
 
     @classmethod
     def mount(

@@ -28,7 +28,7 @@ from abc import ABC, abstractmethod
 from datetime import date, datetime, timedelta
 from functools import reduce
 
-from ..abstract import AbstractBlockFilesystem, AbstractDirectoryEntry, AbstractFile
+from ..abstract import AbstractBlockFilesystem, XFERXPath, AbstractFile
 from ..commons import (
     BLOCK_SIZE,
     READ_FILE_FULL,
@@ -134,11 +134,9 @@ def format_time(t: int) -> str:
 
 class UNIXFile(AbstractFile):
     inode: "UNIXInode"
-    closed: bool
 
     def __init__(self, inode: "UNIXInode"):
         self.inode = inode
-        self.closed = False
 
     def read_block(
         self,
@@ -201,12 +199,6 @@ class UNIXFile(AbstractFile):
         """
         return self.inode.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return str(self.inode)
 
@@ -252,17 +244,14 @@ class UNIXInode(ABC):
     def blocks(self) -> t.Iterator[int]:
         pass
 
-    @property
     @abstractmethod
-    def isdir(self) -> bool:
+    def is_dir(self) -> bool:
         pass
 
-    @property
     @abstractmethod
-    def is_regular_file(self) -> bool:
+    def is_file(self) -> bool:
         pass
 
-    @property
     @abstractmethod
     def is_allocated(self) -> bool:
         pass
@@ -289,7 +278,7 @@ class UNIXInode(ABC):
         return str(self.__dict__)
 
 
-class UNIXDirectoryEntry(AbstractDirectoryEntry):
+class UNIXDirectoryEntry(XFERXPath):
     fs: "UNIXFilesystem"
     _inode: t.Optional["UNIXInode"]
     inode_num: int  # Inode number
@@ -333,17 +322,29 @@ class UNIXDirectoryEntry(AbstractDirectoryEntry):
             self._inode = self.fs.read_inode(self.inode_num)
         return self._inode
 
-    @property
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return self.inode.is_dir()
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return self.inode_num == self.fs.root_inode
+
     def is_empty(self) -> bool:
-        return not self.inode.is_allocated
+        return not self.inode.is_allocated()
 
     @property
     def fullname(self) -> str:
         return unix_join(self.dirname, self.filename)
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.filename
+
+    @property
+    def parent(self) -> "UNIXDirectoryEntry":
+        """The logical parent"""
+        return self.fs.get_file_entry(self.dirname)
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """Get the length in blocks"""
@@ -459,7 +460,7 @@ class UNIXDirectoryEntry(AbstractDirectoryEntry):
         return self.filename > other.filename
 
     def __str__(self) -> str:
-        return f"{self.inode_num:>5} {self.basename}"
+        return f"{self.inode_num:>5} {self.name}"
 
 
 class Dirent:
@@ -502,7 +503,7 @@ class UNIXDirectory:
         Read the directory
         """
         self = UNIXDirectory(fs, inode)
-        if self.inode.isdir:
+        if self.inode.is_dir():
             self.entries = []
             with UNIXFile(self.inode) as f:
                 try:
@@ -573,8 +574,8 @@ class UNIXFilesystem(AbstractBlockFilesystem):
             inode = self.read_inode(inode_num)
             if not parts:
                 # No more parts, inode found
-                return inode if inode.is_allocated else None
-            elif not inode.isdir:
+                return inode if inode.is_allocated() else None
+            elif not inode.is_dir():
                 # More parts and not a directory, not found
                 return None
             # Get next part
@@ -589,6 +590,13 @@ class UNIXFilesystem(AbstractBlockFilesystem):
                         break
                 if not found:
                     return None
+
+    def get_root(self) -> "UNIXDirectoryEntry":
+        """
+        Get the root directory entry
+        """
+        inode = self.read_inode(self.root_inode)
+        return UNIXDirectoryEntry(self, "/", self.root_inode, inode)
 
     def list_dir(self, inode: UNIXInode) -> t.List[Dirent]:
         directory = self.directory_class.read(self, inode)
@@ -615,7 +623,7 @@ class UNIXFilesystem(AbstractBlockFilesystem):
             absolute_path = pattern
         else:
             absolute_path = unix_join(self.pwd, pattern or "")
-        if self.isdir(absolute_path):
+        if self.is_dir(absolute_path):
             if not expand:
                 yield self.get_file_entry(absolute_path)  # type: ignore
                 return
@@ -624,7 +632,7 @@ class UNIXFilesystem(AbstractBlockFilesystem):
         else:
             dirname, pattern = unix_split(absolute_path)
         for entry in self.read_dir_entries(dirname):  # type: ignore
-            if filename_match(entry.basename, pattern, wildcard):
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
     @property
@@ -644,10 +652,6 @@ class UNIXFilesystem(AbstractBlockFilesystem):
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
     ) -> UNIXDirectoryEntry:
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
-
-    def isdir(self, fullname: str) -> bool:
-        inode = self.get_inode(fullname)
-        return inode is not None and inode.isdir
 
     def read_uids(self) -> t.Dict[int, str]:
         """
@@ -688,18 +692,18 @@ class UNIXFilesystem(AbstractBlockFilesystem):
             sys.stdout.write(f"blocks = {blocks}\n")
 
         for x in entries:
-            if not options.get("full") and x.basename.startswith("."):
+            if not options.get("full") and x.name.startswith("."):
                 pass
             mode = format_mode(x.inode.flags, self.version, self.perms)
             time = format_time(x.inode.mtime)
             uid = uids.get(x.inode.uid, str(x.inode.uid))
             if self.version < 3:
                 sys.stdout.write(
-                    f"{x.inode_num:>3} {mode} {x.inode.nlinks:>2} {uid:<6} {x.inode.size:>6} {time} {x.basename}\n"
+                    f"{x.inode_num:>3} {mode} {x.inode.nlinks:>2} {uid:<6} {x.inode.size:>6} {time} {x.name}\n"
                 )
             else:
                 sys.stdout.write(
-                    f"{x.inode_num:>5} {mode}{x.inode.nlinks:>2} {uid:<6}{x.inode.size:>7} {time} {x.basename}\n"
+                    f"{x.inode_num:>5} {mode}{x.inode.nlinks:>2} {uid:<6}{x.inode.size:>7} {time} {x.name}\n"
                 )
 
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
@@ -716,7 +720,7 @@ class UNIXFilesystem(AbstractBlockFilesystem):
                     sys.stdout.write(inode.examine())  # type: ignore
                 else:
                     sys.stdout.write(dump_struct(inode.__dict__, newline=True))
-                if inode.isdir:
+                if inode.is_dir():
                     # Dump the directory entries
                     sys.stdout.write("Directory entries:\n")
                     for dirent in self.list_dir(inode):
@@ -730,24 +734,15 @@ class UNIXFilesystem(AbstractBlockFilesystem):
                 inode = self.read_inode(i)
                 sys.stdout.write(f"{inode}\n")
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current directory
         """
-        if not fullname.startswith("/"):
-            fullname = unix_join(self.pwd, fullname)
-        fullname = os.path.normpath(fullname)
-        if self.isdir(fullname):
-            self.pwd = fullname
-            return True
+        if entry is None:
+            self.pwd = "/"
         else:
-            return False
+            assert isinstance(entry, UNIXDirectoryEntry)
+            self.pwd = entry.fullname
 
     def get_pwd(self) -> str:
         """

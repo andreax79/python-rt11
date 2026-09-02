@@ -12,9 +12,8 @@ from xferx.device.block_18bit import (
 )
 from xferx.pdp15.dos15fs import (
     WORDS_PER_LINKED_BLOCK,
-    DOS15DirectoryEntry,
+    DOS15Path,
     DOS15Filesystem,
-    MasterFileDirectory,
     RetrievalInformationBlock,
     date_to_dos15,
     dos15_to_date,
@@ -51,7 +50,7 @@ def test_dos15_directory_entry_to_words():
         (5 << 16) | 0o456,
         date_to_dos15(date(1971, 9, 24)),
     ]
-    entry = DOS15DirectoryEntry.read(SimpleNamespace(fs=None), original_words, 7, 0)
+    entry = DOS15Path.read(SimpleNamespace(fs=None), original_words, 7, 0)
 
     assert entry.to_words() == original_words
 
@@ -74,7 +73,7 @@ def test_dos15_directory_entry_to_words():
         date_to_dos15(date(2001, 12, 31)),
     ]
     assert entry.to_words() == expected_words
-    round_trip = DOS15DirectoryEntry.read(SimpleNamespace(fs=None), entry.to_words(), 7, 0)
+    round_trip = DOS15Path.read(SimpleNamespace(fs=None), entry.to_words(), 7, 0)
     assert round_trip.to_words() == expected_words
 
 
@@ -115,15 +114,21 @@ def test_dos15():
     shell.onecmd(f"mount t: /dos15 {DSK}", batch=True)
     fs = shell.volumes.get_volume("T")
     assert isinstance(fs, DOS15Filesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
+
+    assert fs.uic == None
+    shell.onecmd("cd t:[ABC]", batch=True)
     assert fs.uic == "ABC"
 
     shell.onecmd("dir t:", batch=True)
     entries = list(fs.entries_list)
     assert all(
-        DOS15DirectoryEntry.read(entry.ufd, entry.to_words(), entry.file_number, 0).to_words() == entry.to_words()
+        DOS15Path.read(entry.ufd, entry.to_words(), entry.file_number, 0).to_words() == entry.to_words()
         for entry in entries
     )
-    entry_lengths = {entry.basename: entry.length for entry in entries}
+    entry_lengths = {entry.name: entry.length for entry in entries}
     assert entry_lengths["1;BIN"] == 1
     assert entry_lengths["10;BIN"] == 1
     assert entry_lengths["100;BIN"] == 1
@@ -164,7 +169,8 @@ def test_dos15_delete_file(tmp_path):
     shell.onecmd(f"copy {DSK} {disk}", batch=True)
     shell.onecmd(f"mount t: /dos15 {disk}", batch=True)
     fs = shell.volumes.get_volume("T")
-    entry = fs.get_file_entry("1000;BIN")
+    shell.volumes.chdir("T:[ABC]")
+    entry = fs.get_file_entry("[ABC]1000;BIN")
     initial_entry_count = len(list(fs.entries_list))
     length = entry.length
     data_blocks = entry.get_blocks()
@@ -174,7 +180,7 @@ def test_dos15_delete_file(tmp_path):
 
     assert entry.delete()
     with pytest.raises(FileNotFoundError):
-        fs.get_file_entry("1000;BIN")
+        fs.get_file_entry("[ABC]1000;BIN")
     assert len(list(fs.entries_list)) == initial_entry_count - 1
     bitmap = fs.read_bitmap()
     for block_number in data_blocks:
@@ -183,13 +189,14 @@ def test_dos15_delete_file(tmp_path):
 
     rib_words = fs.read_words_block(rib.block_number)
     assert rib_words[rib_position + 1 : rib_position + 1 + length] == [0] * length
-    # if rib.block_number not in data_blocks:
-    #     assert fs.read_bitmap().is_free(rib.block_number)
 
+    shell.onecmd("sy:", batch=True)
+    shell.onecmd("dismount t:", batch=True)
     shell.onecmd(f"mount t: /dos15 {disk}", batch=True)
     fs = shell.volumes.get_volume("T")
     with pytest.raises(FileNotFoundError):
-        fs.get_file_entry("1000;BIN")
+        fs.get_file_entry("[ABC]1000;BIN")
+    shell.volumes.chdir("T:[ABC]")
     assert len(list(fs.entries_list)) == initial_entry_count - 1
     assert all(
         fs.read_bitmap().is_free(block_number) for block_number in data_blocks if block_number != rib.block_number
@@ -202,13 +209,13 @@ def test_dos15_ufd_write(tmp_path):
     shell.onecmd(f"copy {DSK} {disk}", batch=True)
     shell.onecmd(f"mount t: /dos15 {disk}", batch=True)
     fs = shell.volumes.get_volume("T")
-    ufd = next(MasterFileDirectory.read(fs).entries_list)
-    original_entries = list(ufd.entries_list)
+    ufd = next(fs.get_root().iterdir())
+    original_entries = list(ufd.iterdir(include_all=True))
 
     original_entries[0].protection_code = 3
     ufd.write(original_entries)
-    rewritten_ufd = next(MasterFileDirectory.read(fs).entries_list)
-    rewritten_entries = list(rewritten_ufd.entries_list)
+    rewritten_ufd = next(fs.get_root().iterdir())
+    rewritten_entries = list(rewritten_ufd.iterdir(include_all=True))
     assert len(list(rewritten_ufd.read_ufd_blocks())) == 1
     assert rewritten_entries[0].protection_code == 3
     assert rewritten_entries[0].to_words() == original_entries[0].to_words()
@@ -223,11 +230,11 @@ def test_dos15_ufd_write_grows_and_links_blocks(tmp_path):
     shell.onecmd(f"copy {DSK} {disk}", batch=True)
     shell.onecmd(f"mount t: /dos15 {disk}", batch=True)
     fs = shell.volumes.get_volume("T")
-    ufd = next(MasterFileDirectory.read(fs).entries_list)
-    entries = list(ufd.entries_list)
+    ufd = next(fs.get_root().iterdir())
+    entries = list(ufd.iterdir(include_all=True))
     for file_number in range(len(entries), 32):
         extra_entry = copy.copy(entries[0])
-        extra_entry.filename = f"X{file_number:05d}"
+        extra_entry.stem = f"X{file_number:05d}"
         entries.append(extra_entry)
 
     ufd.write(entries)
@@ -236,13 +243,13 @@ def test_dos15_ufd_write_grows_and_links_blocks(tmp_path):
     assert blocks[0].next_block_number == blocks[1].block_number
     assert blocks[1].previous_block_number == blocks[0].block_number
     assert blocks[1].next_block_number == 0o777777
-    assert [entry.basename for entry in ufd.entries_list][-1] == "X00031;BIN"
+    assert [entry.name for entry in ufd.iterdir(include_all=True)][-1] == "X00031;BIN"
     assert not fs.read_bitmap().is_free(blocks[1].block_number)
 
     shell.onecmd(f"mount t: /dos15 {disk}", batch=True)
     fs = shell.volumes.get_volume("T")
-    ufd = next(MasterFileDirectory.read(fs).entries_list)
-    assert len(list(ufd.entries_list)) == 32
+    ufd = next(fs.get_root().iterdir())
+    assert len(list(ufd.iterdir(include_all=True))) == 32
     blocks = list(ufd.read_ufd_blocks())
     assert len(blocks) == 2
     assert blocks[0].next_block_number == blocks[1].block_number
@@ -264,7 +271,7 @@ def test_dos15_create_file(tmp_path):
         data1 = b"".join([decode_block_format(block) for block in blocks_content])
         assert data1 == data, "data1 != data"
 
-        filename = f"t:T{l};BIN"
+        filename = f"[ABC]T{l};BIN"
         fs.write_bytes(filename, data, file_mode=IMAGE)
         with fs.get_file_entry(filename).open(file_mode=IMAGE) as f:
             t = f.read_words_block(0)
@@ -275,9 +282,9 @@ def test_dos15_create_file(tmp_path):
 
     content = from_18bit_words_to_bytes([index % 1 << 18 for index in range(1024)], IMAGE)
     fs.write_bytes(
-        "NEW01;BIN", content, metadata={"creation_date": date(1980, 5, 15), "protection_code": 3}, file_mode=IMAGE
+        "[ABC]NEW01;BIN", content, metadata={"creation_date": date(1980, 5, 15), "protection_code": 3}, file_mode=IMAGE
     )
-    entry = fs.get_file_entry("NEW01;BIN")
+    entry = fs.get_file_entry("[ABC]NEW01;BIN")
     assert entry.length == 5
     assert len(entry.get_blocks()) == 5
     assert entry.creation_date == date(1980, 5, 15)
@@ -286,7 +293,7 @@ def test_dos15_create_file(tmp_path):
 
     shell.onecmd(f"mount t: /dos15 {disk}", batch=True)
     fs = shell.volumes.get_volume("T")
-    entry = fs.get_file_entry("NEW01;BIN")
+    entry = fs.get_file_entry("[ABC]NEW01;BIN")
     assert entry.read_bytes()[: len(content)] == content
     assert len(entry.get_blocks()) == 5
 
@@ -298,7 +305,7 @@ def test_dos15_create_file_ascii(tmp_path):
     shell.onecmd(f"mount t: /dos15 {disk}", batch=True)
     fs = shell.volumes.get_volume("T")
 
-    fs.write_bytes("TEXT;BIN", b"line one\nline two\n", file_mode="ASCII")
-    text = fs.get_file_entry("TEXT;BIN").read_bytes(file_mode="ASCII")
+    fs.write_bytes("[ABC]TEXT;BIN", b"line one\nline two\n", file_mode="ASCII")
+    text = fs.get_file_entry("[ABC]TEXT;BIN").read_bytes(file_mode="ASCII")
     assert b"line one" in text
     assert b"line two" in text

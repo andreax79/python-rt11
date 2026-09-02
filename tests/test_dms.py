@@ -186,7 +186,7 @@ def test_directory_entry():
     t = [3113, 3072, 0, 512, 3138]
     dn = DirectorNameBlock(None)
     d = DMSDirectoryEntry.read(dn, None, t, 0)
-    assert d.filename == "PIP "
+    assert d.stem == "PIP "
     assert d.extension == "SYS"
     assert d.file_number == 2
     assert d.dms_low_core_addr == 0
@@ -260,7 +260,7 @@ def test_directory_name_block():
     assert fs.t[127] == dn1w
     d = fs.get_file_entry("PIP.SYS")
     assert d is not None
-    assert d.filename == "PIP "
+    assert d.stem == "PIP "
     assert d.extension == "SYS"
     assert d.file_number == 2
     assert d.dms_low_core_addr == 0
@@ -292,6 +292,9 @@ def test_dms():
     shell.onecmd(f"mount t: /dms {DSK}", batch=True)
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, DMSFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("type t:1.ascii", batch=True)
@@ -328,7 +331,7 @@ def test_dms():
 
     e1 = fs.get_file_entry("AAAA.USER")
     assert e1 is not None
-    assert e1.filename == "AAAA"
+    assert e1.stem == "AAAA"
     assert e1.extension == "USER"
     assert e1.dms_low_core_addr == 0o777
     assert e1.dms_high_core_addr == 0
@@ -431,7 +434,7 @@ def test_dms_dectape():
 
     e1 = fs.get_file_entry("AAAA.USER")
     assert e1 is not None
-    assert e1.filename == "AAAA"
+    assert e1.stem == "AAAA"
     assert e1.extension == "USER"
     assert e1.dms_low_core_addr == 0o777
     assert e1.dms_high_core_addr == 0

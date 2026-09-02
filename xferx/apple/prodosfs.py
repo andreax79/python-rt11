@@ -27,7 +27,7 @@ import typing as t
 from abc import abstractmethod
 from datetime import date, datetime
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile
+from ..abstract import XFERXPath, AbstractFile
 from ..commons import (
     ASCII,
     BLOCK_SIZE,
@@ -331,13 +331,11 @@ def check_fork(fork: t.Optional[str], default: str = "") -> str:
 
 class ProDOSFile(AbstractFile):
     entry: "FileEntry"
-    closed: bool
     fork: t.Optional[str]
 
     def __init__(self, entry: "FileEntry", fork: t.Optional[str] = None):
         self.entry = entry
         self.fork = fork
-        self.closed = False
 
     def read_block(
         self,
@@ -406,12 +404,6 @@ class ProDOSFile(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
@@ -453,7 +445,7 @@ class IndexBlock:
         self.fs.write_block(buffer, self.block_number)
 
 
-class ProDOSAbstractDirEntry(AbstractDirectoryEntry):
+class ProDOSAbstractDirEntry(XFERXPath):
     """
     ProDOS Abstract Directory Entry
 
@@ -481,7 +473,7 @@ class ProDOSAbstractDirEntry(AbstractDirectoryEntry):
     """
 
     fs: "ProDOSFilesystem"  # Filesystem
-    parent: t.Optional["FileEntry"]  # Parent directory
+    _parent: t.Optional["FileEntry"]  # Parent directory
     prodos_storage_type: int = 0  # Storage type
     filename: str = ""  # Volume/subdirectory/file name
     version: int = 0  #  0 in ProDOS 1.0
@@ -490,7 +482,7 @@ class ProDOSAbstractDirEntry(AbstractDirectoryEntry):
 
     def __init__(self, fs: "ProDOSFilesystem", parent: t.Optional["FileEntry"]):
         self.fs = fs
-        self.parent = parent
+        self._parent = parent
 
     @classmethod
     def read(
@@ -527,14 +519,21 @@ class ProDOSAbstractDirEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        if self.parent:
-            return prodos_join(self.parent.fullname, self.filename)
+        if self._parent:
+            return prodos_join(self._parent.fullname, self.filename)
         else:
             return self.filename
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.filename
+
+    @property
+    def parent(self) -> "FileEntry":
+        if self._parent is not None:
+            return self._parent
+        else:
+            return self.fs.get_root()
 
     @property
     def storage_type_name(self) -> str:
@@ -1207,6 +1206,9 @@ class AbstractDirectoryFileEntry(FileEntry):
         """
         pass
 
+    def is_dir(self) -> bool:
+        return True
+
 
 class DirectoryFileEntry(AbstractDirectoryFileEntry):
     """
@@ -1480,6 +1482,10 @@ class VolumeDirectoryFileEntry(DirectoryFileEntry):
         if not self.update_dir_entry(self.header, create=True):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         return self
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
 
 
 class ExtendedFileEntry(FileEntry):
@@ -1917,6 +1923,12 @@ class ProDOSFilesystem(AbstractAppleDiskFilesystem):
         """
         return ProDOSBitmap.read(self)
 
+    def get_root(self) -> "DirectoryFileEntry":
+        """
+        Get the root directory entry
+        """
+        return self.root
+
     def prepare_filter_entries_list(
         self,
         pattern: t.Optional[str],
@@ -1927,7 +1939,7 @@ class ProDOSFilesystem(AbstractAppleDiskFilesystem):
         if not pattern:
             pattern = "*"
         absolute_path = prodos_join(self.pwd, pattern) if not pattern.startswith("/") else pattern
-        if self.isdir(absolute_path) and expand:
+        if self.is_dir(absolute_path) and expand:
             dirname = pattern
             pattern = "*"
         else:
@@ -1943,8 +1955,9 @@ class ProDOSFilesystem(AbstractAppleDiskFilesystem):
         wildcard: bool = True,
     ) -> t.Iterator["ProDOSAbstractDirEntry"]:
         dirname, pattern = self.prepare_filter_entries_list(pattern, include_all, expand, wildcard)
+        entry: ProDOSAbstractDirEntry
         for entry in self.get_file_entry(dirname, AbstractDirectoryFileEntry).iterdir():  # type: ignore
-            if filename_match(entry.basename, pattern, wildcard) and (include_all or isinstance(entry, FileEntry)):
+            if filename_match(entry.name, pattern, wildcard) and (include_all or isinstance(entry, FileEntry)):
                 yield entry
 
     @property
@@ -1974,7 +1987,7 @@ class ProDOSFilesystem(AbstractAppleDiskFilesystem):
             if not hasattr(parent, "iterdir"):
                 raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), path)
             for child in parent.iterdir():  # type: ignore
-                if child.basename == part and isinstance(child, entry_class):
+                if child.name == part and isinstance(child, entry_class):
                     entry = child
                     break
             if entry is None:
@@ -2121,23 +2134,13 @@ class ProDOSFilesystem(AbstractAppleDiskFilesystem):
         bitmap.write()
         return directory
 
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the path is a directory
-        """
-        try:
-            self.get_file_entry(fullname, AbstractDirectoryFileEntry)  # type: ignore
-            return True
-        except FileNotFoundError:
-            return False
-
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         dirname, pattern = self.prepare_filter_entries_list(pattern, include_all=False, wildcard=True)
         entry: AbstractDirectoryFileEntry = self.get_file_entry(dirname, AbstractDirectoryFileEntry)  # type: ignore
-        sys.stdout.write(f"\n{entry.basename}\n")
+        sys.stdout.write(f"\n{entry.name}\n")
         sys.stdout.write("\n NAME           TYPE  BLOCKS  MODIFIED         CREATED          ENDFILE SUBTYPE\n\n")
         for x in entry.iterdir():
-            if filename_match(x.basename, pattern, wildcard=True) and (isinstance(x, FileEntry)):
+            if filename_match(x.name, pattern, wildcard=True) and (isinstance(x, FileEntry)):
                 file_type = format_file_type(x.prodos_file_type)
                 locked = " " if (x.access & ACCESS_WRITE_ENABLE) == ACCESS_WRITE_ENABLE else "*"
                 last_mod_date = format_time(x.last_mod_date)
@@ -2182,12 +2185,6 @@ class ProDOSFilesystem(AbstractAppleDiskFilesystem):
             for x in self.filter_entries_list("*", include_all=True, wildcard=True):
                 sys.stdout.write(f"{x}\n")
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
     @classmethod
     def initialize(
         cls,
@@ -2213,16 +2210,14 @@ class ProDOSFilesystem(AbstractAppleDiskFilesystem):
         self.volume_name = volume_name
         return self
 
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current directory
         """
-        fullname = prodos_normpath(fullname, self.pwd)
-        if self.isdir(fullname):
-            self.pwd = fullname
-            return True
+        if entry is None:
+            self.pwd = f"/{self.volume_name}"
         else:
-            return False
+            self.pwd = entry.fullname
 
     def get_pwd(self) -> str:
         """

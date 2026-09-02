@@ -29,7 +29,7 @@ import typing as t
 from datetime import date, datetime, timedelta
 
 from ..device.block import BlockDevice
-from ..abstract import AbstractBlockFilesystem, AbstractDirectoryEntry, AbstractFile
+from ..abstract import AbstractBlockFilesystem, XFERXPath, AbstractFile
 from ..commons import (
     ASCII,
     IMAGE,
@@ -224,29 +224,29 @@ def os32_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) -
     """
     fullname = (fullname or "").upper()
     try:
-        filename, extension = fullname.split(".", 1)
+        stem, extension = fullname.split(".", 1)
     except Exception:
-        filename = fullname
+        stem = fullname
         extension = "*" if wildcard else ""
 
-    filename = filename[:FILE_NAME_LENGTH]
+    stem = stem[:FILE_NAME_LENGTH]
     # The first character must be alphabetic, the remaining alphanumeric
-    if not filename or not (filename[0].isalpha() or (wildcard and filename[0] == '*')):
-        raise ValueError(f"Invalid filename: {filename} (First character must be alphabetic)")
-    if not all(c.isalnum() or (wildcard and c == '*') for c in filename):
-        raise ValueError(f"Invalid filename: {filename} (Only alphanumeric characters are allowed)")
+    if not stem or not (stem[0].isalpha() or (wildcard and stem[0] == '*')):
+        raise ValueError(f"Invalid filename: {stem} (First character must be alphabetic)")
+    if not all(c.isalnum() or (wildcard and c == '*') for c in stem):
+        raise ValueError(f"Invalid filename: {stem} (Only alphanumeric characters are allowed)")
     extension = extension[:FILE_EXTENSION_LENGTH]
     if not all(c.isalnum() or (wildcard and c == '*') for c in extension):
         raise ValueError(f"Invalid extension: {extension} (Only alphanumeric characters are allowed)")
     if not extension:
-        return filename
+        return stem
     else:
-        return f"{filename}.{extension}"
+        return f"{stem}.{extension}"
 
 
 def os32_split_fullname(
-    account: int, fullname: t.Optional[str], wildcard: bool = True
-) -> t.Tuple[int, t.Optional[str]]:
+    account: t.Optional[int], fullname: t.Optional[str], wildcard: bool = True
+) -> t.Tuple[t.Optional[int], t.Optional[str]]:
     """
     Split the fullname into account and canonical filename
     """
@@ -266,11 +266,11 @@ def os32_split_fullname(
     return account, fullname
 
 
-def account_match(entry_account: int, account: int) -> bool:
+def account_match(entry_account: int, account: t.Optional[int]) -> bool:
     """
     Check if the account matches the entry account
     """
-    return account == ANY_ACCOUNT or entry_account == account
+    return account is None or account == ANY_ACCOUNT or entry_account == account
 
 
 class OS32Bitmap:
@@ -424,12 +424,10 @@ class OS32Bitmap:
 
 
 class OS32File(AbstractFile):
-    entry: "OS32DirectoryEntry"
-    closed: bool
+    entry: "OS32Path"
 
-    def __init__(self, entry: "OS32DirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "OS32Path", file_mode: t.Optional[str] = None):
         self.entry = entry
-        self.closed = False
         self.file_mode = file_mode or IMAGE
 
     def read_block(
@@ -500,17 +498,11 @@ class OS32File(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class OS32DirectoryEntry(AbstractDirectoryEntry):
+class OS32Path(XFERXPath):
     """
     File directory entry
 
@@ -544,7 +536,7 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
     """
 
     fs: "OS32Filesystem"
-    filename: str = ""  # File name, up to 8 characters
+    stem: str = ""  # File name, up to 8 characters
     extension: str = ""  # File extension, up to 3 characters
     account: int = 0  # Account number, 0-65535
     first_block: int = 0  # First data sector for contiguous file, first index sector for indexed file
@@ -572,10 +564,10 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
         fs: "OS32Filesystem",
         buffer: bytes,
         position: int,
-    ) -> "OS32DirectoryEntry":
+    ) -> "OS32Path":
         self = cls(fs)
         (
-            filename,
+            stem,
             extension,
             self.account,
             self.first_block,
@@ -594,7 +586,7 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
             self.num_of_records,
             self.raw_last_assigned_date,
         ) = struct.unpack_from(DIR_ENTRY_FORMAT, buffer, position)
-        self.filename = filename.decode("utf-8", errors='ignore').strip("\0 ")
+        self.stem = stem.decode("utf-8", errors='ignore').strip("\0 ")
         self.extension = extension.decode("utf-8", errors='ignore').strip("\0 ")
         return self
 
@@ -613,15 +605,17 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
         index_block_size: int = 1,
         num_of_records: int = 0,
         keys: int = 0,
-    ) -> "OS32DirectoryEntry":
+    ) -> "OS32Path":
         """
         Create a new directory entry
         """
         self = cls(fs)
         account, fullname = os32_split_fullname(fullname=fullname, account=self.fs.account)  # type: ignore
-        filename, extension = fullname.split(".", 1) if "." in fullname else (fullname, "")
-        self.filename = filename
+        stem, extension = fullname.split(".", 1) if "." in fullname else (fullname, "")
+        self.stem = stem
         self.extension = extension
+        if account is None:
+            raise FileNotFoundError(errno.ENOENT, "No account number specified")
         self.account = account
         self.write_key = (keys >> 8) & 0xFF
         self.read_key = keys & 0xFF
@@ -647,7 +641,7 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
             DIR_ENTRY_FORMAT,
             buffer,
             0,
-            self.filename.encode("utf-8", errors='ignore').ljust(FILE_NAME_LENGTH, b" "),
+            self.stem.encode("utf-8", errors='ignore').ljust(FILE_NAME_LENGTH, b" "),
             self.extension.encode("utf-8", errors='ignore').ljust(FILE_EXTENSION_LENGTH, b" "),
             self.account,
             self.first_block,
@@ -696,6 +690,14 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
                             yield block
         else:
             raise NotImplementedError(f"File type {os32_file_type_description(self.raw_file_type)} not supported")
+
+    def is_dir(self) -> bool:
+        return False
+
+    @property
+    def parent(self) -> "OS32AccountDirectory":
+        """The logical parent"""
+        return OS32AccountDirectory(self.fs, self.account)
 
     @property
     def is_permanent(self) -> bool:
@@ -768,17 +770,17 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
         """
         Full name of the file, including account number
         """
-        return f"{self.basename}/{self.account}"
+        return f"{self.name}/{self.account}"
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         """
         File name with extension
         """
         if not self.extension:
-            return self.filename
+            return self.stem
         else:
-            return f"{self.filename}.{self.extension}"
+            return f"{self.stem}.{self.extension}"
 
     @property
     def last_mod_date(self) -> t.Optional[datetime]:
@@ -828,10 +830,10 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
         """
         Get the segment and position of the directory entry
         """
-        for directory_segment in self.fs.read_dir_segments():
+        for directory_segment in self.fs.get_root().read_dir_segments():
             for i, entry in enumerate(directory_segment.entries_list):
                 if (
-                    entry.filename == self.filename
+                    entry.stem == self.stem
                     and entry.extension == self.extension
                     and entry.account == self.account
                     and entry.is_permanent
@@ -905,7 +907,74 @@ class OS32DirectoryEntry(AbstractDirectoryEntry):
 
     def __str__(self) -> str:
         last_mod_date = format_time(self.last_mod_date)
-        return f"{self.basename:>12}/{self.account:<5}  {self.file_type}  {self.get_size():>8}  {last_mod_date}"
+        return f"{self.name:>12}/{self.account:<5}  {self.file_type}  {self.get_size():>8}  {last_mod_date}"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+class OS32AccountDirectory(XFERXPath):
+    """
+    OS/32 Account
+    """
+
+    fs: "OS32Filesystem"
+    account: int
+
+    def __init__(self, fs: "OS32Filesystem", account: int):
+        self.fs = fs
+        self.account = account
+
+    @property
+    def length(self) -> int:
+        """Length in blocks"""
+        return 0
+
+    def is_dir(self) -> bool:
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self.fs.get_root()
+
+    @property
+    def fullname(self) -> str:
+        return f"{self.name}"
+
+    @property
+    def name(self) -> str:
+        return f"{self.account}"
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return OS32_BLOCK_SIZE
+
+    def open(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> OS32File:
+        """
+        Open a file
+        """
+        raise OSError(errno.EISDIR, os.strerror(errno.EISDIR))
+
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        expand: bool = True,
+        wildcard: bool = True,
+    ) -> t.Iterator["OS32Path"]:
+        for entry in self.fs.get_root().read_entries_list():
+            if (
+                entry.is_permanent
+                and filename_match(entry.name, pattern, wildcard)
+                and account_match(entry.account, self.account)
+            ):
+                yield entry
+
+    def __str__(self) -> str:
+        return self.name
 
     def __repr__(self) -> str:
         return str(self)
@@ -1067,7 +1136,7 @@ class OS32DirectorySegment(object):
     # Next block number
     next_block_number = 0
     # Directory entries
-    entries_list: t.List["OS32DirectoryEntry"]
+    entries_list: t.List["OS32Path"]
 
     def __init__(self, fs: "OS32Filesystem"):
         self.fs = fs
@@ -1083,7 +1152,7 @@ class OS32DirectorySegment(object):
         buffer = self.fs.read_block(self.block_number)
         self.next_block_number = bytes_to_int(buffer, 0)
         for i in range(0, DIR_ENTRIES):
-            dir_entry = OS32DirectoryEntry.read(self.fs, buffer, 4 + DIR_ENTRY_LENGTH * i)
+            dir_entry = OS32Path.read(self.fs, buffer, 4 + DIR_ENTRY_LENGTH * i)
             self.entries_list.append(dir_entry)
         return self
 
@@ -1095,7 +1164,7 @@ class OS32DirectorySegment(object):
         self = cls(fs)
         self.block_number = block_number
         self.next_block_number = 0
-        self.entries_list = [OS32DirectoryEntry(fs) for _ in range(DIR_ENTRIES)]
+        self.entries_list = [OS32Path(fs) for _ in range(DIR_ENTRIES)]
         return self
 
     def to_bytes(self) -> bytes:
@@ -1239,6 +1308,67 @@ class AUFRecord:
         return f"{self.account:>5} {self.group:>5} {self.name:<24} {self.time_left:<12} {self.cpu_left:<9} {self.privileges:08X}  {self.date}"
 
 
+class OS32RootDirectory(XFERXPath):
+    fs: "OS32Filesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self
+
+    def read_dir_segments(self) -> t.Iterator["OS32DirectorySegment"]:
+        """
+        Read directory segments
+        """
+        next_block_number = self.fs.directory_block
+        while next_block_number != 0:
+            segment = OS32DirectorySegment.read(self.fs, next_block_number)
+            next_block_number = segment.next_block_number
+            yield segment
+
+    def read_entries_list(self) -> t.Iterator["OS32Path"]:
+        """
+        Read the directory entries from the segments
+        """
+        for segment in self.read_dir_segments():
+            yield from segment.entries_list
+
+    def read_accounts(self) -> t.List[int]:
+        """
+        Read the accounts in the filesystem
+        """
+        accounts = set()
+        for entry in self.read_entries_list():
+            if entry.is_permanent:
+                accounts.add(entry.account)
+        return sorted(accounts)
+
+    def iterdir(self) -> t.Iterator["OS32AccountDirectory"]:
+        """
+        Iterate over the account directories in the filesystem
+        """
+        for account in self.read_accounts():
+            yield OS32AccountDirectory(self.fs, account)
+
+
 class OS32Filesystem(AbstractBlockFilesystem):
     """
     OS/32 Filesystem
@@ -1307,7 +1437,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
         "keys",
     ]
 
-    account: int = 0  # Account number
+    account: t.Optional[int] = None  # Account number
     volume_name: str = ""  # Volume name
     directory_block: int = 0  # Directory block number
     bitmap_block: int = 0  # Bitmap block number
@@ -1373,16 +1503,6 @@ class OS32Filesystem(AbstractBlockFilesystem):
                 assert not bitmap.is_free(block)
         return self
 
-    def read_dir_segments(self) -> t.Iterator["OS32DirectorySegment"]:
-        """
-        Read directory segments
-        """
-        next_block_number = self.directory_block
-        while next_block_number != 0:
-            segment = OS32DirectorySegment.read(self, next_block_number)
-            next_block_number = segment.next_block_number
-            yield segment
-
     def read_bitmap(self) -> OS32Bitmap:
         """
         Read the bitmap
@@ -1396,34 +1516,49 @@ class OS32Filesystem(AbstractBlockFilesystem):
         expand: bool = True,
         wildcard: bool = True,
         account: t.Optional[int] = None,
-    ) -> t.Iterator["OS32DirectoryEntry"]:
+    ) -> t.Iterator[t.Union["OS32Path", "OS32AccountDirectory"]]:
         if account is None:
             account = self.account
         account, filename_pattern = os32_split_fullname(fullname=pattern, wildcard=wildcard, account=account)
-        for entry in self.entries_list:
-            if (
-                entry.is_permanent
-                and filename_match(entry.basename, filename_pattern, wildcard)
-                and account_match(entry.account, account)
-            ):
-                yield entry
+        if account is None:
+            yield from self.get_root().iterdir()
+        else:
+            for entry in self.get_root().read_entries_list():
+                if (
+                    entry.is_permanent
+                    and filename_match(entry.name, filename_pattern, wildcard)
+                    and account_match(entry.account, account)
+                ):
+                    yield entry
 
     @property
-    def entries_list(self) -> t.Iterator["OS32DirectoryEntry"]:
-        for segment in self.read_dir_segments():
-            for entry in segment.entries_list:
+    def entries_list(self) -> t.Iterator[t.Union["OS32Path", "OS32AccountDirectory"]]:
+        if self.account is None:
+            yield from self.get_root().iterdir()
+        else:
+            for entry in self.get_root().read_entries_list():
                 if entry.is_permanent:
                     yield entry
 
-    def get_file_entry(self, fullname: str) -> OS32DirectoryEntry:
+    def get_file_entry(self, fullname: str) -> t.Union["OS32Path", "OS32AccountDirectory"]:
         """
         Get the directory entry for a file
         """
-        account, filename = os32_split_fullname(fullname=fullname, wildcard=False, account=self.account)
-        for entry in self.entries_list:
-            if entry.is_permanent and entry.basename == filename and entry.account == account:
+        account, stem = os32_split_fullname(fullname=fullname, wildcard=False, account=self.account)
+        if account is None:
+            raise FileNotFoundError(errno.ENOENT, "No account number specified")
+        if not stem:
+            return OS32AccountDirectory(self, account)
+        for entry in self.get_root().read_entries_list():
+            if entry.is_permanent and entry.name == stem and entry.account == account:
                 return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> OS32RootDirectory:
+        """
+        Get the root directory
+        """
+        return OS32RootDirectory(self)
 
     def get_free_directory_entry(self) -> t.Tuple[OS32DirectorySegment, int]:
         """
@@ -1431,7 +1566,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
         Returns a tuple of (segment, index) where segment is the directory segment and
         index is the index of the free entry
         """
-        segment = next(self.read_dir_segments())
+        segment = next(self.get_root().read_dir_segments())
         return segment.get_free_entry()
 
     def write_bytes(
@@ -1467,7 +1602,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> OS32DirectoryEntry:
+    ) -> OS32Path:
         """
         Create a new file with a given length and file type
         """
@@ -1476,7 +1611,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
         creation_date: t.Optional[date] = metadata.get("creation_date")  # type: ignore
         keys: int = metadata.get("keys") or 0  # type: ignore
         num_of_records: int = metadata.get("num_of_records") or 0  # type: ignore
-        fullname = os32_canonical_filename(fullname)
+
         # Delete the file if it already exists
         try:
             self.get_file_entry(fullname).delete()
@@ -1537,7 +1672,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
 
         # Create the directory entry
         directory_segment, index = self.get_free_directory_entry()
-        entry = OS32DirectoryEntry.create(
+        entry = OS32Path.create(
             fs=self,
             fullname=fullname,
             size=size,
@@ -1563,7 +1698,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
         Initialized an empty OS/32 filesystem
         """
         self = cls(file_or_dev)
-        self.account = 0
+        self.account = None
         try:
             self.volume_name = kwargs["name"].strip().upper() or DEFAULT_VOLUME_NAME  # type: ignore
         except Exception:
@@ -1590,16 +1725,6 @@ class OS32Filesystem(AbstractBlockFilesystem):
         volume_descriptor.write()
         return self
 
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the given path is an account number
-        """
-        try:
-            int(fullname)
-            return True
-        except Exception:
-            return False
-
     def read_authorized_user_file(self) -> t.Dict[int, AUFRecord]:
         """
         OS/32 MULTI-TERMINAL MONITOR (MTM) SYSTEM PLANNING AND OPERATOR, Pag 52
@@ -1625,10 +1750,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
         OS/32 MULTI-TERMINAL MONITOR (MTM) SYSTEM PLANNING AND OPERATOR, Pag 66
         https://bitsavers.org/pdf/interdata/32bit/os32/1984_7.2/48-023F00R03_OS32_R7.02_MTM_System_Planning_and_Operator_Reference_Manual_1984.pdf
         """
-        accounts = set()
-        for entry in self.entries_list:
-            if entry.is_permanent:
-                accounts.add(entry.account)
+        accounts = self.get_root().read_accounts()
         auf_accounts = self.read_authorized_user_file()
         sys.stdout.write(f"  ACT   GRP          NAME           TIME LEFT    CPU LEFT       PRIV      DATE\n")
         for account in sorted(accounts):
@@ -1644,9 +1766,15 @@ class OS32Filesystem(AbstractBlockFilesystem):
         OS/32 Operator Reference Manual - Pag 134
         https://bitsavers.org/pdf/interdata/32bit/os32/1986_8.1.2/48-030F01R03_OS32_R08.1.2_Operators_Reference_Manual_1986.pdf
         """
+        account, _ = os32_split_fullname(fullname=pattern, wildcard=True, account=self.account)
+        if account is None:
+            self.show_accounts(volume_id, options)
+            return
         sys.stdout.write(f"VOLUME= {self.volume_name}\n")
         sys.stdout.write("FILENAME......     TY DBS/IBS RECL. RECORDS CREATED....... LAST WRITTEN.. KEYS\n")
         for x in self.filter_entries_list(pattern, include_all=False, wildcard=True):
+            if not isinstance(x, OS32Path):
+                continue
             # Print file information
             creation_date = format_time(x.creation_date)
             last_mod_date = format_time(x.last_mod_date)
@@ -1671,7 +1799,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
                 records = x.num_of_records
 
             sys.stdout.write(
-                f" {x.filename:<8}.{x.extension:<3}/{x.account:05} {x.file_type} "
+                f" {x.stem:<8}.{x.extension:<3}/{x.account:05} {x.file_type} "
                 f"{dbs_ibs_recl:13} "
                 f"{records:>7} "
                 f"{creation_date} "
@@ -1698,7 +1826,7 @@ class OS32Filesystem(AbstractBlockFilesystem):
                     sys.stdout.write("\n")
         elif not arg:
             # Display the system directory
-            for entry in self.entries_list:
+            for entry in self.get_root().read_entries_list():
                 if options.get("full") or entry.is_permanent:
                     sys.stdout.write(f"{entry}\n")
         else:
@@ -1706,29 +1834,21 @@ class OS32Filesystem(AbstractBlockFilesystem):
             entry = self.get_file_entry(arg)  # type: ignore
             sys.stdout.write(entry.examine())
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current account number
         """
-        try:
-            if fullname.startswith("/"):
-                fullname = fullname[1:]
-            self.account = int(fullname)
-            return True
-        except Exception:
-            return False
+        if entry is None:
+            self.account = None
+        else:
+            assert isinstance(entry, OS32AccountDirectory)
+            self.account = entry.account
 
     def get_pwd(self) -> str:
         """
         Get the current account number
         """
-        return str(self.account)
+        return str(self.account) if self.account is not None else "/"
 
     def get_types(self) -> t.List[str]:
         """

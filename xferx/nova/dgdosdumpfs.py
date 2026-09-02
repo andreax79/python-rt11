@@ -25,7 +25,7 @@ import sys
 import typing as t
 from datetime import date, datetime
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, IMAGE, READ_FILE_FULL, dump_struct, filename_match
 from ..device.abstract import AbstractDevice
 from ..unix.commons import unix_join, unix_split
@@ -52,7 +52,7 @@ __all__ = [
 
 
 # RDOS System Reference - DUMP File format Pag 125
-# https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_DGDOSDump_SystemReference_Oct83.pdf
+# https://www.bitsavers.org/pdf/dg/software/rdos/093-000109-01_RDOS_Command_Line_Interpreter.pdf
 
 NAME_BLOCK_ID = 0o377  # Name block
 DATA_BLOCK_ID = 0o376  # Data block
@@ -97,6 +97,8 @@ class AbstractBlock:
             return LinkAccessAttributesBlock(fs, position)
         elif block_id == END_OF_SEGMENT_BLOCK_ID:
             return EndOfSegmentBlock(fs, position)
+        elif block_id == 0:
+            raise EOFError
         else:
             raise Exception(f"{block_id} is not a valid block type")
 
@@ -107,7 +109,7 @@ class NameBlock(AbstractBlock):
     """
 
     attributes: int  # File attributes
-    contiguous: int  # Contiguous block number
+    contiguous: int  # Number of contiguous block number (present only if ATCON is set)
     data: bytes  # File name
 
     def __init__(self, fs: "DGDOSDumpFilesystem", position: int):
@@ -115,7 +117,14 @@ class NameBlock(AbstractBlock):
         self.attributes = fs.read_word()
         if self.attributes & ATCON != 0:
             self.contiguous = fs.read_word()
+        else:
+            self.contiguous = 0
         self.data = fs.read_to_null()
+
+    def __str__(self) -> str:
+        data = self.data.decode("ascii", "ignore").rstrip("\0")
+        attributes = format_attr(self.attributes, long=True)
+        return f"{self.position:>6d} NAME BLOCK attributes: {attributes} contiguous: {self.contiguous} name: {data}"
 
 
 class DataBlock(AbstractBlock):
@@ -135,17 +144,26 @@ class DataBlock(AbstractBlock):
         self.data_position = fs.f.tell()
         self.data = fs.f.read(self.byte_count)
 
+    def __str__(self) -> str:
+        return f"{self.position:>6d} DATA BLOCK byte count: {self.byte_count} checksum: {self.checksum} data position: {self.data_position}"
+
 
 class EndBlock(AbstractBlock):
     """
     End block
     """
 
+    def __str__(self) -> str:
+        return f"{self.position:>6d} END BLOCK"
+
 
 class ErrorBlock(AbstractBlock):
     """
     Error block
     """
+
+    def __str__(self) -> str:
+        return f"{self.position:>6d} ERROR BLOCK"
 
 
 class TimeBlock(AbstractBlock):
@@ -163,16 +181,27 @@ class TimeBlock(AbstractBlock):
         self.last_modification_date = fs.read_word()
         self.last_modification_time = fs.read_word()
 
+    def __str__(self) -> str:
+        return f"{self.position:>6d} TIME BLOCK last access date: {self.last_access_date} last modification date: {self.last_modification_date} last modification time: {self.last_modification_time}"
+
 
 class LinkDataBlock(AbstractBlock):
     """
     Link data block
     """
 
+    dirname: bytes  # Alternate directory name
+    resfilename: bytes  # Resolution file name
+
     def __init__(self, fs: "DGDOSDumpFilesystem", position: int):
         super().__init__(fs, position)
         self.dirname = fs.read_to_null()
         self.resfilename = fs.read_to_null()
+
+    def __str__(self) -> str:
+        dirname = self.dirname.decode("ascii", "ignore").rstrip("\0")
+        resfilename = self.resfilename.decode("ascii", "ignore").rstrip("\0")
+        return f"{self.position:>6d} LINK DATA BLOCK directory name: {dirname} resolution file name: {resfilename}"
 
 
 class LinkAccessAttributesBlock(AbstractBlock):
@@ -180,9 +209,15 @@ class LinkAccessAttributesBlock(AbstractBlock):
     Link access attributes block
     """
 
+    attributes: int  # Link access attributes
+
     def __init__(self, fs: "DGDOSDumpFilesystem", position: int):
         super().__init__(fs, position)
         self.attributes = fs.read_word()
+
+    def __str__(self) -> str:
+        attributes = format_attr(self.attributes, long=True)
+        return f"{self.position:>6d} LINK ACCESS ATTRIBUTES BLOCK attributes: {attributes}"
 
 
 class EndOfSegmentBlock(AbstractBlock):
@@ -190,20 +225,25 @@ class EndOfSegmentBlock(AbstractBlock):
     End of segment block
     """
 
+    t: int
+    segment_number: int
+    data: bytes
+
     def __init__(self, fs: "DGDOSDumpFilesystem", position: int):
         super().__init__(fs, position)
         self.t = fs.read_word()
         self.segment_number = ord(fs.f.read(1))
-        self.filename = fs.read_to_null()
+        self.data = fs.read_to_null()
+
+    def __str__(self) -> str:
+        return f"{self.position:>6d} END OF SEGMENT BLOCK t={self.t} segment number: {self.segment_number}"
 
 
 class DGDOSDumpFile(AbstractFile):
-    entry: "DGDOSDumpEntry"
-    closed: bool
+    entry: "DGDOSDumpPath"
 
-    def __init__(self, entry: "DGDOSDumpEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "DGDOSDumpPath", file_mode: t.Optional[str] = None):
         self.entry = entry
-        self.closed = False
         self.file_mode = file_mode or IMAGE
 
     def read_block(
@@ -263,20 +303,14 @@ class DGDOSDumpFile(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class DGDOSDumpEntry(AbstractDirectoryEntry):
+class DGDOSDumpPath(XFERXPath):
     fs: "DGDOSDumpFilesystem"
-    parent: t.Optional["DGDOSDumpEntry"]  # Parent directory/partition
-    filename: str = ""
+    parent_path: "DGDOSDumpPath"  # Parent directory/partition
+    stem: str = ""
     extension: str = ""
     attributes: int = 0
     link_access_attributes: int = 0
@@ -288,95 +322,100 @@ class DGDOSDumpEntry(AbstractDirectoryEntry):
     last_modification_time: int = 0  # hour (high byte) and minute (low byte)
     target: str = ""  # link target
 
-    def __init__(self, fs: "DGDOSDumpFilesystem", name_block: NameBlock, parent: t.Optional["DGDOSDumpEntry"] = None):
+    def __init__(self, fs: "DGDOSDumpFilesystem", name: str, attributes: int, parent: "DGDOSDumpPath"):
         self.fs = fs
-        basename = name_block.data.decode("ascii", "ignore").rstrip("\0")
         try:
-            self.filename, self.extension = basename.split(".", 1)
+            self.stem, self.extension = name.split(".", 1)
         except Exception:
-            self.filename = basename
+            self.stem = name
             self.extension = ""
-        self.attributes = name_block.attributes
-        self.parent = parent
+        self.attributes = attributes
+        self.parent_path = parent
         self.addresses = []
 
     @classmethod
     def create(
         cls,
         fs: "DGDOSDumpFilesystem",
-        parent: t.Optional["DGDOSDumpEntry"],
-        filename: str,
+        parent: t.Optional["DGDOSDumpPath"],
+        stem: str,
         length: int,  # Length in blocks
         creation_date: t.Optional[t.Union[date, datetime]] = None,  # optional creation date
         length_bytes: t.Optional[int] = None,  # optional length int bytes
-    ) -> "DGDOSDumpEntry":
+    ) -> "DGDOSDumpPath":
         """
         Create a new regular file
         """
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    def write_buffer(self, buffer: bytearray, position: int) -> None:
-        """
-        Write the UFD entry to the buffer
-        """
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
-
-    @property
     def is_random(self) -> bool:
         """
         Check if the file is random organized
         """
         return self.attributes & ATRAN != 0
 
-    @property
     def is_contiguous(self) -> bool:
         """
         Check if the file is contiguous organized
         """
         return self.attributes & ATCON != 0
 
-    @property
     def is_sequential(self) -> bool:
         """
         Check if the file is sequential organized
         """
-        return not self.is_random and not self.is_contiguous and not self.is_link
+        return not self.is_random() and not self.is_contiguous() and not self.is_symlink()
 
-    @property
-    def is_link(self) -> bool:
+    def is_symlink(self) -> bool:
         """
         Check if the file is a link
         """
         return self.attributes & ATLNK != 0
 
-    @property
+    def is_dir(self) -> bool:
+        """
+        Check if the file is a directory or a partition
+        """
+        return self.is_directory() or self.is_partition()
+
     def is_directory(self) -> bool:
         """
         Check if the file is a directory
         """
         return self.attributes & ATDIR != 0
 
-    @property
     def is_partition(self) -> bool:
         """
         Check if the file is a partition
         """
         return self.attributes & ATPAR != 0
 
-    @property
-    def is_empty(self) -> bool:
-        return self.filename == "" and self.extension == ""
+    def is_mount(self) -> bool:
+        """
+        Check if the file is the root of the filesystem
+        """
+        return False
 
     @property
     def fullname(self) -> str:
-        if self.parent:
-            return rdos_join(self.parent.fullname, self.basename)
+        if self.is_mount():
+            return self.name
         else:
-            return self.basename
+            return rdos_join(self.parent_path.fullname, self.name)
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def name(self) -> str:
+        if self.is_mount():
+            return "/"
+        else:
+            return f"{self.stem}.{self.extension}"
+
+    @property
+    def parent(self) -> XFERXPath:
+        """
+        The logical parent
+        """
+        return self.parent_path
 
     @property
     def last_access(self) -> t.Optional[date]:
@@ -410,32 +449,21 @@ class DGDOSDumpEntry(AbstractDirectoryEntry):
         """
         return self.block_size
 
-    def delete(self) -> bool:
-        """
-        Delete the directory entry
-        """
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
-
-    def write(self) -> bool:
-        """
-        Write the directory entry
-        """
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
-
     def examine(self) -> str:
-        if self.is_directory:  # Directory
+        if self.is_directory():  # Directory
             file_type = "Directory"
-        elif self.is_partition:  # Partition
+        elif self.is_partition():  # Partition
             file_type = "Partition"
-        elif self.is_link:  # Link entry
+        elif self.is_symlink():  # Link entry
             file_type = "Link"
-        elif self.is_random:  # Random organized file
+        elif self.is_random():  # Random organized file
             file_type = "Random file"
-        elif self.is_contiguous:  # Contiguous organized file
+        elif self.is_contiguous():  # Contiguous organized file
             file_type = "Contiguous file"
         else:  # Sequential organized file
             file_type = "Sequential file"
-        if self.is_link:
+        if self.is_symlink():
+            # Symlink entry
             data: t.Dict[str, t.Any] = {
                 "Filename": self.fullname,
                 "File type": file_type,
@@ -443,6 +471,7 @@ class DGDOSDumpEntry(AbstractDirectoryEntry):
                 "Target": self.target,
             }
         else:
+            # Regular file entry
             data = {
                 "Filename": self.fullname,
                 "File type": file_type,
@@ -464,17 +493,85 @@ class DGDOSDumpEntry(AbstractDirectoryEntry):
         """
         return DGDOSDumpFile(self, file_mode)
 
+    def get_child(self, name: str) -> "DGDOSDumpPath":
+        """
+        Get a child entry by name
+        """
+        name = rdos_canonical_filename(name).rstrip(".")
+        for entry in self.iterdir():
+            if filename_match(entry.name.rstrip("."), name, wildcard=False):
+                return entry
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+
+    def iterdir(self) -> t.Iterator["DGDOSDumpPath"]:
+        """
+        Iterate over the entries in the directory
+        """
+        if not self.is_dir():
+            raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), self.fullname)
+        parents = []
+        entry: DGDOSDumpPath = None  # type: ignore
+        for block in self.fs.read_blocks():
+            if isinstance(block, NameBlock):
+                # Yield the previous entry
+                if entry is not None:
+                    position = self.fs.f.tell()  # Save current dump file position
+                    if entry.is_directory():
+                        parents.append(entry)
+                    elif entry.is_partition():
+                        parents = [entry]
+                    if entry.parent.fullname == self.fullname:
+                        yield entry
+                    self.fs.f.seek(position)  # Restore dump file position
+                # Name block - create a new entry
+                name = block.data.decode("ascii", "ignore").rstrip("\0")
+                attributes = block.attributes
+                entry = DGDOSDumpPath(self.fs, name, attributes, parent=parents[-1] if parents else self.fs.get_root())
+            elif isinstance(block, DataBlock):
+                # Data block - save the block address in the entry
+                entry.size += block.byte_count
+                if entry.block_size < block.byte_count:
+                    entry.block_size = block.byte_count
+                entry.addresses.append(block.data_position)
+            elif isinstance(block, TimeBlock):
+                # Time block - set the last access and modification date in the entry
+                entry.last_access_date = block.last_access_date
+                entry.last_modification_date = block.last_modification_date
+                entry.last_modification_time = block.last_modification_time
+            elif isinstance(block, LinkDataBlock):
+                # Link data block - set the link target in the entry
+                dirname = block.dirname.decode("ascii", "ignore").rstrip("\0")
+                resfilename = block.resfilename.decode("ascii", "ignore").rstrip("\0")
+                if dirname:
+                    entry.target = f"{dirname}:{resfilename}"
+                else:
+                    entry.target = f"{resfilename}"
+            elif isinstance(block, LinkAccessAttributesBlock):
+                # Link access attributes block - set the link access attributes in the entry
+                entry.link_access_attributes = block.attributes
+            elif isinstance(block, EndBlock):
+                # End block - end of the directory entry/dump file
+                if parents:
+                    parents.pop()
+                else:
+                    break
+            # elif isinstance(block, EndOfSegmentBlock):
+            #     raise TODO
+        # Yield the previous entry
+        if entry is not None and entry.parent.fullname == self.fullname:
+            yield entry
+
     def __str__(self) -> str:
         attr = format_attr(self.attributes, long=True)
-        if self.is_link:
-            return f"{self.filename:>10s}.{self.extension:<2s} {attr:<12}  -> {self.target}"
+        if self.is_symlink():
+            return f"{self.stem:>10s}.{self.extension:<2s} {attr:<12}  -> {self.target}"
         else:
             uftlkl = format_attr(self.link_access_attributes)
             if uftlkl:
                 attr = f"{attr}/{uftlkl}"
             creation_date = self.creation_date.strftime("%m/%d/%y") if self.creation_date else ""
             return (
-                # f"{self.filename:>10s}.{self.extension:<2s} "
+                # f"{self.stem:>10s}.{self.extension:<2s} "
                 f"{self.fullname:<30s} {attr:<12} {self.get_size():>10d}  {creation_date:<8}  "
                 # f"{self.addresses[0]:>10}"
             )
@@ -483,12 +580,45 @@ class DGDOSDumpEntry(AbstractDirectoryEntry):
         return str(self)
 
 
+class DGDOSDumpRootDirectory(DGDOSDumpPath):
+    """
+    Data General DOS/RDOS DUMP Root Directory
+    """
+
+    def __init__(self, fs: "DGDOSDumpFilesystem"):
+        super().__init__(fs, "/", ATDIR, parent=self)
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+
 class DGDOSDumpFilesystem(AbstractFilesystem):
     """
     Data General DOS/RDOS DUMP
+    --------------------------
+
+    The Data General DOS/RDOS DUMP format is a block-oriented binary archive
+    format used by the DUMP command to store files, directories, metadata,
+    and their contents.
+
+    Each dump consists of a sequence of typed blocks. The first byte of each
+    block identifies its type, followed by block-specific fields and, where
+    applicable, data. The main block types are:
+
+    Type	                Code	Purpose
+    ----                    ----    -------
+    Name	                0o377	File/directory name and associated metadata
+    Data	                0o376	File data
+    Error	                0o375	Error information
+    End	                    0o374	End of file/directory/partition
+    Time	                0o373	Timestamp information
+    Link Data	            0o372	Data associated with a linked file
+    Link Access Attribute	0o371	Access attributes for links
+    End of Segment	        0o370	End of a data segment
 
     RDOS System Reference - Pag 125
-    https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_DGDOSDump_SystemReference_Oct83.pdf
+    https://www.bitsavers.org/pdf/dg/software/rdos/093-000109-01_RDOS_Command_Line_Interpreter.pdf
     """
 
     fs_name = "dump"
@@ -535,7 +665,7 @@ class DGDOSDumpFilesystem(AbstractFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["DGDOSDumpEntry"]:
+    ) -> t.Iterator[DGDOSDumpPath]:
         if pattern:
             pattern = pattern.upper()
         if not pattern and expand:
@@ -544,7 +674,7 @@ class DGDOSDumpFilesystem(AbstractFilesystem):
             absolute_path = pattern
         else:
             absolute_path = unix_join(self.pwd, pattern or "")
-        if self.isdir(absolute_path):
+        if self.is_dir(absolute_path):
             if not expand:
                 yield self.get_file_entry(absolute_path)
                 return
@@ -552,54 +682,52 @@ class DGDOSDumpFilesystem(AbstractFilesystem):
             pattern = "*"
         else:
             dirname, pattern = unix_split(absolute_path)
-        if dirname == "/":  # Root directory
-            dir_ufd: t.Optional[DGDOSDumpEntry] = None
-        else:
-            dir_ufd = self.get_file_entry(dirname)  # type: ignore
-        for entry in self.read_dir_entries(dir_ufd):
-            if filename_match(entry.basename, pattern, wildcard):
+        if not dirname:
+            dirname = "/"
+        directory = self.get_file_entry(dirname)
+        for entry in directory.iterdir():
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
-    def get_ufd(self, parent: t.Optional[DGDOSDumpEntry], basename: str) -> DGDOSDumpEntry:
-        """
-        Get User File Descriptor for a file in a directory
-        """
-        basename = rdos_canonical_filename(basename).rstrip(".")
-        for entry in self.read_dir_entries(parent):
-            if filename_match(entry.basename.rstrip("."), basename, wildcard=False):
-                return entry
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), basename)
-
     @property
-    def entries_list(self) -> t.Iterator["DGDOSDumpEntry"]:
-        yield from self.read_dir_entries()
+    def entries_list(self) -> t.Iterator[DGDOSDumpPath]:
+        directory = self.get_file_entry(self.pwd)
+        yield from directory.iterdir()
 
-    def get_file_entry(self, fullname: str) -> DGDOSDumpEntry:
+    def get_file_entry(self, fullname: str) -> DGDOSDumpPath:
         """
         Get the directory entry for a file
         """
         fullname = unix_join(self.pwd, fullname) if not fullname.startswith("/") else fullname
+        if fullname == "/":
+            return self.get_root()
         parts = [x for x in fullname.split("/") if x]
         if not parts:
             parts = []
-        entry: t.Optional[DGDOSDumpEntry] = None
+        entry: DGDOSDumpPath = self.get_root()
         for i, part in enumerate(parts):
-            if entry is not None and not (entry.is_directory or entry.is_partition):  # is a directory?
+            if not entry.is_dir():
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-            entry = self.get_ufd(entry, part)
+            entry = entry.get_child(part)
         if entry is None:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return entry
+
+    def get_root(self) -> DGDOSDumpRootDirectory:
+        """
+        Get the root directory
+        """
+        return DGDOSDumpRootDirectory(self)
 
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         """
         List directory entries
         """
         for x in self.filter_entries_list(pattern, include_all=True, wildcard=True):
-            if x.is_link:
+            if x.is_symlink():
                 # Print link information
                 # filename, target
-                sys.stdout.write(f"{x.basename:<13s}             {x.target}\n")
+                sys.stdout.write(f"{x.name:<13s}             {x.target}\n")
             else:
                 # Print file information
                 # filename, byte length, attributes, last modification date, last access date
@@ -609,10 +737,23 @@ class DGDOSDumpFilesystem(AbstractFilesystem):
                     attr = f"{attr}/{uftlkl}"
                 creation_date = x.creation_date.strftime("%m/%d/%y %H:%M") if x.creation_date else ""
                 access_date = x.last_access.strftime("%m/%d/%y") if x.last_access else ""
-                sys.stdout.write(
-                    f"{x.basename:<13s}{x.get_size():>10d}  {attr:<7} {creation_date:<14} {access_date:<8}\n"
-                )
+                sys.stdout.write(f"{x.name:<13s}{x.get_size():>10d}  {attr:<7} {creation_date:<14} {access_date:<8}\n")
         sys.stdout.write("\n")
+
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
+        """
+        Change the current directory
+        """
+        if entry is None:
+            self.pwd = "/"
+        else:
+            self.pwd = entry.fullname
+
+    def get_pwd(self) -> str:
+        """
+        Get the current directory
+        """
+        return self.pwd
 
     def read_byte(self) -> int:
         """
@@ -645,108 +786,24 @@ class DGDOSDumpFilesystem(AbstractFilesystem):
         return bytes(buffer)
 
     def read_blocks(self) -> t.Iterator[AbstractBlock]:
+        """
+        Read the blocks from the dump file
+        """
         self.f.seek(0)
-        while True:
-            yield AbstractBlock.read(self)
-
-    def read_dir_entries(self, parent: t.Optional[DGDOSDumpEntry] = None) -> t.Iterator[DGDOSDumpEntry]:
-        parents = []
-        entry: DGDOSDumpEntry = None  # type: ignore
-        for block in self.read_blocks():
-            if isinstance(block, NameBlock):
-                # Name block - create a new entry
-                if entry is not None:
-                    # Yield the previous entry
-                    position = self.f.tell()  # Save current dump file position
-                    if entry.is_directory:
-                        parents.append(entry)
-                    elif entry.is_partition:
-                        parents = [entry]
-                    if (parent is None and entry.parent is None) or (
-                        (entry.parent is not None)
-                        and (parent is not None)
-                        and (entry.parent.fullname == parent.fullname)
-                    ):
-                        yield entry
-                    self.f.seek(position)  # Restore dump file position
-                entry = DGDOSDumpEntry(self, block, parent=parents[-1] if parents else None)
-            elif isinstance(block, DataBlock):
-                # Data block - save the block address in the entry
-                entry.size += block.byte_count
-                if entry.block_size < block.byte_count:
-                    entry.block_size = block.byte_count
-                entry.addresses.append(block.data_position)
-            elif isinstance(block, TimeBlock):
-                # Time block - set the last access and modification date in the entry
-                entry.last_access_date = block.last_access_date
-                entry.last_modification_date = block.last_modification_date
-                entry.last_modification_time = block.last_modification_time
-            elif isinstance(block, LinkDataBlock):
-                # Link data block - set the link target in the entry
-                dirname = block.dirname.decode("ascii", "ignore").rstrip("\0")
-                resfilename = block.resfilename.decode("ascii", "ignore").rstrip("\0")
-                if dirname:
-                    entry.target = f"{dirname}:{resfilename}"
-                else:
-                    entry.target = f"{resfilename}"
-            elif isinstance(block, LinkAccessAttributesBlock):
-                # Link access attributes block - set the link access attributes in the entry
-                entry.link_access_attributes = block.attributes
-            elif isinstance(block, EndBlock):
-                # End block - end of the directory entry/dump file
-                if parents:
-                    parents.pop()
-                else:
-                    break
-            # elif isinstance(block, EndOfSegmentBlock):
-            #     raise TODO
-        # Yield the previous entry
-        if entry is not None:
-            yield entry
+        try:
+            while True:
+                yield AbstractBlock.read(self)
+        except EOFError:
+            pass
 
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         if not arg:
-            for entry in self.read_dir_entries():
-                if options.get("full") or not entry.is_empty:
-                    sys.stdout.write(f"{entry}\n")
+            for block in self.read_blocks():
+                if options.get("full") or not isinstance(block, DataBlock):
+                    sys.stdout.write(f"{block}\n")
+            for entry in self.entries_list:
+                sys.stdout.write(f"{entry}\n")
         else:
             # Display the file information
             entry = self.get_file_entry(arg)  # type: ignore
             sys.stdout.write(entry.examine())
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.f.get_size()
-
-    @classmethod
-    def initialize(
-        cls, file_or_dev: t.Union["AbstractFile", "AbstractDevice"], **kwargs: t.Union[bool, str]
-    ) -> "AbstractFilesystem":
-        """Initialize the filesystem"""
-        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
-
-    def close(self) -> None:
-        self.f.close()
-
-    def chdir(self, fullname: str) -> bool:
-        """
-        Change the current directory
-        """
-        return False
-
-    def get_pwd(self) -> str:
-        """
-        Get the current directory
-        """
-        return ""
-
-    def get_types(self) -> t.List[str]:
-        """
-        Get the list of the supported file types
-        """
-        return []
-
-    def __str__(self) -> str:
-        return str(self.f)

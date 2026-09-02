@@ -27,7 +27,7 @@ import sys
 import typing as t
 from datetime import datetime, timedelta
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, READ_FILE_FULL, filename_match, hex_dump
 from ..device.abstract import AbstractDevice
 from ..device.tape import Tape
@@ -106,14 +106,12 @@ def date_to_os32_header(dt: t.Optional[datetime]) -> int:
 
 class OS32TapeFile(AbstractFile):
     entry: "FileInformationBlock"
-    closed: bool
     size: int  # size in bytes
     number_of_blocks: int  # number of 256 bytes blocks
     content: bytes  # file content
 
     def __init__(self, entry: "FileInformationBlock"):
         self.entry = entry
-        self.closed = False
         entry.fs.dev.tape_seek(entry.tape_pos)
         entry.fs.dev.tape_read_forward()  # skip the header
         self.content = entry.fs.dev.tape_read_file()
@@ -162,17 +160,11 @@ class OS32TapeFile(AbstractFile):
         """
         return OS32_BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class FileInformationBlock(AbstractDirectoryEntry):
+class FileInformationBlock(XFERXPath):
     """
     File Information Block (FIB) - 80 bytes
 
@@ -229,7 +221,7 @@ class FileInformationBlock(AbstractDirectoryEntry):
     _u60: int = 0x1300  # Unknown 9 ( 16 bit - always 0 ?)
     _u62: int = 0x4000  # Unknown 10  ( 16 bit - always 0x4000, in all the examples I have seen)
     num_of_records: int = 0  # Number of disk records
-    filename: str = ""  # File name, up to 8 characters
+    stem: str = ""  # File name, up to 8 characters
     extension: str = ""  # File extension, up to 3 characters
     account: int = 0  # Account number, 0-65535
     index_block_size: int = 0  # Size of the index block, in number of 256 bytes sectors
@@ -264,7 +256,7 @@ class FileInformationBlock(AbstractDirectoryEntry):
             self.record_length,
             self._u8,
             self._u10,
-            filename,
+            stem,
             extension,
             self.account,
             self.index_block_size,
@@ -278,7 +270,7 @@ class FileInformationBlock(AbstractDirectoryEntry):
             self._u62,
             self.raw_last_assigned_date,
         ) = struct.unpack_from(FILE_INFORMATION_BLOCK_FORMAT, buffer, 0)
-        self.filename = filename.decode("ascii", errors="ignore").rstrip("\0 ")
+        self.stem = stem.decode("ascii", errors="ignore").rstrip("\0 ")
         self.extension = extension.decode("ascii", errors="ignore").rstrip("\0 ")
         if self.is_contiguous:
             self.num_of_records = (self.index_block_size << 16) | self.block_size
@@ -290,7 +282,7 @@ class FileInformationBlock(AbstractDirectoryEntry):
     def create(
         cls,
         fs: "OS32TapeFilesystem",
-        filename: str,
+        stem: str,
         extension: str,
         account: int,
         file_type: int = CO_FILE_TYPE,
@@ -314,7 +306,7 @@ class FileInformationBlock(AbstractDirectoryEntry):
         self.read_key = keys & 0xFF
         self.record_length = record_length
         self.num_of_records = num_of_records
-        self.filename = filename.upper()[:8]
+        self.stem = stem.upper()[:8]
         self.extension = extension.upper()[:3]
         self.account = account
         if self.is_contiguous:
@@ -338,7 +330,7 @@ class FileInformationBlock(AbstractDirectoryEntry):
             return self.raw_buffer
         # Construct FIB from scratch (for newly created entries)
         buffer = bytearray(FILE_INFORMATION_BLOCK_SIZE)
-        filename_bytes = self.filename.upper().encode("ascii").ljust(8, b" ")[:8]
+        filename_bytes = self.stem.upper().encode("ascii").ljust(8, b" ")[:8]
         extension_bytes = self.extension.upper().encode("ascii").ljust(3, b" ")[:3]
         # For CO (contiguous) files the number of records is stored as
         # (index_block_size << 16) | block_size
@@ -390,17 +382,22 @@ class FileInformationBlock(AbstractDirectoryEntry):
         """
         Full name of the file, including account number
         """
-        return f"{self.basename}/{self.account}"
+        return f"{self.name}/{self.account}"
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         """
         File name with extension
         """
         if not self.extension:
-            return self.filename
+            return self.stem
         else:
-            return f"{self.filename}.{self.extension}"
+            return f"{self.stem}.{self.extension}"
+
+    @property
+    def parent(self) -> "OS32TapeRootDirectory":
+        """The logical parent"""
+        return self.fs.get_root()
 
     @property
     def last_mod_date(self) -> t.Optional[datetime]:
@@ -422,6 +419,9 @@ class FileInformationBlock(AbstractDirectoryEntry):
         Last assigned date
         """
         return os32_to_date(self.raw_last_assigned_date)
+
+    def is_dir(self) -> bool:
+        return False
 
     @property
     def is_contiguous(self) -> bool:
@@ -506,7 +506,7 @@ class FileInformationBlock(AbstractDirectoryEntry):
         entries = [
             (entry, data)
             for entry, data in self.fs.read_files_data()
-            if not (filename_match(entry.basename, self.basename, False) and account_match(entry.account, self.account))
+            if not (filename_match(entry.name, self.name, False) and account_match(entry.account, self.account))
         ]
         self.fs._rewrite_tape(entries)
         return True
@@ -565,14 +565,14 @@ class FileInformationBlock(AbstractDirectoryEntry):
         last_mod_date = format_time(self.last_mod_date)
         if self.is_contiguous:
             return (
-                f"{self.filename:<8s}.{self.extension:<3s}/{self.account:05d} {self.file_type:>2s} "
+                f"{self.stem:<8s}.{self.extension:<3s}/{self.account:05d} {self.file_type:>2s} "
                 f"               "
                 f"{self.num_of_records:>7} {creation_date} {last_mod_date} "
                 f"{self.write_key:02X}{self.read_key:02X}"
             )
         else:
             return (
-                f"{self.filename:<8s}.{self.extension:<3s}/{self.account:05d} {self.file_type:>2s} "
+                f"{self.stem:<8s}.{self.extension:<3s}/{self.account:05d} {self.file_type:>2s} "
                 f"{self.block_size:>4}/{self.index_block_size:<3} {self.record_length:>5} "
                 f"{self.num_of_records:>7} {creation_date} {last_mod_date} "
                 f"{self.write_key:02X}{self.read_key:02X}"
@@ -738,6 +738,49 @@ class VolumeHeader:
         )
 
 
+class OS32TapeRootDirectory(XFERXPath):
+    fs: "OS32TapeFilesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "OS32TapeRootDirectory":
+        """The logical parent"""
+        return self
+
+    def iterdir(self) -> t.Iterator["FileInformationBlock"]:
+        """
+        Read File Information Blocks (FIBs) from the tape
+        """
+        self.fs.dev.tape_rewind()
+        volume_header = self.fs.dev.tape_read_forward()
+        assert len(volume_header) == VOLUME_HEADER_SIZE, "Invalid volume header size"
+        try:
+            while True:
+                tape_pos = self.fs.dev.tape_pos
+                fib, tape_size = self.fs.dev.tape_read_header()
+                if fib and len(fib) == FILE_INFORMATION_BLOCK_SIZE:
+                    yield FileInformationBlock.read(self.fs, fib, tape_pos, tape_size)
+        except EOFError:
+            pass
+
+
 class OS32TapeFilesystem(AbstractFilesystem):
     """
     Disk Backup Utility Magnetic Tape Format
@@ -816,8 +859,8 @@ class OS32TapeFilesystem(AbstractFilesystem):
         if account is None:
             account = ANY_ACCOUNT
         account, filename_pattern = os32_split_fullname(fullname=pattern, wildcard=wildcard, account=account)
-        for entry in self.entries_list:
-            if filename_match(entry.basename, filename_pattern, wildcard) and account_match(entry.account, account):
+        for entry in self.get_root().iterdir():
+            if filename_match(entry.name, filename_pattern, wildcard) and account_match(entry.account, account):
                 yield entry
 
     @property
@@ -825,34 +868,30 @@ class OS32TapeFilesystem(AbstractFilesystem):
         """
         Read File Information Blocks (FIBs) from the tape
         """
-        self.dev.tape_rewind()
-        volume_header = self.dev.tape_read_forward()
-        assert len(volume_header) == VOLUME_HEADER_SIZE, "Invalid volume header size"
-        try:
-            while True:
-                tape_pos = self.dev.tape_pos
-                fib, tape_size = self.dev.tape_read_header()
-                if fib and len(fib) == FILE_INFORMATION_BLOCK_SIZE:
-                    yield FileInformationBlock.read(self, fib, tape_pos, tape_size)
-        except EOFError:
-            pass
+        yield from self.get_root().iterdir()
 
     def get_file_entry(self, fullname: str) -> "FileInformationBlock":
         """
         Get the directory entry for a file
         """
-        account, filename = os32_split_fullname(fullname=fullname, wildcard=False, account=ANY_ACCOUNT)
+        account, stem = os32_split_fullname(fullname=fullname, wildcard=False, account=ANY_ACCOUNT)
         try:
-            return next(self.filter_entries_list(filename, account=account, wildcard=False))
+            return next(self.filter_entries_list(stem, account=account, wildcard=False))
         except StopIteration:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> OS32TapeRootDirectory:
+        """
+        Get the root directory of the filesystem
+        """
+        return OS32TapeRootDirectory(self)
 
     def show_accounts(self, volume_id: str, options: t.Dict[str, bool]) -> None:
         """
         Listing of all UIC
         """
         accounts = set()
-        for entry in self.entries_list:
+        for entry in self.get_root().iterdir():
             accounts.add(entry.account)
         sys.stdout.write(f"  ACT")
         for account in sorted(accounts):
@@ -896,7 +935,7 @@ class OS32TapeFilesystem(AbstractFilesystem):
                 dbs_ibs_recl = ""  # TODO
 
             sys.stdout.write(
-                f"{x.filename:<8}.{x.extension:<3}/{x.account:05} {x.file_type}  "
+                f"{x.stem:<8}.{x.extension:<3}/{x.account:05} {x.file_type}  "
                 f"{dbs_ibs_recl:13} "
                 f"{x.num_of_records:>7} "
                 f"{creation_date} "
@@ -932,12 +971,6 @@ class OS32TapeFilesystem(AbstractFilesystem):
                     hex_dump(fib)
         except EOFError:
             pass
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     def read_files_data(self) -> t.Iterator[t.Tuple["FileInformationBlock", bytes]]:
         """
@@ -1027,22 +1060,22 @@ class OS32TapeFilesystem(AbstractFilesystem):
             record_length = metadata.get("record_length") or DEFAULT_RECORD_LENGTH  # type: ignore
             block_size = metadata.get("block_size") or DEFAULT_BLOCK_SIZE  # type: ignore
             index_block_size = metadata.get("index_block_size") or DEFAULT_INDEX_BLOCK_SIZE  # type: ignore
-        basename: str
-        account, basename = os32_split_fullname(fullname=fullname, wildcard=False, account=account)  # type: ignore
-        if "." in basename:
-            filename, extension = basename.split(".", 1)
+        name: str
+        account, name = os32_split_fullname(fullname=fullname, wildcard=False, account=account)  # type: ignore
+        if "." in name:
+            stem, extension = name.split(".", 1)
         else:
-            filename, extension = basename, ""
+            stem, extension = name, ""
         # Collect all existing files, excluding any with the same name/account
         entries = [
             (entry, data)
             for entry, data in self.read_files_data()
-            if not (filename_match(entry.basename, basename, False) and account_match(entry.account, account))
+            if not (filename_match(entry.name, name, False) and account_match(entry.account, account))
         ]
         # Build the new File Information Block
         new_entry = FileInformationBlock.create(
             fs=self,
-            filename=filename,
+            stem=stem,
             extension=extension,
             account=account,
             file_type=file_type,
@@ -1082,13 +1115,3 @@ class OS32TapeFilesystem(AbstractFilesystem):
         self.dev.tape_write_mark()
         self.dev.tape_truncate()
         return self
-
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the given path is an account number
-        """
-        try:
-            int(fullname)
-            return True
-        except Exception:
-            return False

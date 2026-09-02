@@ -73,26 +73,30 @@ DIR             Lists file directories
     """
     # fmt: on
     args, options = extract_options(args, "/brief", "/uic", "/full")
+    if not args:
+        args = [f"{DEFAULT_VOLUME}:"]  # default to current volume
     if options.get("uic") or options.get("account"):
         # Listing of all the accounts on a volume
-        if not args:
-            args = [DEFAULT_VOLUME + ":"]
         for arg in args:
-            context.volumes.show_accounts(arg, options, cmd="DIR")  # type: ignore
+            try:
+                context.volumes.show_accounts(arg, options, cmd="DIR")  # type: ignore
+            except OSError as ex:
+                raise CommandError(f"?DIR-F-{ex.strerror} {arg}")
         return
     if options.get("brief"):
         # Listing of files in brief format
-        if not args:
-            args = [DEFAULT_VOLUME + ":"]
         for arg in args:
-            for x in context.volumes.filter_entries_list(arg):
-                sys.stdout.write(f"{x.basename}\n")
+            try:
+                for x in context.volumes.filter_entries_list(arg):
+                    sys.stdout.write(f"{x.name}\n")
+            except OSError as ex:
+                raise CommandError(f"?DIR-F-{ex.strerror} {arg}")
         return
-    if not args:
-        context.volumes.dir(f"{DEFAULT_VOLUME}:", options, cmd="DIR")  # type: ignore
-    else:
-        for arg in args:
+    for arg in args:
+        try:
             context.volumes.dir(arg, options, cmd="DIR")  # type: ignore
+        except OSError as ex:
+            raise CommandError(f"?DIR-F-{ex.strerror} {arg}")
 
 
 @cmds.register("TY_PE")
@@ -174,9 +178,9 @@ COPY            Copies files
     elif from_len == 1:  # One file to be copied
         source = list(from_list)[0]
         if not to:
-            to_path = source.basename
-        elif to and to_fs.isdir(to):
-            to_path = to_fs.path_join(to, source.basename)
+            to_path = source.name
+        elif to and to_fs.is_dir(to):
+            to_path = to_fs.path_join(to, source.name)
         else:
             to_path = to
         from_entry = from_fs.get_file_entry(source.fullname)
@@ -187,13 +191,13 @@ COPY            Copies files
     else:
         if not to:
             to = context.volumes.get_volume(to_volume_id).get_pwd()
-        elif not to_fs.isdir(to):
+        elif not to_fs.is_dir(to):
             raise CommandError("?COPY-F-Target must be a volume or a directory")
         for from_entry in from_fs.filter_entries_list(cfrom):
             if to:
-                to_path = to_fs.path_join(to, from_entry.basename)  # TODO
+                to_path = to_fs.path_join(to, from_entry.name)  # TODO
             else:
-                to_path = from_entry.basename
+                to_path = from_entry.name
             sys.stderr.write("%s:%s -> %s:%s\n" % (from_volume_id, from_entry.fullname, to_volume_id, to_path))
             copy_file(
                 from_entry, from_fork, to_fs, to_path, to_fork, to_file_type, file_mode, context.level, cmd="COPY"
@@ -567,8 +571,11 @@ CD              Changes or displays the current working drive and directory
         raise CommandError("?CD-F-Too many arguments")
     elif len(args) == 0:
         sys.stdout.write("%s\n" % context.volumes.get_pwd())
-    elif not context.volumes.chdir(args[0]):
-        raise CommandError("?CD-F-Directory not found")
+    else:
+        try:
+            context.volumes.chdir(args[0])
+        except Exception as exc:
+            raise CommandError("?CD-F-Directory not found") from exc
 
 
 @cmds.register("@", aliases=["BATCH"])

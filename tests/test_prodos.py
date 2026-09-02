@@ -14,6 +14,7 @@ from xferx.apple.prodosfs import (
     prodos_to_date,
 )
 from xferx.commons import BLOCK_SIZE
+from xferx.shell.commons import CommandError
 from xferx.shell import Shell
 
 DSK = "tests/dsk/prodos.dsk"
@@ -56,13 +57,16 @@ def test_prodos():
     shell.onecmd(f"mount t: /prodos {DSK}", batch=True)
     fs = shell.volumes.get_volume("T")
     assert isinstance(fs, ProDOSFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("dir/brief t:", batch=True)
     shell.onecmd("dir/brief t:/pr", batch=True)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(CommandError):
         shell.onecmd("dir/brief t:/notfound", batch=True)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(CommandError):
         shell.onecmd("dir/brief t:/pr/notfound/test", batch=True)
     shell.onecmd("type t:/pr/small/1.txt", batch=True)
 

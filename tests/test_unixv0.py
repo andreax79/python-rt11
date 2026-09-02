@@ -23,6 +23,9 @@ def test_unix0_read():
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, UNIX0Filesystem)
     assert fs.version == 0
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("dir t:/", batch=True)
@@ -33,18 +36,18 @@ def test_unix0_read():
     assert x.startswith("|")
 
     l = list(fs.entries_list)
-    filenames = [x.filename for x in l if not x.is_empty]
+    filenames = [x.filename for x in l if not x.is_empty()]
     assert "dd" in filenames
     assert "system" in filenames
 
     entry = shell.volumes.get_file_entry("t:/test/a")
-    assert not entry.inode.is_large
+    assert not entry.inode.is_large()
 
     entry = shell.volumes.get_file_entry("t:/test/b")
-    assert not entry.inode.is_large
+    assert not entry.inode.is_large()
 
     entry = shell.volumes.get_file_entry("t:/test/c")
-    assert entry.inode.is_large
+    assert entry.inode.is_large()
 
 
 def test_unix0_write():
@@ -72,59 +75,59 @@ def test_unix0_write():
 
     # Resize a small file
     i = fs.get_inode("/data/10.txt")
-    assert not i.is_large
+    assert not i.is_large()
     size = i.size
     length = i.get_length()
     with shell.volumes.open_file("ou:/data/10.txt") as f:
         f.truncate(size + 100)
     i = fs.get_inode("/data/10.txt")
-    assert not i.is_large
+    assert not i.is_large()
     assert i.get_length() > length
     assert i.size == size + 100
 
     # Resize a small file to a large size
     i = fs.get_inode("/data/10.txt")
-    assert not i.is_large
+    assert not i.is_large()
     size = i.size
     with shell.volumes.open_file("ou:/data/10.txt") as f:
         f.truncate(size + 500)
     i = fs.get_inode("/data/10.txt")
-    assert i.is_large
+    assert i.is_large()
     assert i.size == size + 500
 
     # Resize a large file
     i = fs.get_inode("/data/100.txt")
-    assert i.is_large
+    assert i.is_large()
     size = i.size
     length = i.get_length()
     with shell.volumes.open_file("ou:/data/100.txt") as f:
         f.truncate(size + 200)
     i = fs.get_inode("/data/100.txt")
-    assert i.is_large
+    assert i.is_large()
     assert i.get_length() > length
     assert i.size == size + 200
 
     # Shrink a small file
     i = fs.get_inode("/data/11.txt")
-    assert not i.is_large
+    assert not i.is_large()
     size = i.size
     length = i.get_length()
     with shell.volumes.open_file("ou:/data/11.txt") as f:
         f.truncate(size - 100)
     i = fs.get_inode("/data/11.txt")
     assert i.get_length() < length
-    assert not i.is_large
+    assert not i.is_large()
     assert i.size == size - 100
 
     # Shrink a large file
     i = fs.get_inode("/data/100.txt")
-    assert i.is_large
+    assert i.is_large()
     size = i.size
     length = i.get_length()
     with shell.volumes.open_file("ou:/data/100.txt") as f:
         f.truncate(size - 200)
     i = fs.get_inode("/data/100.txt")
-    assert i.is_large
+    assert i.is_large()
     assert i.get_length() < length
     assert i.size == size - 200
 
@@ -230,7 +233,7 @@ def test_unix0_dir():
     fs = shell.volumes.get_volume('OU')
 
     dir0 = UNIX0Directory.read(fs, fs.get_file_entry("/test/").inode)
-    assert dir0.inode.isdir
+    assert dir0.inode.is_dir()
     assert len(dir0.entries) == 7
     dir0.write()
 
@@ -239,13 +242,13 @@ def test_unix0_dir():
     assert dir0.entries == dir1.entries
 
     dir_entry = fs.create_directory("/test/subdir", {})
-    assert dir_entry.inode.isdir
+    assert dir_entry.inode.is_dir()
     dir_entry.inode.nlinks += 1
     dir_entry.inode.write()
-    assert dir_entry.inode.isdir
+    assert dir_entry.inode.is_dir()
     dir_entry.inode.nlinks -= 1
     dir_entry.inode.write()
-    assert dir_entry.inode.isdir
+    assert dir_entry.inode.is_dir()
 
     count = 7
     inode0 = UNIX0Inode.allocate(fs, number_of_blocks=1, size=0)
@@ -255,6 +258,6 @@ def test_unix0_dir():
 
     dir_inode = fs.get_file_entry("/test/subdir").inode
     assert dir_inode.inode_num == dir_entry.inode.inode_num
-    assert dir_inode.isdir
+    assert dir_inode.is_dir()
     dir3 = UNIX0Directory.read(fs, fs.get_file_entry("/test/subdir").inode)
     assert len(dir3.entries) == 3 + count

@@ -18,9 +18,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Type, TypeVar
+import typing as t
 
-T_UIC = TypeVar("T_UIC", bound="UIC")
+T_UIC = t.TypeVar("T_UIC", bound="UIC")
 
 __all__ = [
     "UIC",
@@ -40,18 +40,18 @@ class UIC:
     GROUP_BITS = 8  # Number of bits of the group number
     USER_BITS = 8  # Number of bits of the user number
     IS_OCTAL = True  # Indicates that the UIC is represented in octal format
-    ANY_USER = 0xFF
-    ANY_GROUP = 0xFF
+    ANY_USER: t.Optional[int] = None  # Indicates that the user number is a wildcard (any user)
+    ANY_GROUP: t.Optional[int] = None  # Indicates that the group number is a wildcard (any group)
 
-    group: int
-    user: int
+    group: t.Optional[int]  # The group number of the UIC
+    user: t.Optional[int]  # The user number of the UIC
 
-    def __init__(self, group: int, user: int):
-        self.group = group & ((1 << self.GROUP_BITS) - 1)
-        self.user = user & ((1 << self.USER_BITS) - 1)
+    def __init__(self, group: t.Optional[int], user: t.Optional[int]):
+        self.group = group & ((1 << self.GROUP_BITS) - 1) if group is not None else None
+        self.user = user & ((1 << self.USER_BITS) - 1) if user is not None else None
 
     @classmethod
-    def from_str(cls: Type[T_UIC], code_str: str, strict: bool = False) -> T_UIC:
+    def from_str(cls: t.Type[T_UIC], code_str: str, strict: bool = False) -> T_UIC:
         code_str, tmp = code_str.split("[")[1].split("]", 1)
         if strict and tmp:
             raise ValueError("Invalid UIC")
@@ -67,7 +67,7 @@ class UIC:
         return cls(group, user)
 
     @classmethod
-    def from_word(cls: Type[T_UIC], code_int: int) -> T_UIC:
+    def from_word(cls: t.Type[T_UIC], code_int: int) -> T_UIC:
         user_mask = (1 << cls.USER_BITS) - 1
         user = code_int & user_mask
         group = code_int >> cls.USER_BITS
@@ -78,6 +78,8 @@ class UIC:
         return self.group == self.ANY_GROUP or self.user == self.ANY_USER
 
     def to_word(self) -> int:
+        if self.group is None or self.user is None:
+            raise ValueError("Group and user must be set to convert to word")
         return (self.group << self.USER_BITS) | self.user
 
     @staticmethod

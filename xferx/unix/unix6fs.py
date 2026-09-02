@@ -48,15 +48,14 @@ class UNIXInode6(UNIXInode4):
         self.mtime = swap_words(self.mtime)
         return self
 
-    @property
     def is_huge(self) -> bool:
         """
         Extra-large files are not marked by any flag, but only by having addr[7] non-zero
         """
-        return self.is_large and (self.addr[V4_NADDR - 1] != 0)
+        return self.is_large() and (self.addr[V4_NADDR - 1] != 0)
 
     def blocks(self) -> t.Iterator[int]:
-        if self.is_huge:
+        if self.is_huge():
             # Huge file
             for index, block_number in enumerate(self.addr):
                 if block_number == 0:
@@ -90,6 +89,7 @@ class UNIX6Filesystem(UNIX4Filesystem):
     fs_name = "unix6"
     fs_description = "UNIX version 6"
     fs_platforms = ["pdp-11", "interdata7"]
+    fs_path_separator = "/"
     fs_entry_metadata = [
         "creation_date",
         "last_access",

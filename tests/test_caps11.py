@@ -11,6 +11,9 @@ def test_caps11_read():
     shell.onecmd(f"mount t: /caps11 {DSK}", batch=True)
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, CAPS11Filesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:[*,*]", batch=True)
     shell.onecmd("type t:1.txt", batch=True)

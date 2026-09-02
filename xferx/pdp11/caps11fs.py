@@ -26,7 +26,7 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
 from ..device.abstract import AbstractDevice
 from ..device.tape import Tape
@@ -105,13 +105,11 @@ def date_to_caps11(d: t.Optional[date]) -> bytes:
 
 class CAPS11File(AbstractFile):
     entry: "CAPS11DirectoryEntry"
-    closed: bool
     size: int  # size in bytes
     content: bytes  # file content
 
     def __init__(self, entry: "CAPS11DirectoryEntry"):
         self.entry = entry
-        self.closed = False
         self.size = entry.size
         entry.fs.dev.tape_seek(entry.tape_pos)
         self.content = entry.fs.dev.tape_read_file()[HEADER_RECORD_SIZE + entry.continued :]
@@ -158,17 +156,11 @@ class CAPS11File(AbstractFile):
         """
         return BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class CAPS11DirectoryEntry(AbstractDirectoryEntry):
+class CAPS11DirectoryEntry(XFERXPath):
     """
     CAPS-11 File Header
 
@@ -193,7 +185,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
     """
 
     fs: "CAPS11Filesystem"
-    filename: str = ""  #             6 chars - name
+    stem: str = ""  #             6 chars - name
     extension: str = ""  #            3 chars - extension
     record_type: int = 0  #           1 byte  - record type
     record_length: int = 0  #         2 bytes - file record length (fixed at 128 bytes)
@@ -216,7 +208,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         fs: "CAPS11Filesystem",
         file_number: int,
         tape_pos: int,
-        filename: str,
+        stem: str,
         extension: str,
         creation_date: t.Optional[date] = None,  # optional creation date
         record_type: int = FILE_TYPE_BIN,
@@ -224,7 +216,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self = CAPS11DirectoryEntry(fs)
         self.file_number = file_number
         self.tape_pos = tape_pos
-        self.filename = filename
+        self.stem = stem
         self.extension = extension
         self.record_type = record_type
         self.record_length = RECORD_SIZE
@@ -248,7 +240,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         self.file_number = file_number
         self.tape_pos = tape_pos
         (
-            filename,
+            stem,
             extension,
             self.record_type,
             self.record_length,
@@ -259,10 +251,10 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
             self.unused,
         ) = struct.unpack_from(HEADER_RECORD, buffer, 0)
         # print(" ".join([f"{b:02x}" for b in buffer]))
-        self.filename = filename.decode("ascii", errors="ignore").rstrip(" ")
+        self.stem = stem.decode("ascii", errors="ignore").rstrip(" ")
         self.extension = extension.decode("ascii", errors="ignore").rstrip(" ")
-        if not self.filename or self.filename.startswith("\0"):  # Sentinel file
-            self.filename = ""
+        if not self.stem or self.stem.startswith("\0"):  # Sentinel file
+            self.stem = ""
             self.extension = ""
         self.size = size - self.continued
         return self
@@ -272,18 +264,18 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         Write the directory entry
         """
         buffer = bytearray(HEADER_RECORD_SIZE)
-        if not self.filename:  # Sentinel file
-            filename = b"\0"
+        if not self.stem:  # Sentinel file
+            stem = b"\0"
             extension = b"\0"
         else:
-            filename = self.filename.ljust(6).encode("ascii", errors="ignore")
+            stem = self.stem.ljust(6).encode("ascii", errors="ignore")
             extension = self.extension.ljust(3).encode("ascii", errors="ignore")
         # Pack the data into the buffer
         struct.pack_into(
             HEADER_RECORD,
             buffer,
             0,
-            filename,
+            stem,
             extension,
             self.record_type,
             self.record_length,
@@ -317,21 +309,27 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         """
         return BLOCK_SIZE
 
-    @property
-    def is_empty(self) -> bool:
-        return self.record_type == FILE_TYPE_BAD or self.is_sentinel_file
+    def is_dir(self) -> bool:
+        return False
 
     @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self.fs.get_root()
+
+    def is_empty(self) -> bool:
+        return self.record_type == FILE_TYPE_BAD or self.is_sentinel_file()
+
     def is_sentinel_file(self) -> bool:
-        return not self.filename
+        return not self.stem
 
     @property
     def fullname(self) -> str:
-        return f"{self.filename}.{self.extension}"
+        return f"{self.stem}.{self.extension}"
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
 
     @property
     def creation_date(self) -> t.Optional[date]:
@@ -345,7 +343,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         """
         Delete the file
         """
-        self.filename = "*EMPTY"
+        self.stem = "*EMPTY"
         self.extension = ""
         self.record_type = FILE_TYPE_BAD
         self.record_length = 0
@@ -365,7 +363,7 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
         file_type = self.file_type or f"{self.record_type:>4o}"
         return (
             f"{self.file_number:<4} "
-            f"{self.filename:>6}."
+            f"{self.stem:>6}."
             f"{self.extension:<3}  "
             f"{file_type:>6}  "
             f"{self.record_length:>6} "
@@ -378,6 +376,49 @@ class CAPS11DirectoryEntry(AbstractDirectoryEntry):
 
     def __repr__(self) -> str:
         return str(self)
+
+
+class CAPS11RootDirectory(XFERXPath):
+    fs: "CAPS11Filesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is a mount point"""
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self
+
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        expand: bool = True,
+        wildcard: bool = True,
+    ) -> t.Iterator["CAPS11DirectoryEntry"]:
+        """
+        Iterate over the directory entries
+        """
+        if pattern:
+            pattern = rt11_canonical_filename(pattern, wildcard=wildcard)
+        for entry in self.fs.read_file_headers():
+            if filename_match(entry.name, pattern, wildcard) and (include_all or not entry.is_empty()):
+                yield entry
 
 
 class CAPS11Filesystem(AbstractFilesystem):
@@ -429,7 +470,7 @@ class CAPS11Filesystem(AbstractFilesystem):
         self = cls(file_or_dev)
         if strict:
             for entry in self.read_file_headers(include_eot=False):
-                if not entry.is_sentinel_file and entry.version != 0:
+                if not entry.is_sentinel_file() and entry.version != 0:
                     self.caps8 = True
                 if entry.record_length not in [0, RECORD_SIZE] or entry.size < 0:
                     raise OSError(errno.EIO, f"Invalid record length ({entry.record_length}) {entry}")
@@ -446,7 +487,7 @@ class CAPS11Filesystem(AbstractFilesystem):
                 if header:
                     file_number += 1
                     entry = CAPS11DirectoryEntry.read(self, header, file_number, tape_pos, size)
-                    if include_eot or not entry.is_sentinel_file:
+                    if include_eot or not entry.is_sentinel_file():
                         yield entry
         except EOFError:
             pass
@@ -458,19 +499,13 @@ class CAPS11Filesystem(AbstractFilesystem):
         expand: bool = True,
         wildcard: bool = True,
     ) -> t.Iterator["CAPS11DirectoryEntry"]:
-        if pattern:
-            pattern = rt11_canonical_filename(pattern, wildcard=wildcard)
-        for entry in self.read_file_headers():
-            if filename_match(entry.basename, pattern, wildcard) and (include_all or not entry.is_empty):
-                yield entry
+        yield from self.get_root().iterdir(pattern=pattern, include_all=include_all, expand=expand, wildcard=wildcard)
 
     @property
     def entries_list(self) -> t.Iterator["CAPS11DirectoryEntry"]:
-        for entry in self.read_file_headers():
-            if not entry.is_empty:
-                yield entry
+        yield from self.get_root().iterdir()
 
-    def get_file_entry(self, fullname: str) -> CAPS11DirectoryEntry:
+    def get_file_entry(self, fullname: str) -> t.Union[CAPS11DirectoryEntry, CAPS11RootDirectory]:
         fullname = rt11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
@@ -478,6 +513,12 @@ class CAPS11Filesystem(AbstractFilesystem):
             return next(self.filter_entries_list(fullname, wildcard=False))
         except StopIteration:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> CAPS11RootDirectory:
+        """
+        Get the root directory
+        """
+        return CAPS11RootDirectory(self)
 
     def write_bytes(
         self,
@@ -512,15 +553,15 @@ class CAPS11Filesystem(AbstractFilesystem):
         # Find the position for the new file
         tape_pos = 0
         for entry in reversed(list(self.read_file_headers(include_eot=True))):
-            if (not entry.is_sentinel_file) and entry.record_type != FILE_TYPE_BAD:
+            if (not entry.is_sentinel_file()) and entry.record_type != FILE_TYPE_BAD:
                 break
             tape_pos = entry.tape_pos
         self.dev.tape_seek(tape_pos)
         self.dev.tape_truncate(tape_pos)
         # Create the new directory entry
-        filename, extension = fullname.split(".", 1)
+        stem, extension = fullname.split(".", 1)
         creation_date = metadata.get("creation_date", date.today())
-        entry = CAPS11DirectoryEntry.new(self, 0, tape_pos, filename, extension, creation_date)
+        entry = CAPS11DirectoryEntry.new(self, 0, tape_pos, stem, extension, creation_date)
         entry.write(skip_file=False)
         # Write the file
         empty_record = b"\0" * RECORD_SIZE
@@ -551,10 +592,10 @@ class CAPS11Filesystem(AbstractFilesystem):
             if self.caps8:
                 version = f"V{x.version}" if x.version else ""
                 creation_date = x.creation_date and x.creation_date.strftime("%m/%d/%y").upper() or ""
-                sys.stdout.write(f"{x.filename:<6s}.{(x.extension or 'BIN'):<3s} {creation_date:<8s} {version}\n")
+                sys.stdout.write(f"{x.stem:<6s}.{(x.extension or 'BIN'):<3s} {creation_date:<8s} {version}\n")
             else:
                 creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or "--"
-                sys.stdout.write(f"{x.filename:<6s} {x.extension:<3s} {creation_date:<9s}\n")
+                sys.stdout.write(f"{x.stem:<6s} {x.extension:<3s} {creation_date:<9s}\n")
 
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         if arg:
@@ -568,12 +609,6 @@ class CAPS11Filesystem(AbstractFilesystem):
                 sys.stdout.write("---    --------    ----     ---  --- ----        ----     ----\n")
             for entry in self.read_file_headers(include_eot=True):
                 sys.stdout.write(f"{entry}\n")
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     @classmethod
     def initialize(
@@ -595,9 +630,6 @@ class CAPS11Filesystem(AbstractFilesystem):
         """
         self.dev.tape_write_forward(SENTINEL_FILE)
         self.dev.tape_truncate()
-
-    def close(self) -> None:
-        self.dev.close()
 
     def get_types(self) -> t.List[str]:
         """

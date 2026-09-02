@@ -1,6 +1,7 @@
-# import pytest
+import pytest
 
 from xferx.nova.dgdosmagtapefs import DGDOSMagTapeFilesystem
+from xferx.nova.dgdosdumpfs import DGDOSDumpFilesystem
 from xferx.shell import Shell
 
 DSK = "tests/dsk/nova_magtape.tap"
@@ -12,6 +13,7 @@ def test_dgdos_magtape_read():
     shell.onecmd(f"mount t: /dgdosmt {DSK}", batch=True)
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, DGDOSMagTapeFilesystem)
+    assert fs.get_root().is_dir()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("type t:1", batch=True)
@@ -25,19 +27,49 @@ def test_dgdos_magtape_read():
     l = list(fs.entries_list)
     assert len(l) == 6
 
+    l = list(fs.get_root().iterdir())
+    assert len(l) == 6
+
 
 def test_dgdos_magtape_dump_read():
     shell = Shell(verbose=True)
     shell.onecmd(f"mount dm0: /dgdosmt {DSK_DUMP}", batch=True)
-    # fs = shell.volumes.get_volume('T')
-    # assert isinstance(fs, DGDOSMagTapeFilesystem)
+    fs = shell.volumes.get_volume('DM0')
+    assert isinstance(fs, DGDOSMagTapeFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
-    shell.onecmd("mount d: /dgdosdump dm0:5", batch=True)
-    shell.onecmd("dir d:", batch=True)
+    shell.onecmd("mount dm1: /dgdosdump dm0:5", batch=True)
+    fs1 = shell.volumes.get_volume('DM1')
+    assert isinstance(fs1, DGDOSDumpFilesystem)
+    shell.onecmd("dir dm1:", batch=True)
 
-    fs = shell.volumes.get_volume('D')
-    x = fs.read_bytes("Z20")
+    x = fs1.read_bytes("/Z20")
     assert x == b'\0' * 10240
+
+    subdir = fs1.get_file_entry("/SUBDIR.DR")
+    assert subdir is not None
+    assert subdir.is_dir()
+    l = list(subdir.iterdir())
+    assert len(l) == 5
+
+    subdir = fs1.get_file_entry("/C1.DR")
+    assert subdir is not None
+    assert subdir.is_dir()
+    l = list(subdir.iterdir())
+    assert len(l) == 3
+
+    x = fs1.read_bytes("/SUBDIR.DR/SB")
+    assert x
+    x = fs1.read_bytes("/SUBDIR.DR/COM.CM")
+    assert x
+
+    with pytest.raises(FileNotFoundError):
+        fs1.get_file_entry("/NOTEXIST")
+
+    with pytest.raises(FileNotFoundError):
+        fs1.get_file_entry("/SUBDIR.DR/NOTEXIST")
 
 
 #

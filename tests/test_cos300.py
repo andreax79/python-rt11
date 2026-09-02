@@ -1,7 +1,7 @@
 import pytest
 
 from xferx.pdp8.cos300fs import (
-    COS300DirectoryEntry,
+    COS300Path,
     COS300Filesystem,
     ascii_to_cos_codes,
     cos_codes_to_ascii,
@@ -80,7 +80,7 @@ def test_write_directory_entry():
     segment = OS8Segment(partition)
     segment.extra_words = 1
 
-    e = COS300DirectoryEntry.read(segment, words, 0, 0)
+    e = COS300Path.read(segment, words, 0, 0)
     segment.entries_list.append(e)
     assert segment.number_of_entries == 1
     assert e.is_empty
@@ -89,7 +89,7 @@ def test_write_directory_entry():
 
     assert len(words1) == 2
     e.empty_entry = False
-    e.filename = "TEST"
+    e.stem = "TEST"
     e.extension = "TX"
     e.length = 123
     e.extra_words = [342]
@@ -97,7 +97,7 @@ def test_write_directory_entry():
     words2 = e.to_words()
     assert len(words2) == 6
 
-    e2 = COS300DirectoryEntry.read(segment, words2, 0, 0)
+    e2 = COS300Path.read(segment, words2, 0, 0)
     assert not e2.is_empty
     assert e2.to_words() == words2
 
@@ -108,6 +108,9 @@ def test_cos300():
     fs = shell.volumes.get_volume('T')
     assert isinstance(fs, COS300Filesystem)
     assert fs.dev.is_rx
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("type t:a50.a", batch=True)

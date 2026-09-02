@@ -27,7 +27,7 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, DECTAPE, IMAGE, READ_FILE_FULL
 from ..device.abstract import AbstractDevice
 from ..device.block_12bit import BlockDevice12Bit, RXBlockDevice12Bit
@@ -87,7 +87,7 @@ class DMSFilename:
     Parse the canonical PDP-8 4k Disk Monitor System filename
     """
 
-    filename: str = ""
+    stem: str = ""
     program_type: int = 0
     system_program: bool = False
     core_addr: int = 0o200
@@ -118,15 +118,15 @@ class DMSFilename:
             if match.group(3):
                 self.entry_point = int(match.group(3), 8)
         try:
-            filename, extension = fullname.rsplit(".", 1)
+            stem, extension = fullname.rsplit(".", 1)
             extension = extension.upper()
         except:
-            filename = fullname
+            stem = fullname
             extension = None
-        self.filename = sixbit_word12_to_asc(asc_to_sixbit_word12(filename[0:2]))
-        self.filename += sixbit_word12_to_asc(asc_to_sixbit_word12(filename[2:4]))
+        self.stem = sixbit_word12_to_asc(asc_to_sixbit_word12(stem[0:2]))
+        self.stem += sixbit_word12_to_asc(asc_to_sixbit_word12(stem[2:4]))
         # A file name cannot be one of the following: "CALL", "SAVE"
-        if self.filename in INVALID_FILENAMES:
+        if self.stem in INVALID_FILENAMES:
             raise OSError(errno.EINVAL, "Invalid filename")
         if file_type == ASCII:
             self.program_type = FILE_TYPE_ASCII
@@ -155,7 +155,7 @@ class DMSFilename:
         """
         Match the filename with a directory entry
         """
-        result = fnmatch.fnmatch(entry.filename.strip(), self.filename.strip())
+        result = fnmatch.fnmatch(entry.stem.strip(), self.stem.strip())
         if self.program_type != -1:
             result &= self.program_type == entry.program_type and self.system_program == entry.system_program
         return result
@@ -305,7 +305,6 @@ def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
 class DMSFile(AbstractFile):
     entry: "DMSDirectoryEntry"
     file_mode: str
-    closed: bool
 
     def __init__(self, entry: "DMSDirectoryEntry", file_mode: t.Optional[str] = None):
         self.entry = entry
@@ -313,7 +312,6 @@ class DMSFile(AbstractFile):
             self.file_mode = file_mode
         else:
             self.file_mode = ASCII if entry.extension.upper() == EXT_ASCII else IMAGE
-        self.closed = False
 
     def read_block(
         self,
@@ -376,12 +374,6 @@ class DMSFile(AbstractFile):
         Get file block size in bytes
         """
         return self.entry.get_block_size()
-
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
 
     def __str__(self) -> str:
         return self.entry.fullname
@@ -617,7 +609,7 @@ class StorageAllocationMap:
             del self.files_blocks[file_number]
 
 
-class DMSDirectoryEntry(AbstractDirectoryEntry):
+class DMSDirectoryEntry(XFERXPath):
     """
     Directory Name Entry
 
@@ -646,7 +638,7 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
     dms_low_core_addr: int = 0  # Core address low bits
     dms_high_core_addr: int = 0  # Core bank (core address high bits)
     dms_entry_point: int  # Entry point
-    filename: str = ""  # Filename (4 chars)
+    stem: str = ""  # Filename (4 chars)
     file_number: int = 0  # 0-63 (6 bits), 0 = Empty
     system_program: bool = False  # System/User program
     program_type: int = 0  # FILE_TYPE_ASCII, FILE_TYPE_BIN, FILE_TYPE_FTC_BIN, FILE_TYPE_SYS_USER
@@ -670,7 +662,7 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
         self.dms_low_core_addr = words[2 + position]  # Low core addr / -1 not contiguous
         self.dms_entry_point = words[3 + position]  # Entry point
         flags = words[4 + position]  # Flags
-        self.filename = sixbit_word12_to_asc(n1) + sixbit_word12_to_asc(n2)
+        self.stem = sixbit_word12_to_asc(n1) + sixbit_word12_to_asc(n2)
         self.program_type = flags >> 10
         self.dms_high_core_addr = (flags >> 7) & 0o7
         self.file_number = flags & 0o77
@@ -683,8 +675,8 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
         """
         flags = self.program_type << 10 | self.dms_high_core_addr << 7 | self.system_program << 6 | self.file_number
         return [
-            asc_to_sixbit_word12(self.filename[0:2]),
-            asc_to_sixbit_word12(self.filename[2:4]),
+            asc_to_sixbit_word12(self.stem[0:2]),
+            asc_to_sixbit_word12(self.stem[2:4]),
             self.dms_low_core_addr & 0o7777,
             self.dms_entry_point & 0o7777,
             flags & 0o7777,
@@ -723,11 +715,18 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return f"{self.filename}.{self.extension}"
+        return f"{self.stem}.{self.extension}"
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.fullname
+
+    @property
+    def parent(self) -> "DMSRootDirectory":
+        """
+        Get the parent directory
+        """
+        return self.fs.get_root()
 
     def get_blocks(self) -> t.List[int]:
         return self.sam.files_blocks.get(self.file_number, [])
@@ -766,7 +765,7 @@ class DMSDirectoryEntry(AbstractDirectoryEntry):
             self.sam.write()
             self.dms_low_core_addr = 0
             self.dms_entry_point = 0
-            self.filename = ""
+            self.stem = ""
             self.file_number = EMPTY_FILE_NUMBER
             self.system_program = False
             self.dms_high_core_addr = 0
@@ -928,6 +927,53 @@ class DirectorNameBlock:
         return buf.getvalue()
 
 
+class DMSRootDirectory(XFERXPath):
+    fs: "DMSFilesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "DMSRootDirectory":
+        """The logical parent"""
+        return self
+
+    def read_directory_name_blocks(
+        self, sam: t.Optional["StorageAllocationMap"] = None
+    ) -> t.Iterator["DirectorNameBlock"]:
+        """
+        Read the Directory Name Blocks
+        """
+        if sam is None:
+            sam = StorageAllocationMap.read(self.fs)
+        next_block_number = DN_START
+        block_seq_nr = 0
+        while next_block_number != 0:
+            dn = DirectorNameBlock.read(self.fs, next_block_number, block_seq_nr, sam)
+            next_block_number = dn.next_directory_name_block
+            block_seq_nr += 1
+            yield dn
+
+    def iterdir(self) -> t.Iterator["DMSDirectoryEntry"]:
+        for dn in self.read_directory_name_blocks():
+            yield from dn.entries_list
+
+
 class DMSFilesystem(AbstractFilesystem):
     """
     PDP-8 4k Disk Monitor System Filesystem
@@ -1078,30 +1124,29 @@ class DMSFilesystem(AbstractFilesystem):
         sam: t.Optional["StorageAllocationMap"] = None,
     ) -> t.Iterator["DMSDirectoryEntry"]:
         dms_filename = DMSFilename(pattern, wildcard=wildcard) if pattern else None
-        for dn in self.read_directory_name_blocks(sam):
-            for entry in dn.entries_list:
-                if dms_filename is None or dms_filename.match(entry):
-                    yield entry
+        for entry in self.get_root().iterdir():
+            if dms_filename is None or dms_filename.match(entry):
+                yield entry
 
     @property
     def entries_list(self) -> t.Iterator["DMSDirectoryEntry"]:
-        for dn in self.read_directory_name_blocks():
-            for entry in dn.entries_list:
-                yield entry
+        yield from self.get_root().iterdir()
 
     def get_file_entry(self, fullname: str) -> DMSDirectoryEntry:
         """
         Get the directory entry for a file
         """
         dms_filename = DMSFilename(fullname)
-        for dn in self.read_directory_name_blocks():
-            for entry in dn.entries_list:
-                if (
-                    entry.filename.strip() == dms_filename.filename.strip()
-                    and entry.program_type == dms_filename.program_type
-                ):
-                    return entry
+        for entry in self.get_root().iterdir():
+            if entry.stem.strip() == dms_filename.stem.strip() and entry.program_type == dms_filename.program_type:
+                return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> DMSRootDirectory:
+        """
+        Get the root directory
+        """
+        return DMSRootDirectory(self)
 
     def read_bytes(self, fullname: str, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> bytes:
         """Get the content of a file"""
@@ -1185,10 +1230,10 @@ class DMSFilesystem(AbstractFilesystem):
         file_number = sam.allocate_space(fullname, number_of_blocks)
         # Create entry
         entry = None
-        for dn in self.read_directory_name_blocks():
+        for dn in self.get_root().read_directory_name_blocks():
             if dn.first_file_number <= file_number <= dn.last_file_number:
                 entry = DMSDirectoryEntry(dn, sam)
-                entry.filename = dms_filename.filename
+                entry.stem = dms_filename.stem
                 entry.file_number = file_number
                 entry.program_type = dms_filename.program_type
                 entry.system_program = dms_filename.system_program
@@ -1202,22 +1247,6 @@ class DMSFilesystem(AbstractFilesystem):
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), fullname)
         sam.write()
         return entry
-
-    def read_directory_name_blocks(
-        self, sam: t.Optional["StorageAllocationMap"] = None
-    ) -> t.Iterator["DirectorNameBlock"]:
-        """
-        Read the Directory Name Blocks
-        """
-        if sam is None:
-            sam = StorageAllocationMap.read(self)
-        next_block_number = DN_START
-        block_seq_nr = 0
-        while next_block_number != 0:
-            dn = DirectorNameBlock.read(self, next_block_number, block_seq_nr, sam)
-            next_block_number = dn.next_directory_name_block
-            block_seq_nr += 1
-            yield dn
 
     def free(self) -> int:
         """
@@ -1238,9 +1267,9 @@ class DMSFilesystem(AbstractFilesystem):
                 continue
             # Filename, extension, core bank (for SYS/USER files) and length in blocks (in octal)
             if x.program_type == FILE_TYPE_SYS_USER:
-                fullname = f"{x.filename:<4}.{x.extension:<4}({x.dms_high_core_addr:>o})"
+                fullname = f"{x.stem:<4}.{x.extension:<4}({x.dms_high_core_addr:>o})"
             else:
-                fullname = f"{x.filename:<4}.{x.extension:<7}"
+                fullname = f"{x.stem:<4}.{x.extension:<7}"
             sys.stdout.write(f"{fullname} {x.get_length():>04o}\n")
         sys.stdout.write("\n")
 
@@ -1262,7 +1291,7 @@ class DMSFilesystem(AbstractFilesystem):
             sam_blocks = [x.block_number for x in sam.sam_blocks]
             sys.stdout.write(f"SAM blocks:               {sam_blocks}\n")
             sys.stdout.write(f"Is DECtape:               {'YES' if self.dectape else 'NO'}\n")
-            for dn in self.read_directory_name_blocks():
+            for dn in self.get_root().read_directory_name_blocks():
                 sys.stdout.write(f"{dn}\n")
 
     def dump(
@@ -1333,7 +1362,7 @@ class DMSFilesystem(AbstractFilesystem):
                 dn.first_sam_block_number = sam_blocks[0]
                 dn.version_number = asc_to_sixbit_word12(version_string)
                 entry = DMSDirectoryEntry(dn, sam)
-                entry.filename = MONITOR_FILENAME
+                entry.stem = MONITOR_FILENAME
                 entry.file_number = RESERVED_FILE_NUMBER
                 entry.program_type = FILE_TYPE_SYS_USER
                 entry.system_program = True
@@ -1346,12 +1375,6 @@ class DMSFilesystem(AbstractFilesystem):
             dn.write()
         sam.write()
         return self
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     def get_types(self) -> t.List[str]:
         """

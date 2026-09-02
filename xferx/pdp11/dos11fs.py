@@ -27,7 +27,7 @@ import sys
 import typing as t
 from datetime import date, timedelta
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile
+from ..abstract import XFERXPath, AbstractFile
 from ..commons import (
     BLOCK_SIZE,
     DECTAPE,
@@ -136,7 +136,9 @@ def dos11_canonical_filename(fullname: str, wildcard: bool = False) -> str:
     return f"{uic or ''}{fullname}"
 
 
-def dos11_split_fullname(uic: UIC, fullname: t.Optional[str], wildcard: bool = True) -> t.Tuple[UIC, t.Optional[str]]:
+def dos11_split_fullname(
+    uic: t.Optional[UIC], fullname: t.Optional[str], wildcard: bool = True
+) -> t.Tuple[t.Optional[UIC], t.Optional[str]]:
     if fullname:
         if "[" in fullname:
             try:
@@ -343,13 +345,11 @@ class DOS11Bitmap:
 
 class DOS11File(AbstractFile):
     entry: "DOS11DirectoryEntry"
-    closed: bool
     length: int  # Length in blocks
     contiguous: bool
 
     def __init__(self, entry: "DOS11DirectoryEntry"):
         self.entry = entry
-        self.closed = False
         self.contiguous = entry.contiguous
         self.length = entry.length
 
@@ -450,17 +450,11 @@ class DOS11File(AbstractFile):
         """
         return BLOCK_SIZE if self.contiguous else LINKED_FILE_BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class DOS11DirectoryEntry(AbstractDirectoryEntry):
+class DOS11DirectoryEntry(XFERXPath):
     """
     User File Directory Entry
 
@@ -490,7 +484,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
     fs: "DOS11Filesystem"
     ufd_block: "UserFileDirectoryBlock"
     uic: UIC = DEFAULT_UIC
-    filename: str = ""
+    stem: str = ""
     extension: str = ""
     raw_creation_date: int = 0
     start_block: int = 0  # Block number of the first logical block
@@ -512,7 +506,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         # DOS Course Handouts, Pag 14
         # http://www.bitsavers.org/pdf/dec/pdp11/dos-batch/DOS_CourseHandouts.pdf
         self = DOS11DirectoryEntry(ufd_block)
-        self.filename = rad50_word_to_asc(words[position]) + rad50_word_to_asc(words[position + 1])
+        self.stem = rad50_word_to_asc(words[position]) + rad50_word_to_asc(words[position + 1])
         self.extension = rad50_word_to_asc(words[position + 2])
         self.raw_creation_date = words[position + 3]  # Type, Creation date
         self.spare1 = words[position + 4] >> 8  # Spare
@@ -540,8 +534,8 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
             raw_creation_date = self.raw_creation_date & ~CONTIGUOUS_FILE_TYPE
         # Pack values into words
         return [
-            asc_to_rad50_word(self.filename[:3]),  # File Name (1 word)
-            asc_to_rad50_word(self.filename[3:6]),  # File Name (1 word)
+            asc_to_rad50_word(self.stem[:3]),  # File Name (1 word)
+            asc_to_rad50_word(self.stem[3:6]),  # File Name (1 word)
             asc_to_rad50_word(self.extension),  # File Type (1 word)
             raw_creation_date,  # Type, Creation date (1 word)
             (self.spare1 << 8) | self.usage_count,  # Lock, usage count (1 word)
@@ -551,17 +545,26 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
             (self.spare2 << 8) | self.protection_code,  # Protection code (1 word)
         ]
 
+    def is_dir(self) -> bool:
+        return False
+
     @property
+    def parent(self) -> "UserFileDirectory":
+        """
+        Get the parent User File Directory
+        """
+        return self.fs.get_ufd(self.uic)
+
     def is_empty(self) -> bool:
-        return self.filename == "" and self.extension == ""
+        return self.stem == "" and self.extension == ""
 
     @property
     def fullname(self) -> str:
-        return f"{self.uic or ''}{self.filename}.{self.extension}"
+        return f"{self.uic or ''}{self.stem}.{self.extension}"
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -598,7 +601,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
         self.end_block = 0
         self.protection_code = 0
         self.spare2 = 0
-        self.filename = ""
+        self.stem = ""
         self.extension = ""
         self.contiguous = False
         self.ufd_block.write()
@@ -633,7 +636,7 @@ class DOS11DirectoryEntry(AbstractDirectoryEntry):
 
     def __str__(self) -> str:
         return (
-            f"{self.filename:<6}."
+            f"{self.stem:<6}."
             f"{self.extension:<3}  "
             f"{self.uic.to_wide_str() if self.uic else '':<9}  "
             f"{self.creation_date or '          '} "
@@ -728,7 +731,7 @@ class UserFileDirectoryBlock(object):
         Get the first empty directory entry
         """
         for entry in self.entries_list:
-            if entry.is_empty:
+            if entry.is_empty():
                 return entry
         return None
 
@@ -741,7 +744,7 @@ class UserFileDirectoryBlock(object):
         buf.write(f"Next dir block:        {self.next_block_number}\n")
         header = False
         for i, x in enumerate(self.entries_list):
-            if include_all or not x.is_empty:
+            if include_all or not x.is_empty():
                 if not header:
                     buf.write("\nNum  File        UIC        Date       Length   Block    End   Code  Usage")
                     buf.write("\n---  ----        ---        ----       ------   -----    ---   ----  -----\n")
@@ -756,7 +759,7 @@ class UserFileDirectoryBlock(object):
         return self.examine({"full": True})
 
 
-class MasterFileDirectoryEntry(AbstractDirectoryEntry):
+class UserFileDirectory(XFERXPath):
     """
     Master File Directory Entry in the MFD block
 
@@ -788,7 +791,7 @@ class MasterFileDirectoryEntry(AbstractDirectoryEntry):
     @classmethod
     def read(
         cls, mfd_block: "AbstractMasterFileDirectoryBlock", words: t.List[int], position: int
-    ) -> "MasterFileDirectoryEntry":
+    ) -> "UserFileDirectory":
         self = cls(mfd_block)
         self.uic = UIC.from_word(words[position])  # UIC
         self.ufd_block = words[position + 1]  # UFD start block
@@ -823,11 +826,18 @@ class MasterFileDirectoryEntry(AbstractDirectoryEntry):
     ) -> t.Iterator["DOS11DirectoryEntry"]:
         for ufd_block in self.read_ufd_blocks():
             for entry in ufd_block.entries_list:
-                if filename_match(entry.basename, pattern, wildcard):
-                    if include_all or not entry.is_empty:
+                if filename_match(entry.name, pattern, wildcard):
+                    if include_all or not entry.is_empty():
                         yield entry
 
+    def is_dir(self) -> bool:
+        return True
+
     @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self.fs.get_root()
+
     def is_empty(self) -> bool:
         return self.num_words == 0
 
@@ -836,7 +846,7 @@ class MasterFileDirectoryEntry(AbstractDirectoryEntry):
         return f"{self.uic}"
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return f"{self.uic}"
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
@@ -895,7 +905,7 @@ class AbstractMasterFileDirectoryBlock:
 
     fs: "DOS11Filesystem"
     # Master File Directory Block entries
-    entries_list: t.List["MasterFileDirectoryEntry"] = []
+    entries_list: t.List["UserFileDirectory"] = []
 
 
 class MasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
@@ -934,7 +944,7 @@ class MasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
         self.next_block_number = words[0]  # link to next MFD
         self.entries_list = []
         for position in range(1, WORDS_PER_BLOCK - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
-            entry = MasterFileDirectoryEntry.read(self, words, position)
+            entry = UserFileDirectory.read(self, words, position)
             self.entries_list.append(entry)
         return self
 
@@ -948,7 +958,7 @@ class MasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
         self.next_block_number = 0
         self.entries_list = []
         for _ in range(1, WORDS_PER_BLOCK - MFD_ENTRY_SIZE, MFD_ENTRY_SIZE):
-            entry = MasterFileDirectoryEntry(self)
+            entry = UserFileDirectory(self)
             self.entries_list.append(entry)
         return self
 
@@ -964,12 +974,12 @@ class MasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
         # Write the buffer to the disk
         self.fs.write_words_block(self.block_number, words)
 
-    def get_empty_entry(self) -> t.Optional["MasterFileDirectoryEntry"]:
+    def get_empty_entry(self) -> t.Optional["UserFileDirectory"]:
         """
         Get the first empty directory entry
         """
         for entry in self.entries_list:
-            if entry.is_empty:
+            if entry.is_empty():
                 return entry
         return None
 
@@ -983,11 +993,47 @@ class XXDPMasterFileDirectoryBlock(AbstractMasterFileDirectoryBlock):
 
     def __init__(self, fs: "DOS11Filesystem"):
         self.fs = fs
-        entry = MasterFileDirectoryEntry(self)
+        entry = UserFileDirectory(self)
         entry.ufd_block = self.fs.xxdp_ufd_block
-        entry.uic = self.fs.uic
+        entry.uic = self.fs.uic or DEFAULT_UIC
         entry.num_words = UFD_ENTRY_SIZE
         self.entries_list = [entry]
+
+
+class DOS11RootDirectory(XFERXPath):
+    fs: "DOS11Filesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self
+
+    def iterdir(self) -> t.Iterator["UserFileDirectory"]:
+        """
+        Iterate over the User File Directory entries
+        """
+        for mfd in self.fs.read_mfd_blocks():
+            for entry in mfd.entries_list:
+                if not entry.is_empty():
+                    yield entry
 
 
 class DOS11Filesystem(AbstractRXBlockFilesystem):
@@ -1035,7 +1081,7 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         "protection_code",
     ]
 
-    uic: UIC  # current User Identification Code
+    uic: t.Optional[UIC]  # current User Identification Code
     xxdp: bool = False  # MFD Variety #2 (XXDP+)
     dectape: bool = False  # DECtape format
     mfd_block1: int = MFD1_BLOCK  # Master File Directory Block #1
@@ -1052,7 +1098,7 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         **kwargs: t.Union[bool, str],
     ) -> "DOS11Filesystem":
         self = cls(file_or_dev)
-        self.uic = DEFAULT_UIC
+        self.uic = None
         self.read_mfd()  # Read the Master File Directory
         if strict:
             # Check if the used blocks are in the bitmap
@@ -1077,7 +1123,7 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         self = cls(file_or_dev)
         self.dectape = kwargs.get("device_type", "") == DECTAPE
         self.xxdp = False
-        self.uic = DEFAULT_UIC
+        self.uic = None
         self.interleave_factor = DEFAULT_INTERLAVE_FACTOR
         if self.dectape:
             self.mfd_block1 = DECTAPE_MFD1_BLOCK
@@ -1134,13 +1180,13 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
     def read_mfd_entries(
         self,
         uic: UIC = ANY_UIC,
-    ) -> t.Iterator["MasterFileDirectoryEntry"]:
+    ) -> t.Iterator["UserFileDirectory"]:
         """
         Read Master File Directory entries
         """
         for mfd in self.read_mfd_blocks():
             for entry in mfd.entries_list:
-                if not entry.is_empty and uic.match(entry.uic):  # Filter by UIC
+                if not entry.is_empty() and uic.match(entry.uic):  # Filter by UIC
                     yield entry
 
     def read_mfd_blocks(self) -> t.Iterator["AbstractMasterFileDirectoryBlock"]:
@@ -1221,7 +1267,7 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         expand: bool = True,  # expand directories
         wildcard: bool = True,
         uic: t.Optional[UIC] = None,
-    ) -> t.Iterator["DOS11DirectoryEntry"]:
+    ) -> t.Iterator[t.Union[DOS11DirectoryEntry, UserFileDirectory]]:
         if uic is None:
             uic = self.uic
         uic, filename_pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
@@ -1231,31 +1277,58 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
                 uic = UIC.from_str(pattern)
                 for mfd_block in self.read_mfd_blocks():
                     for entry in mfd_block.entries_list:
-                        if not entry.is_empty and uic.match(entry.uic):
+                        if not entry.is_empty() and uic.match(entry.uic):
                             yield entry  # type: ignore
                 return
             except Exception:
                 pass
-        for mfd in self.read_mfd_entries(uic=uic):
-            yield from mfd.iterdir(pattern=filename_pattern, include_all=include_all, wildcard=wildcard)
+        if uic is None:
+            yield from self.get_root().iterdir()
+        else:
+            for mfd in self.read_mfd_entries(uic=uic):
+                yield from mfd.iterdir(pattern=filename_pattern, include_all=include_all, wildcard=wildcard)
 
     @property
-    def entries_list(self) -> t.Iterator["DOS11DirectoryEntry"]:
-        for mfd in self.read_mfd_entries(uic=self.uic):
-            yield from mfd.iterdir()
+    def entries_list(self) -> t.Iterator[t.Union[DOS11DirectoryEntry, UserFileDirectory]]:
+        if self.uic is None:
+            yield from self.get_root().iterdir()
+        else:
+            for mfd in self.read_mfd_entries(uic=self.uic):
+                yield from mfd.iterdir()
 
-    def get_file_entry(self, fullname: str) -> DOS11DirectoryEntry:
+    def get_file_entry(self, fullname: str) -> t.Union[DOS11RootDirectory, DOS11DirectoryEntry, UserFileDirectory]:
         """
         Get the directory entry for a file
         """
         fullname = dos11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        uic, name = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        if not uic:
+            raise FileNotFoundError(errno.ENOENT, "No UIC specified")
         try:
-            return next(self.filter_entries_list(basename, wildcard=False, uic=uic))
+            if not name:
+                return next(self.read_mfd_entries(uic=uic))
+            else:
+                return next(self.filter_entries_list(name, wildcard=False, uic=uic))
         except StopIteration:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> DOS11RootDirectory:
+        """
+        Get the root directory
+        """
+        return DOS11RootDirectory(self)
+
+    def get_ufd(self, uic: UIC) -> UserFileDirectory:
+        """
+        Get the User File Directory for a given UIC
+        """
+        for mfd_block in self.read_mfd_blocks():
+            for entry in mfd_block.entries_list:
+                if not entry.is_empty() and uic.match(entry.uic):
+                    return entry
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
 
     def create_file(
         self,
@@ -1279,7 +1352,9 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         except FileNotFoundError:
             pass
         # Get the MFD entry for the target UIC
-        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        uic, name = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        if not uic:
+            uic = DEFAULT_UIC
         try:
             mfd = next(self.read_mfd_entries(uic=uic))
         except Exception:
@@ -1305,11 +1380,11 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
             if new_entry is None:
                 raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         try:
-            filename, extension = basename.split(".", 1)  # type: ignore
+            stem, extension = name.split(".", 1)  # type: ignore
         except Exception:
-            filename = basename
+            stem = name
             extension = ""
-        new_entry.filename = filename
+        new_entry.stem = stem
         new_entry.extension = extension
         new_entry.raw_creation_date = date_to_dos11(creation_date or date.today())
         new_entry.start_block = blocks[0]
@@ -1333,7 +1408,7 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         self,
         fullname: str,
         options: t.Dict[str, t.Union[bool, str]],
-    ) -> "MasterFileDirectoryEntry":
+    ) -> "UserFileDirectory":
         """
         Create a User File Directory
         """
@@ -1349,7 +1424,7 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         found = False
         mfd: "MasterFileDirectoryBlock"
         for mfd in self.read_mfd_blocks():  # type: ignore
-            entry: MasterFileDirectoryEntry = mfd.get_empty_entry()  # type: ignore
+            entry: UserFileDirectory = mfd.get_empty_entry()  # type: ignore
             if entry is not None:
                 found = True
                 break
@@ -1393,27 +1468,31 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         blocks = 0
         i = 0
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=True, uic=self.uic)
+        if uic is None:
+            self.show_accounts(volume_id, options)
+            return
         if self.xxdp:
             sys.stdout.write("ENTRY# FILNAM.EXT        DATE          LENGTH  START\n")
         else:
             dt = date.today().strftime('%y-%b-%d').upper()
             sys.stdout.write(f"DIRECTORY {volume_id}: {uic}\n\n{dt}\n\n")
         for x in self.filter_entries_list(pattern, uic=uic, include_all=True, wildcard=True):
-            if x.is_empty:
-                continue
-            i = i + 1
-            fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.extension)
-            creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
-            attr = "C" if x.contiguous else ""
-            if self.xxdp:
-                sys.stdout.write(f"{i:6} {fullname:>10s} {creation_date:>14s} {x.length:>10d}    {x.start_block:06o}\n")
-            else:
-                uic_str = x.uic.to_wide_str() if uic.has_wildcard else ""
-                sys.stdout.write(
-                    f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}> {uic_str}\n"
-                )
-            blocks += x.length
-            files += 1
+            if isinstance(x, DOS11DirectoryEntry) and not x.is_empty():
+                i = i + 1
+                fullname = x.is_empty() and x.stem or "%-6s.%-3s" % (x.stem, x.extension)
+                creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
+                attr = "C" if x.contiguous else ""
+                if self.xxdp:
+                    sys.stdout.write(
+                        f"{i:6} {fullname:>10s} {creation_date:>14s} {x.length:>10d}    {x.start_block:06o}\n"
+                    )
+                else:
+                    uic_str = x.uic.to_wide_str() if uic.has_wildcard else ""
+                    sys.stdout.write(
+                        f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}> {uic_str}\n"
+                    )
+                blocks += x.length
+                files += 1
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
@@ -1432,15 +1511,16 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
             entries = self.filter_entries_list(arg, wildcard=True)
             for entry in entries:
                 sys.stdout.write(f"UIC:                      {entry.uic.to_wide_str()}\n")
-                sys.stdout.write(f"Filename:                 {entry.filename}\n")
-                sys.stdout.write(f"Extension:                {entry.extension}\n")
                 sys.stdout.write(f"Creation date:            {entry.creation_date}\n")
-                sys.stdout.write(f"Length in blocks:         {entry.length}\n")
-                sys.stdout.write(f"Start block:              {entry.start_block}\n")
-                sys.stdout.write(f"End block:                {entry.end_block}\n")
-                sys.stdout.write(f"Contiguous:               {'Y' if entry.contiguous else 'N'}\n")
-                sys.stdout.write(f"Protection code:          {entry.protection_code:03o}\n")
-                sys.stdout.write(f"Usage count:              {entry.usage_count}\n")
+                if isinstance(entry, DOS11DirectoryEntry):
+                    sys.stdout.write(f"Filename:                 {entry.stem}\n")
+                    sys.stdout.write(f"Extension:                {entry.extension}\n")
+                    sys.stdout.write(f"Length in blocks:         {entry.length}\n")
+                    sys.stdout.write(f"Start block:              {entry.start_block}\n")
+                    sys.stdout.write(f"End block:                {entry.end_block}\n")
+                    sys.stdout.write(f"Contiguous:               {'Y' if entry.contiguous else 'N'}\n")
+                    sys.stdout.write(f"Protection code:          {entry.protection_code:03o}\n")
+                    sys.stdout.write(f"Usage count:              {entry.usage_count}\n")
         else:
             bitmap = self.read_bitmap()
             sys.stdout.write(f"Free blocks:       {bitmap.free():>8}\n")
@@ -1453,7 +1533,7 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
             sys.stdout.write(f"Bitmap blocks:     {len(bitmap.blocks):>8}\n")
             sys.stdout.write(f"Bitmap words:      {bitmap.num_of_words:>8}\n")
             sys.stdout.write(f"Interleave factor: {self.interleave_factor:>8}\n")
-            for mfd in self.read_mfd_entries():
+            for mfd in self.get_root().iterdir():
                 for ufd_block in mfd.read_ufd_blocks():
                     sys.stdout.write(ufd_block.examine(options=options))
 
@@ -1466,31 +1546,21 @@ class DOS11Filesystem(AbstractRXBlockFilesystem):
         else:
             return self.dev.get_size()
 
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current User Identification Code
         """
-        try:
-            self.uic = UIC.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
+        if entry is None:
+            self.uic = None
+        else:
+            assert isinstance(entry, UserFileDirectory)
+            self.uic = entry.uic
 
     def get_pwd(self) -> str:
         """
         Get the current User Identification Code
         """
-        return str(self.uic)
-
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the given path is an UIC
-        """
-        try:
-            UIC.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
+        return str(self.uic) if self.uic is not None else ""
 
     def path_join(self, path: str, *paths: str) -> str:
         """

@@ -25,7 +25,7 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile
+from ..abstract import XFERXPath, AbstractFile
 from ..commons import ASCII, BLOCK_SIZE, IMAGE, READ_FILE_FULL, filename_match
 from ..device.abstract import AbstractDevice
 from .abstract import AbstractRXBlockFilesystem
@@ -150,7 +150,6 @@ def ascii_to_solo(data: t.Union[bytes, bytearray]) -> bytes:
 class SOLOFile(AbstractFile):
     entry: "SOLODirectoryEntry"
     file_mode: str
-    closed: bool
 
     def __init__(self, entry: "SOLODirectoryEntry", file_mode: t.Optional[str] = None) -> None:
         self.entry = entry
@@ -158,7 +157,6 @@ class SOLOFile(AbstractFile):
             self.file_mode = file_mode
         else:
             self.file_mode = ASCII if self.entry.file_type_id == FILE_TYPE_ASCII else IMAGE
-        self.closed = False
 
     def read_block(
         self,
@@ -221,12 +219,6 @@ class SOLOFile(AbstractFile):
         """
         return BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
@@ -243,10 +235,8 @@ class SOLOSegment(AbstractFile):
     """
 
     entry: "SOLOSegmentDirectoryEntry"
-    closed: bool
 
     def __init__(self, entry: "SOLOSegmentDirectoryEntry"):
-        self.closed = False
         self.entry = entry
 
     def read_block(
@@ -290,23 +280,26 @@ class SOLOSegment(AbstractFile):
         """
         return BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
 
-
-class SOLOAbstractSortableDirectoryEntry(AbstractDirectoryEntry):
+class SOLOAbstractSortableDirectoryEntry(XFERXPath):
     filename: str = ""
+    fs: "SOLOFilesystem"
 
     @property
     def fullname(self) -> str:
         return self.filename
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.filename
+
+    def is_dir(self) -> bool:
+        return False
+
+    @property
+    def parent(self) -> "SOLORootDirectory":
+        """Parent directory"""
+        return self.fs.get_root()
 
     def __lt__(self, other: "SOLOAbstractSortableDirectoryEntry") -> bool:
         return self.filename < other.filename
@@ -769,6 +762,39 @@ class SOLOCatalogPage:
         return str(self)
 
 
+class SOLORootDirectory(XFERXPath):
+    fs: "SOLOFilesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "SOLORootDirectory":
+        """Parent directory"""
+        return self
+
+    def iterdir(self) -> t.Iterator["SOLODirectoryEntry"]:
+        for block_number in self.fs.read_page_map(CAT_ADDR):
+            catalog_page = SOLOCatalogPage.read(self.fs, block_number)
+            for entry in catalog_page.entries:
+                yield entry
+
+
 class SOLOFilesystem(AbstractRXBlockFilesystem):
     """
     SOLO Filesystem
@@ -864,8 +890,8 @@ class SOLOFilesystem(AbstractRXBlockFilesystem):
                     if file_type_id is None or file_type_id == FILE_TYPE_SEGMENT:
                         yield SOLOSegmentDirectoryEntry(self, segment)
 
-        for entry in self.entries_list:
-            if filename_match(entry.basename, pattern, wildcard) and not entry.is_empty:
+        for entry in self.get_root().iterdir():
+            if filename_match(entry.name, pattern, wildcard) and not entry.is_empty:
                 if file_type_id is None or file_type_id == entry.file_type_id:
                     yield entry
 
@@ -874,10 +900,7 @@ class SOLOFilesystem(AbstractRXBlockFilesystem):
         """
         Read the catalog
         """
-        for block_number in self.read_page_map(CAT_ADDR):
-            catalog_page = SOLOCatalogPage.read(self, block_number)
-            for entry in catalog_page.entries:
-                yield entry
+        yield from self.get_root().iterdir()
 
     def get_searchlength(self, hash_key: int) -> int:
         page_num = (hash_key - 1) // CAT_PAGE_LENGTH + 1
@@ -910,7 +933,9 @@ class SOLOFilesystem(AbstractRXBlockFilesystem):
                 return entry
         return None
 
-    def get_file_entry(self, fullname: str) -> t.Union[SOLODirectoryEntry, SOLOSegmentDirectoryEntry]:
+    def get_file_entry(
+        self, fullname: str
+    ) -> t.Union[SOLODirectoryEntry, SOLOSegmentDirectoryEntry, SOLORootDirectory]:
         """
         Get the directory entry for a file
         """
@@ -924,17 +949,23 @@ class SOLOFilesystem(AbstractRXBlockFilesystem):
         entry = self.get_first_file_entry_for_hash(hash_key)
         if entry is not None:
             # Check if the entry match by filename
-            if entry.basename == fullname:
+            if entry.name == fullname:
                 return entry
             # Check the other entries in the same catalog page
             for entry in entry.cat_page.entries:
-                if entry.basename == fullname:
+                if entry.name == fullname:
                     return entry
         # Fallback
         try:
             return next(self.filter_entries_list(fullname, wildcard=False))
         except StopIteration:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> SOLORootDirectory:
+        """
+        Get the root directory
+        """
+        return SOLORootDirectory(self)
 
     def write_bytes(
         self,
@@ -1056,12 +1087,6 @@ class SOLOFilesystem(AbstractRXBlockFilesystem):
                     t += 1
         else:
             self.dump(arg)
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     @classmethod
     def initialize(

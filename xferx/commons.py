@@ -35,7 +35,7 @@ __all__ = [
     "cache",
     "dump_struct",
     "filename_match",
-    "getch",
+    "format_sizegetch",
     "hex_dump",
     "pad_words",
     "pairwise",
@@ -113,6 +113,18 @@ def pad_words(words: t.List[int], size: int) -> t.List[int]:
     return words + [0] * (size - len(words))
 
 
+def format_size(size: float, si: bool = True, precision: str = "3.1f") -> str:
+    """
+    Format size in human readable format
+    """
+    power = 1000 if si else 1024
+    for unit in ("", "K", "M", "G", "T"):
+        if abs(size) < power or unit == "T":
+            break
+        size = size / power
+    return f"{size:{precision}}{unit}" if unit else str(int(size))
+
+
 def hex_dump(data: bytes, bytes_per_line: int = BYTES_PER_LINE) -> None:
     """
     Display contents in hexadecimal
@@ -148,13 +160,13 @@ def dump_struct(
     return "\n".join(result)
 
 
-def filename_match(basename: str, pattern: t.Optional[str], wildcard: bool) -> bool:
+def filename_match(name: str, pattern: t.Optional[str], wildcard: bool) -> bool:
     if not pattern:
         return True
     if wildcard:
-        return fnmatch.fnmatch(basename, pattern)
+        return fnmatch.fnmatch(name, pattern)
     else:
-        return basename == pattern
+        return name == pattern
 
 
 try:

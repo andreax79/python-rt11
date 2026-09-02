@@ -20,13 +20,14 @@
 
 import errno
 import os
+import re
 import struct
 import sys
 import typing as t
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile
+from ..abstract import XFERXPath, AbstractFile
 from ..commons import (
     BLOCK_SIZE,
     READ_FILE_FULL,
@@ -38,7 +39,6 @@ from ..commons import (
 from ..device.abstract import AbstractDevice
 from ..uic import DEFAULT_UIC, UIC
 from .abstract import AbstractRXBlockFilesystem
-from .dos11fs import dos11_split_fullname
 from .rad50 import asc2rad, rad2asc, rad50_word_to_asc
 
 __all__ = [
@@ -48,14 +48,15 @@ __all__ = [
 ]
 
 HOME_BLOCK = 1  # Home block
-INDEXF_SYS = 1  # The index file is the root of the Files-11
-BITMAP_SYS = 2  # Storage bitmap file
-BADBLK_SYS = 3  # Bad block file
-MFD_DIR = 4  # Volume master file directory (000000.DIR)
+INDEXF_SYS = 1  # File ID 1,1,0 - Index file
+BITMAP_SYS = 2  # File ID 2,2,0 - Storage bitmap file
+BADBLK_SYS = 3  # File ID 3,3,0 - Bad block file
+MFD_DIR = 4  #    File ID 4,4,0 - Volume Master File Directory (000000.DIR)
+
 UC_CNB = 128  # Contiguous as possible flag
 SC_DIR = 0x80  # File is a directory
 
-MFD_UIC = UIC.from_str("[0,0]")
+MFD_DIR_NAME = "000000"
 MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 DIRECTORY_FILE_ENTRY_FORMAT = "<HHHHHHHH"
@@ -91,27 +92,67 @@ def files11_canonical_filename(fullname: t.Optional[str], wildcard: bool = False
     """
     fullname = (fullname or "").upper()
     try:
-        filename, extension = fullname.split(".", 1)
+        stem, extension = fullname.split(".", 1)
     except Exception:
-        filename = fullname
+        stem = fullname
         extension = "*" if wildcard else ""
-    filename = rad2asc(asc2rad(filename[0:3])) + rad2asc(asc2rad(filename[3:6])) + rad2asc(asc2rad(filename[6:9]))
+    stem = rad2asc(asc2rad(stem[0:3])) + rad2asc(asc2rad(stem[3:6])) + rad2asc(asc2rad(stem[6:9]))
     extension = rad2asc(asc2rad(extension))
-    return f"{filename}.{extension}"
+    return f"{stem}.{extension}"
 
 
-def files11_canonical_fullname(fullname: str, wildcard: bool = False) -> str:
-    try:
-        if "[" in fullname:
-            uic: t.Optional[UIC] = UIC.from_str(fullname)
-            fullname = fullname.split("]", 1)[1]
-        else:
-            uic = None
-    except Exception:
-        uic = None
-    if fullname:
+def files11_split_fullname(
+    fullname: t.Optional[str],
+    default_path: str,
+    wildcard: bool = True,
+) -> t.Tuple[str, t.Optional[str]]:
+    """
+    Two Level Directory Hierarchy
+
+    A path of "[n,m]" associates with a directory name of "nnnmmm.DIR;1",
+    where nnn and mmm are n and m padded out to three octal digits.
+
+    Multi-level Directory Hierarchy
+
+    A path has the format "[name1.name2.name3]".
+    Each name in the list translates to a directory file name of the form "name.DIR;1"
+    """
+    if fullname is None:
+        return default_path, None
+
+    # Split the directory specification from the filename.
+    match = re.fullmatch(r"(\[[^\]]*\])?(.*)", fullname)
+    if not match:
         fullname = files11_canonical_filename(fullname, wildcard=wildcard)
-    return f"{uic or ''}{fullname}"
+        return default_path, fullname
+
+    directory, filename = match.groups()
+    if wildcard and not filename:
+        filename = "*.*"
+    if not directory:
+        filename = files11_canonical_filename(filename, wildcard=wildcard)
+        return default_path, filename
+
+    directory = directory[1:-1]  # Remove the enclosing brackets
+
+    # Two-level directory hierarchy: [n,m]
+    if "," in directory:
+        parts = directory.split(",")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid two-level directory path: [{directory}]")
+        try:
+            n, m = (int(part.strip(), 8) for part in parts)
+        except ValueError as exc:
+            raise ValueError(f"Invalid octal directory path: [{directory}]") from exc
+        if not (0 <= n <= 0o777 and 0 <= m <= 0o777):
+            raise ValueError(f"Directory components must fit in three octal digits: [{directory}]")
+        path = f"{n:03o}{m:03o}"
+        return path, filename
+
+    # Multi-level directory hierarchy: [name1.name2.name3...]
+    else:
+        path = directory.upper()
+        return path, filename
 
 
 @dataclass
@@ -143,11 +184,9 @@ class RetrievalPointer:
 
 class Files11File(AbstractFile):
     header: "Files11FileHeader"
-    closed: bool
 
     def __init__(self, header: "Files11FileHeader"):
         self.header = header
-        self.closed = False
 
     def read_block(
         self,
@@ -208,12 +247,6 @@ class Files11File(AbstractFile):
         """
         return BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return str(self.header)
 
@@ -223,6 +256,116 @@ class Files11FileHeader:
     Each file on a Files-11 volume is described by a file header.
     The file header is a block that contains all the information
     necessary to access the file.
+
+    Header Area
+
+             +-------------------+-------------------+
+    H.MPOF   |  Map Area Offset  | Ident Area Offset |   H.IDOF
+             +-------------------+-------------------+
+             |              File Number              |   H.FNUM
+             +-------------------+-------------------+
+             |         File Sequence Number          |   H.FSEQ
+             +-------------------+-------------------+
+             |         File Structure Level          |   H.FLEV
+             +-------------------+-------------------+   H.FOWN
+    H.PROJ   |            File Owner UIC             |   H.PROG
+             +-------------------+-------------------+
+             |            File Protection            |   H.FPRO
+             +-------------------+-------------------+   H.FCHA
+    H.SCHA   |   System Char's   |    User Char's    |   H.UCHA
+             +-------------------+-------------------+
+             |                                       |   H.UFAT
+             +-                 -+-                 -+
+             |                                       |
+             +-                 -+-                 -+
+             |                                       |
+             +-                 -+-                 -+
+             /       User File Attribute Area        /
+             +-                 -+-                 -+
+             |                                       |
+             +-                 -+-                 -+
+             |                                       |
+             +-                 -+-                 -+
+             |                                       |
+             +-------------------+-------------------+   S.HDHD
+
+    Ident Area
+
+             +-------------------+-------------------+
+             |                                       |   I.FNAM
+             +-                 -+-                 -+
+             |               File Name               |
+             +-                 -+-                 -+
+             |                                       |
+             +-------------------+-------------------+
+             |               File Type               |   I.FTYP
+             +-------------------+-------------------+
+             |            Version Number             |   I.FVER
+             +-------------------+-------------------+
+             |            Revision Number            |   I.RVNO
+             +-------------------+-------------------+
+             |                                       |   I.RVDT
+             +-                 -+-                 -+
+             |             Revision Date             |
+             +-                 -+-                 -+
+             |                                       |
+             +-------------------+-                 -+
+    I.RVTI   |                   |                   |
+             +-                  +-------------------+
+             |                                       |
+             +-                 -+-                 -+
+             |             Revision Time             |
+             +-                 -+-                 -+
+             +-------------------+-                 -+
+    I.CRDT   |                   |                   |
+             +-                  +-------------------+
+             |                                       |
+             +-                 -+-                 -+
+             |             Creation Date             |
+             +-                 -+-                 -+
+             |                                       |
+             +-------------------+-------------------+
+             |                                       |   I.CRTI
+             +-                 -+-                 -+
+             |             Creation Time             |
+             +-                 -+-                 -+
+             |                                       |
+             +-------------------+-------------------+
+             |                                       |   I.EXDT
+             +-                 -+-                 -+
+             |             Revision Date             |
+             +-                 -+-                 -+
+             |                                       |
+             +-------------------+-                 -+
+             |       Unused      |                   |
+             +-------------------+-------------------+   S.IDHD
+
+    Map Area
+
+             +-------------------+-------------------+
+    M.ERVN   |   Extension RVN   | Extension Seq Num |   M.ESQN
+             +-------------------+-------------------+
+             |         Extension File Number         |   M.EFNU
+             +-------------------+-------------------+
+             |     Extension File Sequence Number    |   M.EFSQ
+             +-------------------+-------------------+
+    M.LBSZ   |  LBN Field Size   | Count Field Size  |   M.CTSZ
+             +-------------------+-------------------+
+    M.MAX    |  Map Words Avail. | Map Words in Use  |   M.USE
+             +-------------------+-------------------+   S.MPHD
+             |                                       |   M.RTRV
+             +-                 -+-                 -+
+             |                                       |
+             /          Retrieval Pointers           /
+             |                                       |
+             +-                 -+-                 -+
+             |                                       |
+             +-------------------+-------------------+
+             |         File Header Checksum          |   H.CKSM
+             +-------------------+-------------------+
+
+    https://bitsavers.org/pdf/dec/pdp11/rsx11m_s/Files-11_ODS-1_Spec_Sep86.txt
+
     """
 
     fs: "Files11Filesystem"
@@ -237,7 +380,7 @@ class Files11FileHeader:
     fcha: int  # File Characteristics
     ufat: bytes  # User Attribute Area
     # Ident Area
-    filename: str  # File Name
+    stem: str  # File Name
     extension: str  # File Type
     version: int  # Version Number
     rvno: int  # Revision Number
@@ -300,7 +443,7 @@ class Files11FileHeader:
             self.exdt,  # 7 bytes Expiration Date
             _,
         ) = struct.unpack_from(IDENT_AREA_FORMAT, buffer, position + self.idof * 2)
-        self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
+        self.stem = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
         self.extension = rad50_word_to_asc(ftyp)
         # Map Area
         # It describes the mapping of virtual blocks of the file to the logical blocks of the volume
@@ -362,11 +505,11 @@ class Files11FileHeader:
         raise OSError(errno.EIO, os.strerror(errno.EIO))
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
 
-    @property
-    def isdir(self) -> bool:
+    def is_dir(self) -> bool:
+        """Is a directory"""
         return bool(self.fcha & SC_DIR) or (self.fnum == MFD_DIR)
 
     @property
@@ -378,20 +521,36 @@ class Files11FileHeader:
         return UIC.from_word(self.fown)
 
     def __str__(self) -> str:
-        return f"{self.fnum:>5},{self.fseq:<5} {str(self.uic):9s} {self.basename:>14};{self.version}  FCHA: {self.fcha:04x}  RTYP: {self.rtyp:1}  Length: {self.length:9}"
+        return f"{self.fnum:>5},{self.fseq:<5} {str(self.uic):9s} {self.name:>14};{self.version}  FCHA: {self.fcha:04x}  RTYP: {self.rtyp:1}  Length: {self.length:9}"
 
     def __repr__(self) -> str:
         return str(self.__dict__)
 
 
-class Files11DirectoryEntry(AbstractDirectoryEntry):
+class Files11DirectoryEntry(XFERXPath):
     """
     Each directory entry contains the following:
 
     File ID  The File ID of the file that this directory entry represents.
-    Name     The name of the file, up to 9 characters.
-    Type     The type of the file, up to 3 characters.
+    Name     The name of the file, up to 9 characters (3 Radix-50 words)
+    Type     The type of the file, up to 3 characters (1 Radix-50 word)
     Version  The version number of the file
+
+    Word
+             +-------------------+-------------------+
+       0     |                                       |
+             |                File ID                |
+             |                                       |
+             +-------------------+-------------------+
+       3     |                                       |
+             |                 Name                  |
+             |                                       |
+             +-------------------+-------------------+
+       5     |                 Type                  |
+             +-------------------+-------------------+
+       6     |                Version                |
+             +-------------------+-------------------+
+
     """
 
     fs: "Files11Filesystem"
@@ -400,19 +559,23 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
     fnum: int  # File Number
     fseq: int  # File Sequence Number
     fvol: int  # Relative Volume Number
-    filename: str  # File Name
+    stem: str  # File Name
     extension: str  # File Type
     version: int  # Version Number
     uic: UIC = DEFAULT_UIC
+    parent_dir: "Files11DirectoryEntry"
 
-    def __init__(self, fs: "Files11Filesystem", uic: UIC):
+    def __init__(self, fs: "Files11Filesystem", parent_dir: "Files11DirectoryEntry"):
         self.fs = fs
-        self.uic = uic
+        self.parent_dir = parent_dir
+        assert isinstance(parent_dir, Files11DirectoryEntry)
         self._header = None
 
     @classmethod
-    def read(cls, fs: "Files11Filesystem", buffer: bytes, position: int, uic: UIC) -> "Files11DirectoryEntry":
-        self = cls(fs, uic)
+    def read(
+        cls, fs: "Files11Filesystem", buffer: bytes, position: int, parent: "Files11DirectoryEntry"
+    ) -> "Files11DirectoryEntry":
+        self = cls(fs, parent)
         (
             self.fnum,  # 1 word File Number
             self.fseq,  # 1 word File Sequence Number
@@ -423,7 +586,7 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
             ftyp,  #      1 word File Type
             self.version,  # 1 word File Version
         ) = struct.unpack_from(DIRECTORY_FILE_ENTRY_FORMAT, buffer, position)
-        self.filename = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
+        self.stem = rad50_word_to_asc(fnam0) + rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2)
         self.extension = rad50_word_to_asc(ftyp)
         return self
 
@@ -438,7 +601,6 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         """Each file in a volume set is uniquely identified by a File ID"""
         return f"{self.fnum},{self.fseq},{self.fvol}"
 
-    @property
     def is_empty(self) -> bool:
         """
         If the file number of the File ID field is zero,
@@ -446,17 +608,55 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         """
         return self.fnum == 0
 
-    @property
-    def fullname(self) -> str:
-        return f"{self.uic or ''}{self.filename}.{self.extension}"
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return self.header.is_dir()
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return self.fnum == MFD_DIR
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def parent(self) -> "Files11DirectoryEntry":
+        """The logical parent"""
+        return self.parent_dir
+
+    def get_ancestors(self) -> t.List["Files11DirectoryEntry"]:
+        """
+        Get the list of ancestors for this directory entry
+        """
+        ancestors = []
+        node = self.parent_dir
+        while node is not self:
+            if node.parent_dir is node:
+                break
+            ancestors.append(node)
+            node = node.parent_dir
+        return ancestors
+
+    @property
+    def fullname(self) -> str:
+        if self.is_mount():
+            return f"[{self.name}]"
+        elif self.is_dir():
+            path = ".".join([f"{x.stem}" for x in [self] + self.get_ancestors()])
+            return f"[{path}]"
+        else:
+            path = ".".join([f"{x.stem}" for x in self.get_ancestors()])
+            return f"[{path}]{self.name}"
+
+    @property
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
 
     @property
     def creation_date(self) -> t.Optional[date]:
         return files11_to_date(self.header.crdt, self.header.crti)
+
+    def dir_uic(self) -> UIC:
+        if not self.is_dir():
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR))
+        return UIC(int(self.stem[0:3], 8), int(self.stem[3:6], 8))
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -494,13 +694,55 @@ class Files11DirectoryEntry(AbstractDirectoryEntry):
         """
         return Files11File(self.header)
 
+    def iterdir(self) -> t.Iterator["Files11DirectoryEntry"]:
+        """
+        Iterate over directory entries
+        """
+        if not self.is_dir():
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), self.fullname)
+        header = self.fs.read_file_header(self.fnum)
+        with Files11File(header) as f:
+            buffer = f.read_block(0, READ_FILE_FULL)
+            for pos in range(0, len(buffer), DIRECTORY_FILE_ENTRY_LEN):
+                entry = Files11DirectoryEntry.read(self.fs, buffer, position=pos, parent=self)
+                if not entry.is_empty():
+                    yield entry
+
+    def get_child(self, name: str) -> "Files11DirectoryEntry":
+        """
+        Get a child entry by name
+        """
+        if not self.is_dir():
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), self.fullname)
+        name = files11_canonical_filename(name, wildcard=False)
+        for entry in self.iterdir():
+            if filename_match(entry.name, name, wildcard=False) and not entry.is_empty():
+                return entry
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+
     def __str__(self) -> str:
-        return f"File ID {'(' + self.file_id + ')':16} Name: {self.basename:12} Ver: {self.version} FCHA: {self.header.fcha:04x} RTYP: {self.header.rtyp:1} Length: {self.header.length:9}"
+        return f"File ID {'(' + self.file_id + ')':16} Name: {self.name:12} Ver: {self.version} FCHA: {self.header.fcha:04x} RTYP: {self.header.rtyp:1} Length: {self.header.length:9}"
+
+
+class Files11MasterFileDirectory(Files11DirectoryEntry):
+    def __init__(self, fs: "Files11Filesystem"):
+        self.fs = fs
+        self.parent_dir = self
+        self.fnum = MFD_DIR  # File Number
+        self.fseq = MFD_DIR  # File Sequence Number
+        self.fvol = 0  # Relative Volume Number
+        self.stem = "000000"  # File Name
+        self.extension = "DIR"  # File Type
+        self.version = 1  # Version Number
+        self._header = None
 
 
 class Files11Filesystem(AbstractRXBlockFilesystem):
     """
     Files-11 Filesystem
+
+    https://bitsavers.org/pdf/dec/pdp11/rsx11m_s/Files-11_ODS-1_Spec_Sep86.txt
+
     """
 
     fs_name = "files11"
@@ -511,7 +753,7 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
         "version",
     ]
 
-    uic: UIC  # current User Identification Code
+    pwd: str  #     Current working directory
 
     ibsz: int  #     2 bytes  Index File Bitmap Size
     iblb: int  #     4 bytes  Index File Bitmap LBN
@@ -545,7 +787,7 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
         **kwargs: t.Union[bool, str],
     ) -> "Files11Filesystem":
         self = cls(file_or_dev)
-        self.uic = DEFAULT_UIC
+        self.pwd = MFD_DIR_NAME
         self.read_home()
         if strict:
             # Check the bitmap size
@@ -595,7 +837,6 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
             _,  #           2 bytes  Unused
             self.chk2,  #   2 bytes  Second Checksum
         ) = struct.unpack(HOME_BLOCK_FORMAT, t)
-        self.uic = UIC.from_word(self.vown)
         self.iblb = (iblb_h << 16) + iblb_l
         # print(f"{self.ibsz=} {self.iblb=}")
 
@@ -625,48 +866,44 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
         assert file_header.flev == 0o401
         return file_header
 
-    def read_directory(self, file_number: int, uic: UIC) -> t.Iterator["Files11DirectoryEntry"]:
-        """
-        Read directory by file number
-        """
-        header = self.read_file_header(file_number)
-        with Files11File(header) as f:
-            buffer = f.read_block(0, READ_FILE_FULL)
-            for pos in range(0, len(buffer), DIRECTORY_FILE_ENTRY_LEN):
-                entry = Files11DirectoryEntry.read(self, buffer, position=pos, uic=uic)
-                if not entry.is_empty:
-                    yield entry
+    @property
+    def entries_list(self) -> t.Iterator[Files11DirectoryEntry]:
+        try:
+            parent = self.get_file_entry(self.pwd)
+            yield from parent.iterdir()
+        except FileNotFoundError:
+            pass
 
-    def read_dir_entries(self, uic: UIC) -> t.Iterator["Files11DirectoryEntry"]:
-        if uic == MFD_UIC:
-            # Master File Directory
-            yield from self.read_directory(MFD_DIR, MFD_UIC)
-        elif not uic.has_wildcard:
-            # Get UIC directory file number
-            uic_dir = f"{uic.group:03o}{uic.user:03o}.DIR"
-            uic_dir_entry = None
-            for entry in self.read_directory(MFD_DIR, MFD_UIC):
-                if entry.basename == uic_dir:
-                    uic_dir_entry = entry
-            if uic_dir_entry is None:
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
-            yield from self.read_directory(uic_dir_entry.fnum, uic=uic)
+    def get_parent_and_name(
+        self, fullname: t.Optional[str], wildcard: bool
+    ) -> t.Tuple[Files11DirectoryEntry, t.Optional[str]]:
+        """
+        Get the parent directory and filename from fullname
+        """
+        path, name = files11_split_fullname(fullname=fullname, default_path=self.pwd, wildcard=wildcard)
+        if not path:
+            raise FileNotFoundError(errno.ENOENT, "No directory specified", fullname)
+        # Traverse the path to find the directory entry
+        parts = path.split(".")
+        parent: Files11DirectoryEntry = self.get_root()
+        for part in parts:
+            if not part:
+                continue
+            part = files11_canonical_filename(f"{part}.DIR", wildcard=False)
+            parent = parent.get_child(part)
+            if not parent.is_dir():
+                raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), part)
+        return parent, name
+
+    def get_file_entry(self, fullname: str) -> Files11DirectoryEntry:
+        """
+        Get a file entry by fullname
+        """
+        parent, name = self.get_parent_and_name(fullname=fullname, wildcard=False)
+        if not name:
+            return parent  # Return the directory itself
         else:
-            # Filter directories
-            g = f"{uic.group:03o}" if uic.group != UIC.ANY_GROUP else None
-            u = f"{uic.user:03o}" if uic.user != UIC.ANY_USER else None
-            uic_dir_entry = None
-            for entry in self.read_directory(MFD_DIR, MFD_UIC):
-                if (
-                    (entry.header.isdir)
-                    and (g is None or entry.filename[0:3] == g)
-                    and (u is None or entry.filename[3:6] == u)
-                ):
-                    uic_dir_entry = entry
-                    dir_file_number = uic_dir_entry.fnum
-                    yield from self.read_directory(dir_file_number, uic=uic)
-            if uic_dir_entry is None:
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(uic))
+            return parent.get_child(name)  # Return the child entry by name
 
     def filter_entries_list(
         self,
@@ -674,29 +911,17 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-        uic: t.Optional[UIC] = None,
     ) -> t.Iterator["Files11DirectoryEntry"]:
-        if uic is None:
-            uic = self.uic
-        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
-        for entry in self.read_dir_entries(uic=uic):
-            if filename_match(entry.basename, pattern, wildcard) and not entry.is_empty:
+        parent, name = self.get_parent_and_name(fullname=pattern, wildcard=wildcard)
+        for entry in parent.iterdir():
+            if filename_match(entry.name, name, wildcard) and not entry.is_empty():
                 yield entry
 
-    @property
-    def entries_list(self) -> t.Iterator["Files11DirectoryEntry"]:
-        for entry in self.read_dir_entries(uic=self.uic):
-            yield entry
-
-    def get_file_entry(self, fullname: str) -> Files11DirectoryEntry:
-        fullname = files11_canonical_fullname(fullname)
-        if not fullname:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
-        try:
-            return next(self.filter_entries_list(basename, wildcard=False, uic=uic))
-        except StopIteration:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+    def get_root(self) -> Files11MasterFileDirectory:
+        """
+        Get the root directory
+        """
+        return Files11MasterFileDirectory(self)
 
     def show_accounts(self, volume_id: str, options: t.Dict[str, bool]) -> None:
         """
@@ -713,36 +938,32 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
         files = 0
         blocks = 0
         allocated = 0
-        uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=True, uic=self.uic)
+
+        parent, name = self.get_parent_and_name(fullname=pattern, wildcard=True)
         dt = datetime.today().strftime('%y-%b-%d %H:%M').upper()
-        sys.stdout.write(f"DIRECTORY {volume_id}:{uic}\n{dt}\n\n")
-        for x in self.filter_entries_list(pattern, uic=uic, include_all=True, wildcard=True):
-            if x.is_empty:
-                continue
-            fullname = f"{x.filename}.{x.extension};{x.version}"
-            date = x.creation_date and x.creation_date.strftime("%d-%b-%y %H:%M").upper() or ""
-            attr = "C" if UC_CNB & x.header.fcha else ""
-            length = f"{x.header.length}."
-            sys.stdout.write(f"{fullname:<19s} {length:<7s} {attr:1}  {date:>9s}\n")
-            blocks += x.header.length
-            allocated += x.header.length
-            files += 1
+        sys.stdout.write(f"DIRECTORY {volume_id}:{parent.fullname}\n{dt}\n\n")
+        for x in parent.iterdir():
+            if filename_match(x.name, name, wildcard=True) and not x.is_empty():
+                fullname = f"{x.stem}.{x.extension};{x.version}"
+                date = x.creation_date and x.creation_date.strftime("%d-%b-%y %H:%M").upper() or ""
+                attr = "C" if UC_CNB & x.header.fcha else ""
+                length = f"{x.header.length}."
+                sys.stdout.write(f"{fullname:<19s} {length:<7s} {attr:1}  {date:>9s}\n")
+                blocks += x.header.length
+                allocated += x.header.length
+                files += 1
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTAL OF {blocks}./{allocated}. BLOCKS IN {files}. FILES\n")
 
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         uic = None
-        if arg and "[" in arg:
-            try:
-                uic = UIC.from_str(arg)
-                arg = arg.split("]", 1)[1]
-            except Exception:
-                return
         if arg:
-            self.dump(arg)
-        elif uic is not None:
-            for entry in self.read_dir_entries(uic):
-                sys.stdout.write(f"{entry}\n")
+            entry = self.get_file_entry(arg)
+            sys.stdout.write(dump_struct(entry.__dict__))
+            sys.stdout.write("\n\n")
+            if entry.is_dir():
+                for x in entry.iterdir():
+                    sys.stdout.write(f"{x}\n")
         else:
             sys.stdout.write("Home Block\n\n")
             sys.stdout.write(dump_struct(self.__dict__))
@@ -758,49 +979,19 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
                     except FileNotFoundError:
                         pass
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current User Identification Code
         """
-        try:
-            self.uic = UIC.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
+        if entry is None:
+            entry = self.get_root()
+        assert isinstance(entry, Files11DirectoryEntry)
+        if not entry.is_dir():
+            raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), entry.fullname)
+        self.pwd = entry.stem
 
     def get_pwd(self) -> str:
         """
-        Get the current User Identification Code
+        Get the current working directory
         """
-        return str(self.uic)
-
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the given path is an UIC
-        """
-        try:
-            UIC.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
-
-    def path_join(self, path: str, *paths: str) -> str:
-        """
-        Join UIC and filename
-        """
-        paths = [x for x in paths if x]  # type: ignore
-        if not paths:
-            return path
-        try:
-            uic = UIC.from_str(path)
-        except Exception:
-            raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), path)
-        if len(paths) > 1:
-            raise OSError(errno.EINVAL, "Can only join UIC and filename")
-        return f"{uic}{paths[0]}"
+        return self.pwd

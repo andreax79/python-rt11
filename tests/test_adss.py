@@ -7,7 +7,7 @@ from xferx.pdp15.adssfs import (
     DIRECTORY_BLOCK,
     WORDS_PER_BLOCK,
     ADSSDirectory,
-    ADSSDirectoryEntry,
+    ADSSPath,
     ADSSFilesystem,
     oct_dump,
 )
@@ -143,7 +143,7 @@ def test_directory():
     d = ADSSDirectory.read(fs)
 
     words = [0o777777, 0o777777, 0o777777, 0o777777]
-    e1 = ADSSDirectoryEntry.read(d, words, 0, 0)
+    e1 = ADSSPath.read(d, words, 0, 0)
     oct_dump(words)
     oct_dump(e1.to_words())
     assert e1.to_words() == words
@@ -161,6 +161,9 @@ def test_adss():
     shell.onecmd(f"mount adss1: /adss {DSK}", batch=True)
     fs = shell.volumes.get_volume('ADSS1')
     assert isinstance(fs, ADSSFilesystem)
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir adss1:", batch=True)
     shell.onecmd("type adss1:f1;src", batch=True)

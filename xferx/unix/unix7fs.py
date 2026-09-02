@@ -105,15 +105,12 @@ class UNIXInode7(UNIXInode):
         self.ctime = swap_words(self.ctime)
         return self
 
-    @property
-    def isdir(self) -> bool:
+    def is_dir(self) -> bool:
         return (self.flags & V7_DIR) == V7_DIR
 
-    @property
-    def is_regular_file(self) -> bool:
-        return not self.isdir
+    def is_file(self) -> bool:
+        return not self.is_dir()
 
-    @property
     def is_allocated(self) -> bool:
         return self.flags != 0
 
@@ -166,7 +163,7 @@ class UNIXInode7(UNIXInode):
         buf.write("\n*Inode\n")
         buf.write(f"Inode number:          {self.inode_num:>6}\n")
         buf.write(f"Flags:                 {self.flags:>06o}\n")
-        if self.isdir:
+        if self.is_dir():
             buf.write("Type:               directory\n")
         # elif self.is_special_file:
         #     buf.write("Type:            special file\n")
@@ -184,7 +181,7 @@ class UNIXInode7(UNIXInode):
         return buf.getvalue()
 
     def __str__(self) -> str:
-        if not self.is_allocated:
+        if not self.is_allocated():
             return f"{self.inode_num:>4}# ---"
         else:
             mode = format_mode(self.flags, version=self.fs.version, perms=self.fs.perms)
@@ -199,6 +196,7 @@ class UNIX7Filesystem(UNIXFilesystem):
     fs_name = "unix7"
     fs_description = "UNIX version 7"
     fs_platforms = ["pdp-11", "interdata8", "vax"]
+    fs_path_separator = "/"
     fs_entry_metadata = [
         "creation_date",
         "last_access",

@@ -363,7 +363,7 @@ class UNIX0Inode(UNIXInode):
         Iterate over the blocks of the inode
         If include_indexes is True, yield the block numbers as well
         """
-        if self.is_large:
+        if self.is_large():
             # Large file
             for block_number in self.addr:
                 if block_number == 0:
@@ -392,14 +392,14 @@ class UNIX0Inode(UNIXInode):
         if number_of_blocks > current_blocks:
             # If the file is small but the requested size is larger than the small file size,
             # we need to convert it to a large file
-            if number_of_blocks > V0_NUMBLKS and not self.is_large:
+            if number_of_blocks > V0_NUMBLKS and not self.is_large():
                 self._convert_to_large()
-            if self.is_large:
+            if self.is_large():
                 self._grow_large_file(current_blocks, number_of_blocks)
             else:
                 self._grow_small_file(current_blocks, number_of_blocks)
         elif current_blocks > number_of_blocks:
-            if self.is_large:
+            if self.is_large():
                 self._shrink_large_file(current_blocks, number_of_blocks)
             else:
                 self._shrink_small_file(current_blocks, number_of_blocks)
@@ -410,7 +410,7 @@ class UNIX0Inode(UNIXInode):
         """
         Convert a small file into a large one
         """
-        if self.is_large:
+        if self.is_large():
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), "File is already large")
         free_storage_map = UNIX0FreeStorageMap.read(self.fs)  # Read the free storage map
         self.flags |= V0_LARGE  # Mark as large file
@@ -427,7 +427,7 @@ class UNIX0Inode(UNIXInode):
         """
         Grow a small file to the requested size
         """
-        if self.is_large:
+        if self.is_large():
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), "Not a small file")
         if desired_blocks > V0_NUMBLKS:
             # If the file is too large for a small file, raise an error
@@ -442,7 +442,7 @@ class UNIX0Inode(UNIXInode):
         """
         Grow a large file to the requested size
         """
-        if not self.is_large:
+        if not self.is_large():
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), "Not a large file")
         required_blocks = desired_blocks - current_blocks
         free_storage_map = UNIX0FreeStorageMap.read(self.fs)  # Read the free storage map
@@ -479,7 +479,7 @@ class UNIX0Inode(UNIXInode):
         """
         Shrink a small file to the requested size
         """
-        if self.is_large:
+        if self.is_large():
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), "Not a small file")
         if desired_blocks < 0 or desired_blocks > current_blocks:
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), "Invalid file size")
@@ -497,7 +497,7 @@ class UNIX0Inode(UNIXInode):
         """
         Shrink a large file to the requested size
         """
-        if not self.is_large:
+        if not self.is_large():
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), "Not a large file")
         if desired_blocks < 0 or desired_blocks > current_blocks:
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), "Invalid file size")
@@ -524,7 +524,7 @@ class UNIX0Inode(UNIXInode):
             self.nlinks = self.nlinks - 1
         # Delete the inode if link count is zero
         if self.nlinks == 0:
-            if not self.is_special_file:
+            if not self.is_special_file():
                 # Free the blocks
                 free_storage_map = UNIX0FreeStorageMap.read(self.fs)  # type: ignore
                 for block_number in self.blocks(include_indexes=True):
@@ -534,23 +534,18 @@ class UNIX0Inode(UNIXInode):
             self.flags = 0  # not allocated
         self.write()
 
-    @property
-    def isdir(self) -> bool:
+    def is_dir(self) -> bool:
         return (self.flags & V0_DIR) == V0_DIR
 
-    @property
     def is_special_file(self) -> bool:
         return (self.flags & V0_SPECIAL) == V0_SPECIAL
 
-    @property
-    def is_regular_file(self) -> bool:
-        return not self.isdir
+    def is_file(self) -> bool:
+        return not self.is_dir()
 
-    @property
     def is_large(self) -> bool:
         return bool(self.flags & V0_LARGE)
 
-    @property
     def is_allocated(self) -> bool:
         return (self.flags & V0_USED) != 0
 
@@ -578,24 +573,24 @@ class UNIX0Inode(UNIXInode):
         buf.write(f"Inode number:          {self.inode_num:>6}\n")
         buf.write(f"Uniq:                  {self.uniq:>6}\n")
         buf.write(f"Flags:                 {self.flags:>06o}\n")
-        if self.isdir:
+        if self.is_dir():
             buf.write("Type:               directory\n")
-        elif self.is_special_file:
+        elif self.is_special_file():
             buf.write("Type:            special file\n")
-        elif self.is_large:
+        elif self.is_large():
             buf.write("Type:              large file\n")
         else:
             buf.write("Type:                    file\n")
         buf.write(f"Owner user id:         {self.uid:>6}\n")
         buf.write(f"Link count:            {self.nlinks:>6}\n")
         buf.write(f"Size (words):          {self.size:>6}\n")
-        if self.is_large:
+        if self.is_large():
             buf.write(f"Indirect blocks:       {self.addr}\n")
         buf.write(f"Blocks:                {list(self.blocks())}\n")
         return buf.getvalue()
 
     def __str__(self) -> str:
-        if not self.is_allocated:
+        if not self.is_allocated():
             return f"{self.inode_num:>4}# ---"
         else:
             return f"{self.inode_num:>4}# uid: {self.uid:>3}  nlinks: {self.nlinks:>3}  size: {self.size:>5} words  flags: {self.flags:o}"
@@ -621,13 +616,13 @@ class UNIX0DirectoryEntry(UNIXDirectoryEntry):
         """
         Return a Dirent object for this entry
         """
-        return Dirent0(self.inode.inode_num, self.basename, self.inode.uniq)
+        return Dirent0(self.inode.inode_num, self.name, self.inode.uniq)
 
     def delete(self) -> bool:
         """
         Delete the file
         """
-        if self.inode.isdir:
+        if self.inode.is_dir():
             # Check if the directory is empty
             inodes = [V0_DD_INODE, V0_SYSTEM_INODE, self.inode_num]
             not_empty = any(x for x in self.fs.list_dir(self.inode) if x.inode_num not in inodes)
@@ -704,7 +699,7 @@ class UNIX0Directory(UNIXDirectory):
         """
         Read the directory
         """
-        if not inode.isdir:
+        if not inode.is_dir():
             raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR))
         with UNIX0File(inode) as f:  # type: ignore
             words = f.read_words_block(0, READ_FILE_FULL)
@@ -739,7 +734,7 @@ class UNIX0Directory(UNIXDirectory):
         """
         Write the directory
         """
-        if not self.inode.isdir:
+        if not self.inode.is_dir():
             raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR))
         # Prepare the directory entries
         words = []
@@ -887,6 +882,7 @@ class UNIX0Filesystem(UNIXFilesystem):
     fs_name = "unix0"
     fs_description = "UNIX version 0"
     fs_platforms = ["pdp-7"]
+    fs_path_separator = "/"
     fs_entry_metadata = [
         "unix_flags",
         "unix_uid",
@@ -968,7 +964,7 @@ class UNIX0Filesystem(UNIXFilesystem):
     def read_dir_entries(self, dirname: str) -> t.Iterator["UNIXDirectoryEntry"]:
         inode: UNIX0Inode = self.get_inode(dirname)  # type: ignore
         if inode:
-            if not inode.isdir:
+            if not inode.is_dir():
                 raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), dirname)
             for dirent in self.list_dir(inode):
                 fullname = unix_join(dirname, dirent.filename)
@@ -991,11 +987,11 @@ class UNIX0Filesystem(UNIXFilesystem):
             else:
                 sys.stdout.write(f"blocks = {blocks}\n")
         for x in entries:
-            if not options.get("full") and x.basename.startswith("."):
+            if not options.get("full") and x.name.startswith("."):
                 pass
             uid = x.inode.uid if x.inode.uid != -1 else 0o77
             sys.stdout.write(
-                f"{x.inode_num:>03o} {x.inode.flags & 0o77:02o} {uid:02o} {x.inode.nlinks:>02o} {x.inode.size:>05o} {x.basename}\n"
+                f"{x.inode_num:>03o} {x.inode.flags & 0o77:02o} {uid:02o} {x.inode.nlinks:>02o} {x.inode.size:>05o} {x.name}\n"
             )
 
     def find_free_inode_num(self) -> int:
@@ -1084,7 +1080,7 @@ class UNIX0Filesystem(UNIXFilesystem):
             pass
         # Get parent directory
         parent = self.get_file_entry(dirname)
-        if not parent.inode.isdir:
+        if not parent.inode.is_dir():
             raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), dirname)
         # Allocate a new inode and the data blocks for it
         directory = UNIX0Directory.create(self)

@@ -31,7 +31,7 @@ from .device.block import BlockDevice
 
 __all__ = [
     "AbstractFile",
-    "AbstractDirectoryEntry",
+    "XFERXPath",
     "AbstractFilesystem",
     "AbstractBlockFilesystem",
 ]
@@ -44,6 +44,7 @@ class AbstractFile(ABC):
 
     current_position: int = 0
     sector_size: int | None = None  # Sector size, in bytes
+    closed: bool = False
 
     def __enter__(self: AbstractFileT) -> AbstractFileT:
         return self
@@ -78,9 +79,11 @@ class AbstractFile(ABC):
     def get_block_size(self) -> int:
         """Get file block size in bytes"""
 
-    @abstractmethod
     def close(self) -> None:
-        """Close the file"""
+        """
+        Close the file
+        """
+        self.closed = True
 
     def read(self, size: t.Optional[int] = None) -> bytes:
         """Read bytes from the file, starting at the current position"""
@@ -164,8 +167,11 @@ class AbstractFile(ABC):
         return f"{self.__class__.__name__}({self.__dict__})"
 
 
-class AbstractDirectoryEntry(ABC):
+class XFERXPath(ABC):
     fs: "AbstractFilesystem"
+
+    def __init__(self, fs: "AbstractFilesystem"):
+        self.fs = fs
 
     @property
     @abstractmethod
@@ -174,42 +180,58 @@ class AbstractDirectoryEntry(ABC):
 
     @property
     @abstractmethod
-    def basename(self) -> str:
+    def name(self) -> str:
         """Final path component"""
+
+    @property
+    @abstractmethod
+    def parent(self) -> "XFERXPath":
+        """The logical parent of the path."""
 
     @property
     def creation_date(self) -> t.Optional[date]:
         """Creation date"""
         return None
 
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return False
+
+    def is_file(self) -> bool:
+        """Is a file"""
+        return not self.is_dir()
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return False
+
     @property
     def file_type(self) -> t.Optional[str]:
         """File type"""
         return None
 
-    @abstractmethod
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """Get the length in blocks"""
+        return 0
 
-    @abstractmethod
     def get_size(self, fork: t.Optional[str] = None) -> int:
         """Get file size in bytes"""
+        return 0
 
-    @abstractmethod
     def get_block_size(self) -> int:
         """Get file block size in bytes"""
+        return BLOCK_SIZE
 
-    @abstractmethod
     def delete(self) -> bool:
         """Delete the directory entry"""
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
-    # @abstractmethod
-    # def write(self) -> bool:
-    #     """Write the directory entry"""
-
-    @abstractmethod
     def open(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> AbstractFile:
         """Open the file"""
+        if self.is_dir():
+            raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), self.fullname)
+        else:
+            raise OSError(errno.EPERM, os.strerror(errno.EPERM))
 
     def read_bytes(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> bytes:
         """Get the content of the file"""
@@ -223,10 +245,23 @@ class AbstractDirectoryEntry(ABC):
         data = self.read_bytes(file_mode)
         return data.decode(encoding, errors)
 
+    def iterdir(self) -> t.Iterator["XFERXPath"]:
+        """
+        Iterate over directory entries
+        """
+        if self.is_dir():
+            raise OSError(errno.EPERM, os.strerror(errno.EPERM))
+        else:
+            raise NotADirectoryError(f"{self.fullname} is not a directory")
+
     @property
     def metadata(self) -> t.Dict[str, t.Any]:
         """Get metadata of the directory entry"""
-        return {k: getattr(self, k, None) for k in self.fs.fs_entry_metadata}
+        return {
+            k: (value() if callable(value) else value)
+            for k in self.fs.fs_entry_metadata
+            for value in [getattr(self, k, None)]
+        }
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.__dict__})"
@@ -266,24 +301,28 @@ class AbstractFilesystem:
     @abstractmethod
     def filter_entries_list(
         self, pattern: t.Optional[str], include_all: bool = False, expand: bool = True
-    ) -> t.Iterator["AbstractDirectoryEntry"]:
+    ) -> t.Iterator["XFERXPath"]:
         """Filter directory entries based on a pattern"""
 
     @property
     @abstractmethod
-    def entries_list(self) -> t.Iterator["AbstractDirectoryEntry"]:
+    def entries_list(self) -> t.Iterator["XFERXPath"]:
         """Property to get an iterator of directory entries"""
 
     @abstractmethod
-    def get_file_entry(self, fullname: str) -> "AbstractDirectoryEntry":
+    def get_file_entry(self, fullname: str) -> "XFERXPath":
         """Get the directory entry for a file"""
+
+    @abstractmethod
+    def get_root(self) -> "XFERXPath":
+        """Get the root directory entry"""
 
     def create_file(
         self,
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> "AbstractDirectoryEntry":
+    ) -> "XFERXPath":
         """Create a new file"""
         raise OSError(errno.EROFS, os.strerror(errno.EROFS))
 
@@ -291,21 +330,25 @@ class AbstractFilesystem:
         self,
         fullname: str,
         options: t.Dict[str, t.Union[str, bool]],
-    ) -> "AbstractDirectoryEntry":
+    ) -> "XFERXPath":
         """Create a new directory"""
         raise OSError(errno.ENOSYS, os.strerror(errno.ENOSYS))
 
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """Change the current directory"""
-        return False
+        raise NotImplementedError(f"chdir is not supported on {self.fs_name}")
 
     def get_pwd(self) -> str:
         """Get the current directory"""
         return ""
 
-    def isdir(self, fullname: str) -> bool:
+    def is_dir(self, fullname: str) -> bool:
         """Check if the given path is a directory"""
-        return False
+        try:
+            entry = self.get_file_entry(fullname)
+            return entry.is_dir()
+        except Exception:
+            return False
 
     def path_join(self, path: str, *paths: str) -> str:
         """Join directory path and filename"""
@@ -322,9 +365,9 @@ class AbstractFilesystem:
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         """Examine the filesystem"""
 
-    @abstractmethod
     def get_size(self) -> int:
         """Get filesystem size in bytes"""
+        return self.dev.get_size()
 
     def close(self) -> None:
         """Close the filesystem"""

@@ -26,7 +26,7 @@ import sys
 import typing as t
 from datetime import date, datetime
 
-from ..abstract import AbstractBlockFilesystem, AbstractDirectoryEntry, AbstractFile
+from ..abstract import AbstractBlockFilesystem, XFERXPath, AbstractFile
 from ..commons import (
     ASCII,
     BLOCK_SIZE,
@@ -36,6 +36,7 @@ from ..commons import (
     RESOURCE_FORK,
     dump_struct,
     filename_match,
+    format_size,
 )
 from ..device.abstract import AbstractDevice
 from ..device.block import BlockDevice
@@ -97,25 +98,14 @@ def date_to_mfs(dt: t.Union[datetime, date, None]) -> int:
     return int(dt.timestamp()) + DATETIME_DELTA
 
 
-def mfs_canonical_filename(basename: t.Optional[str], wildcard: bool = False) -> str:
+def mfs_canonical_filename(name: t.Optional[str], wildcard: bool = False) -> str:
     """
     Generate the canonical Macintosh File System name
     """
-    if not basename:
+    if not name:
         return ""
     else:
-        return basename.strip()[:FILE_NAME_LENGTH]
-
-
-def format_size(size: float) -> str:
-    """
-    Format size in human readable format
-    """
-    for unit in ("", "K", "M", "G", "T"):
-        if abs(size) < 1024 or unit == "T":
-            break
-        size = size / 1024
-    return f"{size:3.0f}{unit}" if unit else str(int(size))
+        return name.strip()[:FILE_NAME_LENGTH]
 
 
 def check_fork(fork: t.Optional[str], default: str = DATA_FORK) -> str:
@@ -131,14 +121,12 @@ def check_fork(fork: t.Optional[str], default: str = DATA_FORK) -> str:
 
 
 class File(AbstractFile):
-    entry: "FileDirectoryEntry"
-    closed: bool
+    entry: "MacintoshPath"
     file_mode: str
     fork: str
 
-    def __init__(self, entry: "FileDirectoryEntry", file_mode: t.Optional[str] = None, fork: t.Optional[str] = None):
+    def __init__(self, entry: "MacintoshPath", file_mode: t.Optional[str] = None, fork: t.Optional[str] = None):
         self.entry = entry
-        self.closed = False
         self.file_mode = file_mode or IMAGE
         self.fork = check_fork(fork)
 
@@ -220,12 +208,6 @@ class File(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     @property
     def fs(self) -> "MacintoshFilesystem":
         """
@@ -237,7 +219,7 @@ class File(AbstractFile):
         return self.entry.fullname
 
 
-class FileDirectoryEntry(AbstractDirectoryEntry):
+class MacintoshPath(XFERXPath):
     """
     File Directory Entry
 
@@ -319,11 +301,11 @@ class FileDirectoryEntry(AbstractDirectoryEntry):
         fs: "MacintoshFilesystem",
         buffer: bytes,
         position: int,
-    ) -> "FileDirectoryEntry":
+    ) -> "MacintoshPath":
         """
         Read a File Directory Entry from the buffer
         """
-        self = FileDirectoryEntry(fs)
+        self = MacintoshPath(fs)
         (
             self.flags,  # flags
             self.version,  # version number
@@ -356,7 +338,7 @@ class FileDirectoryEntry(AbstractDirectoryEntry):
         data_size: int,  # data fork length in bytes
         res_size: int = 0,  # resource fork length in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> "FileDirectoryEntry":
+    ) -> "MacintoshPath":
         """
         Create a new regular file
         """
@@ -435,7 +417,7 @@ class FileDirectoryEntry(AbstractDirectoryEntry):
         Return the new position in the buffer
         """
         self.compute_entry_length()
-        if self.is_empty:
+        if self.is_empty():
             struct.pack_into(">H", buffer, position, 0)
             return position + 2
         filename = self.filename.encode("macroman", errors="ignore")[:FILE_NAME_LENGTH]
@@ -465,7 +447,6 @@ class FileDirectoryEntry(AbstractDirectoryEntry):
         buffer[position + FILE_ENTRY_SIZE : position + FILE_ENTRY_SIZE + filename_length] = filename
         return position + self.entry_length
 
-    @property
     def is_empty(self) -> bool:
         # flags bit 7 = 1 if entry used
         return (self.flags & 0x80) == 0
@@ -475,8 +456,13 @@ class FileDirectoryEntry(AbstractDirectoryEntry):
         return self.filename
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.filename
+
+    @property
+    def parent(self) -> "FileDirectory":
+        """The logical parent"""
+        return self.fs.get_root()
 
     @property
     def creation_date(self) -> t.Optional[datetime]:
@@ -673,7 +659,7 @@ class FileDirectoryEntry(AbstractDirectoryEntry):
         """
         Compute the length of the entry in bytes (including filename and padding)
         """
-        if self.is_empty:
+        if self.is_empty():
             self.entry_length = 2
         else:
             filename_length = len(self.filename.encode("macroman", errors="ignore")[:FILE_NAME_LENGTH])
@@ -777,7 +763,7 @@ class FileDirectoryEntry(AbstractDirectoryEntry):
         return str(self)
 
 
-class FileDirectory:
+class FileDirectory(XFERXPath):
     """
     File Directory
 
@@ -785,11 +771,34 @@ class FileDirectory:
     """
 
     fs: "MacintoshFilesystem"
-    entries_list: t.List["FileDirectoryEntry"]
+    entries_list: t.List["MacintoshPath"]
 
     def __init__(self, fs: "MacintoshFilesystem"):
-        self.fs = fs
+        super().__init__(fs)
         self.entries_list = []
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "FileDirectory":
+        """The logical parent"""
+        return self
 
     @classmethod
     def read(cls, fs: "MacintoshFilesystem") -> "FileDirectory":
@@ -807,7 +816,7 @@ class FileDirectory:
                 if buffer[position] == 0:
                     position += 2
                 else:
-                    entry = FileDirectoryEntry.read(self.fs, buffer, position)
+                    entry = MacintoshPath.read(self.fs, buffer, position)
                     self.entries_list.append(entry)
                     position += entry.entry_length
         return self
@@ -831,6 +840,12 @@ class FileDirectory:
                     if entry is not None:
                         entry.compute_entry_length()
             self.fs.write_block(buffer, block_num)
+
+    def iterdir(self) -> t.Iterator[MacintoshPath]:
+        """
+        Iterate over the entries in the directory
+        """
+        yield from self.entries_list
 
 
 class VolumeInformation:
@@ -1252,40 +1267,39 @@ class MacintoshFilesystem(AbstractBlockFilesystem):
         file_directory.write()
         return self
 
-    def read_dir_entries(self) -> t.Iterator["FileDirectoryEntry"]:
-        """
-        Read File Directory entries
-        """
-        file_directory = FileDirectory.read(self)
-        yield from file_directory.entries_list
-
     def filter_entries_list(
         self,
         pattern: t.Optional[str],
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["FileDirectoryEntry"]:
+    ) -> t.Iterator["MacintoshPath"]:
         if pattern:
             pattern = pattern.upper()
         if not pattern and expand:
             pattern = "*"
-        for entry in self.read_dir_entries():
-            if filename_match(entry.basename.upper(), pattern, wildcard):
+        for entry in self.get_root().iterdir():
+            if filename_match(entry.name.upper(), pattern, wildcard):
                 yield entry
 
     @property
-    def entries_list(self) -> t.Iterator["FileDirectoryEntry"]:
-        yield from self.read_dir_entries()
+    def entries_list(self) -> t.Iterator["MacintoshPath"]:
+        yield from self.get_root().iterdir()
 
-    def get_file_entry(self, fullname: str) -> FileDirectoryEntry:
+    def get_file_entry(self, fullname: str) -> MacintoshPath:
         """
         Get the directory entry for a file
         """
-        for entry in self.read_dir_entries():
-            if entry.basename.upper() == fullname.upper():
+        for entry in self.get_root().iterdir():
+            if entry.name.upper() == fullname.upper():
                 return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> FileDirectory:
+        """
+        Get the root directory
+        """
+        return FileDirectory.read(self)
 
     def write_bytes(
         self,
@@ -1366,7 +1380,7 @@ class MacintoshFilesystem(AbstractBlockFilesystem):
         size: int,  # Data fork size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
         res_size: int = 0,  # Resource firk size in bytes
-    ) -> FileDirectoryEntry:
+    ) -> MacintoshPath:
         """
         Create a new file with a given length in number of blocks
         """
@@ -1378,7 +1392,7 @@ class MacintoshFilesystem(AbstractBlockFilesystem):
         except FileNotFoundError:
             pass
         # Create the file
-        entry = FileDirectoryEntry.create(
+        entry = MacintoshPath.create(
             fs=self,
             fullname=fullname,
             data_size=size,
@@ -1399,10 +1413,10 @@ class MacintoshFilesystem(AbstractBlockFilesystem):
         for x in self.filter_entries_list(pattern, include_all=True, wildcard=True):
             # Print file information
             # filename, byte length, attributes, last modification date, last access date, address, use count
-            filename = f"'{x.basename}'" if " " in x.basename else x.basename
+            filename = f"'{x.name}'" if " " in x.name else x.name
             file_type = x.raw_file_type.decode("macroman", errors="ignore").replace("\0", " ")
             file_creator = x.raw_file_creator.decode("macroman", errors="ignore").replace("\0", " ")
-            size = format_size(x.get_size(fork=DATA_FORK) + x.get_size(fork=RESOURCE_FORK))
+            size = format_size(x.get_size(fork=DATA_FORK) + x.get_size(fork=RESOURCE_FORK), si=False, precision="3.0f")
             flags = ""  #  "lvbspoimad"  # TODO
             # l - Locked
             # v - Invisible
@@ -1466,9 +1480,3 @@ class MacintoshFilesystem(AbstractBlockFilesystem):
             # Display the file information
             entry = self.get_file_entry(arg)  # type: ignore
             sys.stdout.write(entry.examine())
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()

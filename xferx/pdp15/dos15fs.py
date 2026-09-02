@@ -26,7 +26,7 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, IMAGE, READ_FILE_FULL, filename_match
 from ..device.abstract import AbstractDevice
 from ..device.block_18bit import BlockDevice18Bit, from_18bit_words_to_bytes, from_bytes_to_18bit_words
@@ -45,7 +45,7 @@ from .iops import (
 )
 
 __all__ = [
-    "DOS15DirectoryEntry",
+    "DOS15Path",
     "DOS15File",
     "DOS15Filesystem",
     "date_to_dos15",
@@ -96,7 +96,9 @@ def date_to_dos15(val: t.Optional[date]) -> int:
     return (val.month << 12) | (val.day << 6) | ((val.year - 1970) & 0o37)
 
 
-def dos15_split_fullname(uic: str, fullname: t.Optional[str], wildcard: bool = True) -> t.Tuple[str, t.Optional[str]]:
+def dos15_split_fullname(
+    uic: t.Optional[str], fullname: t.Optional[str], wildcard: bool = True
+) -> t.Tuple[t.Optional[str], t.Optional[str]]:
     """
     Split a fullname into UIC and filename
 
@@ -124,14 +126,12 @@ def dos15_split_fullname(uic: str, fullname: t.Optional[str], wildcard: bool = T
 
 
 class DOS15File(AbstractFile):
-    entry: "DOS15DirectoryEntry"
+    entry: "DOS15Path"
     file_mode: str  # ASCII of IMAGE
-    closed: bool
 
-    def __init__(self, entry: "DOS15DirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "DOS15Path", file_mode: t.Optional[str] = None):
         self.entry = entry
         self.file_mode = file_mode or IMAGE
-        self.closed = False
 
     def read_block(
         self,
@@ -229,17 +229,11 @@ class DOS15File(AbstractFile):
         """
         return WORDS_PER_LINKED_BLOCK * 3
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class DOS15DirectoryEntry(AbstractDirectoryEntry):
+class DOS15Path(XFERXPath):
     """
     Directory Entry
     ---------------
@@ -270,7 +264,7 @@ class DOS15DirectoryEntry(AbstractDirectoryEntry):
     fs: "DOS15Filesystem"
     ufd: "UserFileDirectory"
     file_number: int = 0  # File number in the directory
-    filename: str  # Filename
+    stem: str  # Filename
     extension: str = ""  # File extension
     is_truncated: bool = False
     block_number: int = 0  # First file block number
@@ -286,12 +280,10 @@ class DOS15DirectoryEntry(AbstractDirectoryEntry):
         self.ufd = ufd
 
     @classmethod
-    def read(
-        cls, ufd: "UserFileDirectory", words: t.List[int], file_number: int, position: int
-    ) -> "DOS15DirectoryEntry":
+    def read(cls, ufd: "UserFileDirectory", words: t.List[int], file_number: int, position: int) -> "DOS15Path":
         self = cls(ufd)
         self.file_number = file_number
-        self.filename = sixbit_to_ascii(words[position]) + sixbit_to_ascii(words[position + 1])
+        self.stem = sixbit_to_ascii(words[position]) + sixbit_to_ascii(words[position + 1])
         self.extension = sixbit_to_ascii(words[position + 2])
         self.block_number = words[position + 3] & 0o377777  # First block number
         self.is_truncated = bool(words[position + 3] >> 17)  # Truncated bit
@@ -308,8 +300,8 @@ class DOS15DirectoryEntry(AbstractDirectoryEntry):
         Dump the directory entry to words
         """
         return [
-            ascii_to_sixbit(self.filename[:3]),
-            ascii_to_sixbit(self.filename[3:6]),
+            ascii_to_sixbit(self.stem[:3]),
+            ascii_to_sixbit(self.stem[3:6]),
             ascii_to_sixbit(self.extension),
             (int(self.is_truncated) << 17) | self.block_number,
             (self._u4 << 16) | self.length,
@@ -317,6 +309,14 @@ class DOS15DirectoryEntry(AbstractDirectoryEntry):
             (self.protection_code << 16) | self.rib_position,
             self.raw_creation_date,
         ]
+
+    def is_dir(self) -> bool:
+        return False
+
+    @property
+    def parent(self) -> "UserFileDirectory":
+        """Parent directory"""
+        return self.ufd
 
     @property
     def is_empty(self) -> bool:
@@ -327,15 +327,15 @@ class DOS15DirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return f"[{self.uic}]{self.basename}"
+        return f"[{self.uic}]{self.name}"
 
     @property
     def uic(self) -> str:
         return self.ufd.uic
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename};{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem};{self.extension}"
 
     def get_blocks(self) -> t.List[int]:
         """
@@ -405,7 +405,7 @@ class DOS15DirectoryEntry(AbstractDirectoryEntry):
         bitmap.write()
 
         # Remove the entry from the UFD
-        entries = [entry for entry in self.ufd.entries_list if entry.file_number != self.file_number]
+        entries = [entry for entry in self.ufd.iterdir(include_all=True) if entry.file_number != self.file_number]
         self.ufd.write(entries)
         return True
 
@@ -469,7 +469,7 @@ class RetrievalInformationBlock:
     https://bitsavers.org/pdf/dec/pdp15/DEC-15-ODFFA-A_DOS15_SysMan.pdf
     """
 
-    entry: "DOS15DirectoryEntry"
+    entry: "DOS15Path"
     # Total number of blocks described by this RIB
     number_of_blocks: int = 0
     # List of entries in the UFD block
@@ -481,11 +481,11 @@ class RetrievalInformationBlock:
     # Block number of the previous Master File Directory block
     previous_block_number: int = 0
 
-    def __init__(self, entry: "DOS15DirectoryEntry"):
+    def __init__(self, entry: "DOS15Path"):
         self.entry = entry
 
     @classmethod
-    def read(cls, entry: "DOS15DirectoryEntry", block_number: int) -> "RetrievalInformationBlock":
+    def read(cls, entry: "DOS15Path", block_number: int) -> "RetrievalInformationBlock":
         self = cls(entry)
         self.block_number = block_number
         # Read the block
@@ -527,7 +527,7 @@ class UserFileDirectoryBlock(object):
 
     ufd: "UserFileDirectory"
     # List of entries in the UFD block
-    entries_list: t.List[DOS15DirectoryEntry]
+    entries_list: t.List[DOS15Path]
     # Block number of this Master File Directory block
     block_number: int = 0
     # Block number of the next Master File Directory block
@@ -546,7 +546,7 @@ class UserFileDirectoryBlock(object):
         self.entries_list = []
         words = self.fs.read_words_block(block_number)
         for i, position in enumerate(range(0, len(words) - 8, 8)):
-            entry = DOS15DirectoryEntry.read(ufd, words, i, position)
+            entry = DOS15Path.read(ufd, words, i, position)
             if not entry.is_empty:
                 self.entries_list.append(entry)
         self.previous_block_number = words[-2]  # Pointer to previous MFD block
@@ -573,7 +573,7 @@ class UserFileDirectoryBlock(object):
         return self.ufd.fs
 
 
-class UserFileDirectory:
+class UserFileDirectory(XFERXPath):
     """
     User File Directory
     -------------------
@@ -596,6 +596,7 @@ class UserFileDirectory:
     https://bitsavers.org/pdf/dec/pdp15/DEC-15-ODFFA-A_DOS15_SysMan.pdf
     """
 
+    fs: "DOS15Filesystem"
     mfd_block: "MasterFileDirectoryBlock"
     uic: str  # User Identification Code
     ufd_block_number: int  # Block number of the file
@@ -603,6 +604,7 @@ class UserFileDirectory:
     ufd_entry_size: int  # UFD entry size in bits
 
     def __init__(self, mfd_block: "MasterFileDirectoryBlock"):
+        self.fs = mfd_block.fs
         self.mfd_block = mfd_block
 
     @classmethod
@@ -618,11 +620,50 @@ class UserFileDirectory:
         return self
 
     @property
+    def length(self) -> int:
+        """Length in blocks"""
+        return 0
+
+    def is_dir(self) -> bool:
+        return True
+
+    @property
+    def parent(self) -> "MasterFileDirectory":
+        """Parent directory"""
+        return self.fs.get_root()
+
+    @property
     def is_empty(self) -> bool:
         """
         Check if the entry is empty
         """
         return self.uic == ""
+
+    @property
+    def fullname(self) -> str:
+        return f"{self.name}"
+
+    @property
+    def name(self) -> str:
+        return f"[{self.uic}]"
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return WORDS_PER_LINKED_BLOCK * 3
+
+    def delete(self) -> bool:
+        """
+        Delete the directory entry
+        """
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+
+    def open(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> DOS15File:
+        """
+        Open a file
+        """
+        raise OSError(errno.EISDIR, os.strerror(errno.EISDIR))
 
     def read_ufd_blocks(self) -> t.Iterator["UserFileDirectoryBlock"]:
         """Read User File Directory blocks"""
@@ -632,7 +673,7 @@ class UserFileDirectory:
             next_block_number = ufd_block.next_block_number
             yield ufd_block
 
-    def write(self, entries: t.Optional[t.List[DOS15DirectoryEntry]] = None) -> None:
+    def write(self, entries: t.Optional[t.List[DOS15Path]] = None) -> None:
         """
         Rewrite all directory entries, growing the UFD when necessary.
         """
@@ -680,13 +721,20 @@ class UserFileDirectory:
             block.entries_list = entries[start : start + entries_per_block]
             block.write()
 
-    @property
-    def entries_list(self) -> t.Iterator[DOS15DirectoryEntry]:
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        expand: bool = True,
+        wildcard: bool = True,
+    ) -> t.Iterator[DOS15Path]:
         """
         Iterate over all entries in the User File Directory
         """
         for ufd_block in self.read_ufd_blocks():
-            yield from ufd_block.entries_list
+            for entry in ufd_block.entries_list:
+                if (include_all or not entry.is_empty) and filename_match(entry.name, pattern, wildcard=True):
+                    yield entry
 
     def to_words(self) -> t.List[int]:
         """
@@ -698,10 +746,6 @@ class UserFileDirectory:
             (int(self.protected) << 17) | self.ufd_entry_size,
             0,
         ]
-
-    @property
-    def fs(self) -> "DOS15Filesystem":
-        return self.mfd_block.fs
 
     def __str__(self) -> str:
         """
@@ -805,7 +849,7 @@ class MasterFileDirectoryBlock:
         self.fs.write_words_block(self.block_number, words)
 
 
-class MasterFileDirectory:
+class MasterFileDirectory(XFERXPath):
     """
     Master File Directory
     ---------------------
@@ -820,8 +864,28 @@ class MasterFileDirectory:
     fs: "DOS15Filesystem"
     mfd_blocks: t.List[MasterFileDirectoryBlock]  # List of MFD blocks
 
-    def __init__(self, fs: "DOS15Filesystem"):
-        self.fs = fs
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "MasterFileDirectory":
+        """Parent directory"""
+        return self
 
     @classmethod
     def read(cls, fs: "DOS15Filesystem") -> "MasterFileDirectory":
@@ -844,8 +908,7 @@ class MasterFileDirectory:
         """
         return self.mfd_blocks[0].sat_block_number
 
-    @property
-    def entries_list(self) -> t.Iterator[UserFileDirectory]:
+    def iterdir(self) -> t.Iterator[UserFileDirectory]:
         """
         Iterate over all entries in the Master File Directory
         """
@@ -853,7 +916,7 @@ class MasterFileDirectory:
             yield from mfd_block.entries_list
 
     def get_entry(self, uic: str) -> t.Optional[UserFileDirectory]:
-        for entry in self.entries_list:
+        for entry in self.iterdir():
             if entry.uic == uic:
                 return entry
         return None
@@ -1031,7 +1094,7 @@ class DOS15Filesystem(AbstractFilesystem):
         "protection_code",
     ]
 
-    uic: str = ""  # current User Identification Code
+    uic: t.Optional[str] = None  # current User Identification Code
     dev: BlockDevice18Bit
 
     def __init__(self, file_or_device: t.Union["AbstractFile", "AbstractDevice"]):
@@ -1058,13 +1121,10 @@ class DOS15Filesystem(AbstractFilesystem):
         if is_dectape:
             return ADSSFilesystem.mount(self.dev, strict=strict, **kwargs)
 
-        self.uic = ""
+        self.uic = None
         if strict:
-            mfd = MasterFileDirectory.read(self)
-            for ufd in mfd.entries_list:
-                if not self.uic:
-                    self.uic = ufd.uic
-                    break
+            for ufd in self.get_root().iterdir():
+                pass
         return self
 
     def read_words_block(
@@ -1090,20 +1150,34 @@ class DOS15Filesystem(AbstractFilesystem):
         """
         Read the Storage Allocation Table (SAT)
         """
-        mfd = MasterFileDirectory.read(self)
+        mfd = self.get_root()
         return StorageAllocationTables.read(self, mfd.sat_block_number)
 
-    def read_dir_entries(self, uic: t.Optional[str] = None) -> t.Iterator["DOS15DirectoryEntry"]:
+    def read_dir_entries(self, uic: t.Optional[str] = None) -> t.Iterator[t.Union[DOS15Path, UserFileDirectory]]:
         """
         Read directory entries
         """
-        mfd = MasterFileDirectory.read(self)
-        ufd = mfd.get_entry(uic or self.uic)
-        if ufd:
-            yield from ufd.entries_list
+        uic = uic or self.uic
+        mfd = self.get_root()
+        if uic:
+            ufd = mfd.get_entry(uic)
+            if ufd:
+                yield from ufd.iterdir(include_all=True)
+        else:
+            yield from mfd.iterdir()
+
+    def get_ufd(self, uic: str) -> UserFileDirectory:
+        """
+        Get the User File Directory for a given UIC
+        """
+        mfd = self.get_root()
+        for ufd in mfd.iterdir():
+            if ufd.uic == uic:
+                return ufd
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), uic)
 
     @property
-    def entries_list(self) -> t.Iterator["DOS15DirectoryEntry"]:
+    def entries_list(self) -> t.Iterator[t.Union[DOS15Path, UserFileDirectory]]:
         yield from self.read_dir_entries()
 
     def filter_entries_list(
@@ -1113,40 +1187,58 @@ class DOS15Filesystem(AbstractFilesystem):
         expand: bool = True,
         wildcard: bool = True,
         uic: t.Optional[str] = None,
-    ) -> t.Iterator["DOS15DirectoryEntry"]:
+    ) -> t.Iterator[t.Union[DOS15Path, UserFileDirectory]]:
         uic, pattern = dos15_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic or self.uic)
-        for entry in self.read_dir_entries(uic):
-            if (not entry.is_empty) and filename_match(entry.basename, pattern, wildcard):
-                yield entry
+        if not uic:
+            yield from self.get_root().iterdir()
+        else:
+            try:
+                ufd = self.get_ufd(uic)
+                if pattern:
+                    yield from ufd.iterdir(include_all=include_all, pattern=pattern, wildcard=wildcard)
+                elif expand:
+                    yield from ufd.iterdir(include_all=include_all)
+                else:
+                    yield ufd
+            except FileNotFoundError:
+                pass
 
-    def get_file_entry(self, fullname: str) -> DOS15DirectoryEntry:
+    def get_file_entry(self, fullname: str) -> t.Union[DOS15Path, UserFileDirectory]:
         """
         Get the directory entry for a file
         """
-        for entry in self.filter_entries_list(fullname, wildcard=False):
+        for entry in self.filter_entries_list(fullname, wildcard=False, expand=False):
             return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> MasterFileDirectory:
+        """
+        Get the Master File Directory
+        """
+        return MasterFileDirectory.read(self)
 
     def create_file(
         self,
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> DOS15DirectoryEntry:
+    ) -> DOS15Path:
         """
         Create a new file with a given length in number of blocks
         """
         # If the file already exists, delete it
         try:
-            entry = self.get_file_entry(fullname)
+            entry: DOS15Path = self.get_file_entry(fullname)  # type: ignore
             entry.delete()
         except FileNotFoundError:
             pass
         uic, fullname = dos15_split_fullname(self.uic, fullname, wildcard=False)  # type: ignore
         if not fullname:
             raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
-        filename, extension = fullname.split(";", 1)
-        ufd = MasterFileDirectory.read(self).get_entry(uic)
+        stem, extension = fullname.split(";", 1)
+        if uic is None:
+            raise FileNotFoundError(errno.ENOENT, "No UIC specified")
+        ufd = self.get_root().get_entry(uic)
         if ufd is None:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), uic)
 
@@ -1180,9 +1272,10 @@ class DOS15Filesystem(AbstractFilesystem):
             self.write_words_block(block_number, words)
 
         # Update the UFD with the new entry
-        entry = DOS15DirectoryEntry(ufd)
-        entry.file_number = max((item.file_number for item in ufd.entries_list), default=-1) + 1
-        entry.filename = filename
+        entries_list = list(ufd.iterdir(include_all=True))
+        entry = DOS15Path(ufd)
+        entry.file_number = max((item.file_number for item in entries_list), default=-1) + 1
+        entry.stem = stem
         entry.extension = extension
         entry.block_number = data_blocks[0]
         entry.length = number_of_data_blocks
@@ -1190,7 +1283,7 @@ class DOS15Filesystem(AbstractFilesystem):
         entry.rib_position = 0
         entry.raw_creation_date = date_to_dos15((metadata or {}).get("creation_date", date.today()))
         entry.protection_code = (metadata or {}).get("protection_code", 0)
-        ufd.write(list(ufd.entries_list) + [entry])
+        ufd.write(entries_list + [entry])
         return entry
 
     def write_bytes(
@@ -1216,9 +1309,6 @@ class DOS15Filesystem(AbstractFilesystem):
             for i, block_content in enumerate(blocks_content):
                 f.write_words_block(block_content, i)
 
-    def isdir(self, fullname: str) -> bool:
-        return False
-
     def show_accounts(self, volume_id: str, options: t.Dict[str, bool]) -> None:
         """
         Listing of all UIC
@@ -1234,18 +1324,17 @@ class DOS15Filesystem(AbstractFilesystem):
         https://bitsavers.org/pdf/dec/pdp15/DEC-15-UPIPA-A-D_PIP_DOS_Monitor_Utility_Program_197408.pdf
         """
         buf = io.StringIO()
-        mfd = MasterFileDirectory.read(self)
+        mfd = self.get_root()
         total_files = 0
         total_blocks = 0
-        for ufd in mfd.entries_list:
+        for ufd in mfd.iterdir():
             block_number = f"{ufd.ufd_block_number:o}" if ufd.ufd_block_number != 0o777777 else "NON"
             protected = "1" if ufd.protected else "0"
             files = 0
             blocks = 0
-            for entry in ufd.entries_list:
-                if not entry.is_empty:
-                    files += 1
-                    blocks += entry.get_length()
+            for entry in ufd.iterdir(include_all=False):
+                files += 1
+                blocks += entry.get_length()
             buf.write(f" {ufd.uic} {block_number:>6}({protected}) {files:>6o}{blocks:>6o}\n")
             total_files += files
             total_blocks += blocks
@@ -1273,9 +1362,16 @@ class DOS15Filesystem(AbstractFilesystem):
         https://bitsavers.org/pdf/dec/pdp15/DEC-15-UPIPA-A-D_PIP_DOS_Monitor_Utility_Program_197408.pdf
         """
         uic, pattern = dos15_split_fullname(fullname=pattern, wildcard=True, uic=self.uic)
-        entries = list(self.filter_entries_list(pattern, uic=uic, wildcard=True))
-        if not entries:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), pattern)
+        if not uic:
+            # If no UIC is specified, show the accounts
+            self.show_accounts(volume_id, options)
+            return
+
+        ufd = self.get_ufd(uic)
+        if not pattern:
+            pattern = "*;*"
+        entries = list(entry for entry in ufd.iterdir(pattern=pattern, include_all=False, wildcard=True))
+
         bitmap = self.read_bitmap()
         dt = date.today().strftime('%y-%b-%d').upper()
         used = sum(entry.get_length() for entry in entries if not entry.is_empty)
@@ -1288,7 +1384,7 @@ class DOS15Filesystem(AbstractFilesystem):
         for x in entries:
             if not x.is_empty:
                 creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
-                sys.stdout.write(f" {x.filename:<6} {x.extension:<3}  {x.length:>6o}  {creation_date}\n")
+                sys.stdout.write(f" {x.stem:<6} {x.extension:<3}  {x.length:>6o}  {creation_date}\n")
 
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         if options.get("bitmap"):
@@ -1302,8 +1398,10 @@ class DOS15Filesystem(AbstractFilesystem):
             sys.stdout.write(f"Free blocks: {bitmap.free()}\n")
         elif arg:
             uic, fullname = dos15_split_fullname(self.uic, arg, wildcard=False)
+            if uic is None:
+                raise FileNotFoundError(errno.ENOENT, "No UIC specified")
             if not fullname:
-                mfd = MasterFileDirectory.read(self)
+                mfd = self.get_root()
                 ufd = mfd.get_entry(uic)
                 if ufd:
                     sys.stdout.write(f"UIC:                      {ufd.uic}\n")
@@ -1314,29 +1412,30 @@ class DOS15Filesystem(AbstractFilesystem):
                 # Display the file entry
                 entries = self.filter_entries_list(arg, wildcard=True)
                 for entry in entries:
-                    sys.stdout.write(f"File number:              {entry.file_number}\n")
-                    sys.stdout.write(f"Filename:                 {entry.filename}\n")
-                    sys.stdout.write(f"Extension:                {entry.extension}\n")
                     sys.stdout.write(f"UIC:                      {entry.uic}\n")
                     sys.stdout.write(f"Active:                   {'N' if entry.is_empty else 'Y'}\n")
-                    sys.stdout.write(f"First block number:       {entry.block_number}\n")
                     sys.stdout.write(f"Size:                     {entry.get_length()} blocks\n")
-                    sys.stdout.write(f"RIB:                      {entry.rib}\n")
-                    sys.stdout.write(f"RIB position:             {entry.rib_position}\n")
                     sys.stdout.write(f"Creation date:            {entry.creation_date}\n")
-                    sys.stdout.write(f"Protection code:          {entry.protection_code}\n")
-                    blocks = str(list(entry.get_blocks()))
-                    sys.stdout.write(f"Blocks:                   {blocks}\n")
+                    if isinstance(entry, DOS15Path):
+                        sys.stdout.write(f"First block number:       {entry.block_number}\n")
+                        sys.stdout.write(f"File number:              {entry.file_number}\n")
+                        sys.stdout.write(f"Filename:                 {entry.stem}\n")
+                        sys.stdout.write(f"Extension:                {entry.extension}\n")
+                        sys.stdout.write(f"RIB:                      {entry.rib}\n")
+                        sys.stdout.write(f"RIB position:             {entry.rib_position}\n")
+                        sys.stdout.write(f"Protection code:          {entry.protection_code}\n")
+                        blocks = str(list(entry.get_blocks()))
+                        sys.stdout.write(f"Blocks:                   {blocks}\n")
                     sys.stdout.write("\n")
         else:
             # Display the directory entries
             sys.stdout.write("Filename           Block   Size   Prt    RIB RIB pos Creation Date Active\n")
             sys.stdout.write("--------           -----   ----   ---    --- ------- ------------- ------\n")
             full = bool(options.get("full", False))
-            mfd = MasterFileDirectory.read(self)
-            for ufd in mfd.entries_list:
+            mfd = self.get_root()
+            for ufd in mfd.iterdir():
                 sys.stdout.write(f"{ufd}\n")
-                for entry in ufd.entries_list:
+                for entry in ufd.iterdir(include_all=True):
                     if full or not entry.is_empty:
                         sys.stdout.write(f"{entry}\n")
 
@@ -1350,6 +1449,8 @@ class DOS15Filesystem(AbstractFilesystem):
         """Dump the content of a file or a range of blocks"""
         if fullname:
             entry = self.get_file_entry(fullname)
+            if not isinstance(entry, DOS15Path):
+                raise OSError(errno.EISDIR, os.strerror(errno.EISDIR), fullname)
             if start is None:
                 start = 0
             blocks = entry.get_blocks()
@@ -1371,26 +1472,23 @@ class DOS15Filesystem(AbstractFilesystem):
                 sys.stdout.write(f"\nBLOCK NUMBER   {block_number:08}\n")
                 oct_dump(words)
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current User Identification Code
         """
-        mfd = MasterFileDirectory.read(self)
-        fullname = sixbit_to_ascii(ascii_to_sixbit(fullname[0:3]))
-        entry = mfd.get_entry(fullname)
         if entry is None:
-            return False
-        self.uic = entry.uic
-        return True
+            self.uic = None
+        else:
+            assert isinstance(entry, UserFileDirectory)
+            self.uic = entry.uic
 
     def get_pwd(self) -> str:
         """
         Get the current User Identification Code
         """
-        return self.uic
+        return self.uic or ""
+
+    def path_join(self, path: str, *paths: str) -> str:
+        """Join directory path and filename"""
+        p = [x for x in [path] + list(paths) if x and x != "/"]
+        return "".join(p)

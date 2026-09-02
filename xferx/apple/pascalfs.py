@@ -25,14 +25,14 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile
+from ..abstract import XFERXPath, AbstractFile
 from ..commons import BLOCK_SIZE, READ_FILE_FULL, dump_struct, filename_match
 from ..device.abstract import AbstractDevice
 from .abstract import AbstractAppleDiskFilesystem
 
 __all__ = [
     "PascalFile",
-    "PascalDirectoryEntry",
+    "PascalPath",
     "PascalFilesystem",
 ]
 
@@ -161,12 +161,10 @@ def format_long_filetype(file_type: int) -> str:
 
 
 class PascalFile(AbstractFile):
-    entry: "PascalDirectoryEntry"
-    closed: bool
+    entry: "PascalPath"
 
-    def __init__(self, entry: "PascalDirectoryEntry"):
+    def __init__(self, entry: "PascalPath"):
         self.entry = entry
-        self.closed = False
 
     def read_block(
         self,
@@ -221,17 +219,11 @@ class PascalFile(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class VolumeDirectory:
+class VolumeDirectory(XFERXPath):
     fs: "PascalFilesystem"
     start_block: int  # Start block
     following_block: int  # Last block + 1
@@ -241,10 +233,33 @@ class VolumeDirectory:
     number_of_files: int  # Number of files
     last_access_time: int  # Last access time
     raw_most_recently_date: int  # Most recently date setting
-    directory_entries: t.List["PascalDirectoryEntry"]  # 77 entries, even if empty/unused
+    directory_entries: t.List["PascalPath"]  # 77 entries, even if empty/unused
 
     def __init__(self, fs: "PascalFilesystem"):
         self.fs = fs
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "VolumeDirectory":
+        """The logical parent"""
+        return self
 
     @classmethod
     def read(cls, fs: "PascalFilesystem") -> "VolumeDirectory":
@@ -267,7 +282,7 @@ class VolumeDirectory:
         self.volume_name = pascal_to_str(volume_name)
         # Read directory entries
         self.directory_entries = [
-            PascalDirectoryEntry.read(self.fs, buffer, i * DIRECTORY_ENTRY_SIZE) for i in range(1, MAX_DIR_ENTRIES + 1)
+            PascalPath.read(self.fs, buffer, i * DIRECTORY_ENTRY_SIZE) for i in range(1, MAX_DIR_ENTRIES + 1)
         ]
         return self
 
@@ -307,16 +322,14 @@ class VolumeDirectory:
                 entry.last_block_bytes,
                 entry.raw_mod_date,
             )
-        self.directory_entries = entries + [
-            PascalDirectoryEntry(self.fs) for _ in range(MAX_DIR_ENTRIES - len(entries))
-        ]
+        self.directory_entries = entries + [PascalPath(self.fs) for _ in range(MAX_DIR_ENTRIES - len(entries))]
         self.fs.write_block(bytes(buffer), DIR_BLOCK, number_of_blocks=DIR_SIZE)
 
     @property
     def most_recently_date(self) -> t.Optional[date]:
         return pascal_to_date(self.raw_most_recently_date)
 
-    def iterdir(self, include_empty_area: bool = False) -> t.Iterator["PascalDirectoryEntry"]:
+    def iterdir(self, include_empty_area: bool = False) -> t.Iterator["PascalPath"]:
         """
         Iterate over directory entries
         """
@@ -329,7 +342,7 @@ class VolumeDirectory:
                 # Add empty area between files
                 free_blocks = entry.start_block - following_block
                 if free_blocks > 0:
-                    free_entry = PascalDirectoryEntry(
+                    free_entry = PascalPath(
                         self.fs,
                         start_block=following_block,
                         following_block=entry.start_block,
@@ -344,7 +357,7 @@ class VolumeDirectory:
             # Add empty area at the end
             free_blocks = self.number_of_blocks - following_block
             if free_blocks > 0:
-                free_entry = PascalDirectoryEntry(
+                free_entry = PascalPath(
                     self.fs,
                     start_block=following_block,
                     following_block=self.number_of_blocks,
@@ -358,7 +371,7 @@ class VolumeDirectory:
         creation_date: t.Optional[date] = None,  # optional creation date
         file_type: t.Optional[str] = None,  # optional file type
         last_block_bytes: int = 0,  # number of bytes in last block
-    ) -> "PascalDirectoryEntry":
+    ) -> "PascalPath":
         """
         Allocate space for a new file
         """
@@ -388,7 +401,7 @@ class VolumeDirectory:
         return f"Volume: {self.volume_name}  Blocks: {self.number_of_blocks}  Files: {self.number_of_files}  Access time: {self.last_access_time}  Set date: {date_str}"
 
 
-class PascalDirectoryEntry(AbstractDirectoryEntry):
+class PascalPath(XFERXPath):
     fs: "PascalFilesystem"
     start_block: int  # Start block
     following_block: int  # Last block + 1
@@ -416,7 +429,7 @@ class PascalDirectoryEntry(AbstractDirectoryEntry):
         self.raw_mod_date = raw_mod_date
 
     @classmethod
-    def read(cls, fs: "PascalFilesystem", buffer: bytes, position: int) -> "PascalDirectoryEntry":
+    def read(cls, fs: "PascalFilesystem", buffer: bytes, position: int) -> "PascalPath":
         self = cls(fs)
         (
             self.start_block,  # start block
@@ -459,8 +472,13 @@ class PascalDirectoryEntry(AbstractDirectoryEntry):
         return self.filename
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.filename
+
+    @property
+    def parent(self) -> "VolumeDirectory":
+        """The logical parent"""
+        return self.fs.get_root()
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -518,10 +536,10 @@ class PascalDirectoryEntry(AbstractDirectoryEntry):
         """
         return PascalFile(self)
 
-    def __lt__(self, other: "PascalDirectoryEntry") -> bool:
+    def __lt__(self, other: "PascalPath") -> bool:
         return self.start_block < other.start_block
 
-    def __gt__(self, other: "PascalDirectoryEntry") -> bool:
+    def __gt__(self, other: "PascalPath") -> bool:
         return self.start_block > other.start_block
 
     def __str__(self) -> str:
@@ -576,25 +594,29 @@ class PascalFilesystem(AbstractAppleDiskFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["PascalDirectoryEntry"]:
+    ) -> t.Iterator["PascalPath"]:
         if pattern:
             pattern = pascal_canonical_filename(pattern, wildcard=wildcard)
-        volume_dir = VolumeDirectory.read(self)
-        for entry in volume_dir.iterdir(include_empty_area=include_all):
-            if filename_match(entry.basename, pattern, wildcard):
+        for entry in self.get_root().iterdir(include_empty_area=include_all):
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
     @property
-    def entries_list(self) -> t.Iterator["PascalDirectoryEntry"]:
-        volume_dir = VolumeDirectory.read(self)
-        yield from volume_dir.iterdir()
+    def entries_list(self) -> t.Iterator["PascalPath"]:
+        yield from self.get_root().iterdir()
 
-    def get_file_entry(self, fullname: str) -> PascalDirectoryEntry:
+    def get_file_entry(self, fullname: str) -> PascalPath:
         fullname = pascal_canonical_filename(fullname)  # type: ignore
         for entry in self.entries_list:
             if entry.fullname == fullname and not entry.is_empty:
                 return entry
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> VolumeDirectory:
+        """
+        Get the root directory
+        """
+        return VolumeDirectory.read(self)
 
     def read_bytes(self, fullname: str, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> bytes:
         entry = self.get_file_entry(fullname)
@@ -623,7 +645,7 @@ class PascalFilesystem(AbstractAppleDiskFilesystem):
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> PascalDirectoryEntry:
+    ) -> PascalPath:
         metadata = metadata or {}
         file_type: t.Optional[str] = metadata.get("file_type")  # type: ignore
         creation_date: t.Optional[date] = metadata.get("creation_date")  # type: ignore
@@ -668,7 +690,7 @@ class PascalFilesystem(AbstractAppleDiskFilesystem):
                     date = x.creation_date.strftime("%d-%b-%y").lstrip("0")
                 else:
                     date = ""
-                if filename_match(x.basename, pattern, wildcard=True):
+                if filename_match(x.name, pattern, wildcard=True):
                     files = files + 1
                     sys.stdout.write(
                         f"{x.fullname:<15} {x.length:>6}  {date:>9} {x.start_block:>4}  {x.last_block_bytes:>3}  {x.long_file_type}\n"
@@ -708,12 +730,6 @@ class PascalFilesystem(AbstractAppleDiskFilesystem):
                 ):
                     sys.stdout.write(f"{i:>2}# {entry}\n")
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
     @classmethod
     def initialize(
         cls,
@@ -737,13 +753,10 @@ class PascalFilesystem(AbstractAppleDiskFilesystem):
         volume_dir.number_of_files = 0
         volume_dir.last_access_time = 0
         volume_dir.raw_most_recently_date = date_to_pascal(date.today())
-        volume_dir.directory_entries = [PascalDirectoryEntry(self, 0, 0) for _ in range(MAX_DIR_ENTRIES)]
+        volume_dir.directory_entries = [PascalPath(self, 0, 0) for _ in range(MAX_DIR_ENTRIES)]
         volume_dir.write()
         self.volume_name = volume_name
         return self
-
-    def get_pwd(self) -> str:
-        return ""
 
     def get_types(self) -> t.List[str]:
         """

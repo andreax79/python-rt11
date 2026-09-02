@@ -67,6 +67,12 @@ def main() -> None:
         help="force opening an interactive shell even if commands are provided",
     )
     parser.add_argument(
+        "-e",
+        "--explorer",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_const",
@@ -122,7 +128,11 @@ def main() -> None:
         except Exception:
             sys.exit(1)
     # Start interactive shell
-    if options.interactive or not options.c:
+    if options.explorer:
+        from .shell.explorer import Explorer
+
+        Explorer(shell).run()
+    elif options.interactive or not options.c:
         shell.cmd_loop()
 
 

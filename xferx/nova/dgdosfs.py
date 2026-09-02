@@ -27,7 +27,7 @@ import sys
 import typing as t
 from datetime import date, datetime, timedelta
 
-from ..abstract import AbstractBlockFilesystem, AbstractDirectoryEntry, AbstractFile
+from ..abstract import AbstractBlockFilesystem, XFERXPath, AbstractFile
 from ..commons import (
     ASCII,
     BLOCK_SIZE,
@@ -251,7 +251,7 @@ def rdos_normpath(path: str, pwd: str) -> str:
     return "/" + "/".join(parts)
 
 
-def rdos_canonical_filename(basename: t.Optional[str], wildcard: bool = False) -> str:
+def rdos_canonical_filename(name: t.Optional[str], wildcard: bool = False) -> str:
     """
     Generate the canonical RDOS name
     """
@@ -261,21 +261,21 @@ def rdos_canonical_filename(basename: t.Optional[str], wildcard: bool = False) -
             return True
         return str.isalnum(s) or s == "$"
 
-    if not basename:
+    if not name:
         return ""
 
     try:
-        filename, extension = basename.split(".", 1)
+        stem, extension = name.split(".", 1)
     except Exception:
-        filename = basename
+        stem = name
         extension = ""
 
-    filename = "".join(filter(filter_fn, filename.upper()))[:FILE_NAME_LENGTH]
+    stem = "".join(filter(filter_fn, stem.upper()))[:FILE_NAME_LENGTH]
     extension = "".join(filter(filter_fn, extension.upper()))[:FILE_EXTENSION_LENGTH]
     if extension:
-        return f"{filename}.{extension}"
+        return f"{stem}.{extension}"
     else:
-        return filename
+        return stem
 
 
 def bytes_to_ascii(val: bytes) -> str:
@@ -292,8 +292,8 @@ def ascii_to_bytes(val: str, length: int) -> bytes:
     return swap_bytes(val.encode("ascii").ljust(length, b"\0")[:length])
 
 
-def filename_hash(filename: str, extension: str, frame_size: int = 0xFFFF) -> int:
-    tmp = ascii_to_bytes(filename.upper(), FILE_NAME_LENGTH)
+def filename_hash(stem: str, extension: str, frame_size: int = 0xFFFF) -> int:
+    tmp = ascii_to_bytes(stem.upper(), FILE_NAME_LENGTH)
     t0 = sum([x * (0o400 if i % 2 == 1 else 1) for i, x in enumerate(tmp)])
     tmp = ascii_to_bytes(extension.upper(), FILE_EXTENSION_LENGTH)
     t1 = sum([x * (0o400 if i % 2 == 1 else 1) for i, x in enumerate(tmp)])
@@ -329,14 +329,12 @@ class DGDOSBitmap:
         self.fs = fs
 
     @classmethod
-    def read(cls, fs: "DGDOSFilesystem", parent_dir: t.Optional["UserFileDescriptor"] = None) -> "DGDOSBitmap":
+    def read(cls, fs: "DGDOSFilesystem", parent_dir: "AbstractDGDOSPath") -> "DGDOSBitmap":
         """
         Read the bitmap blocks
         """
         self = DGDOSBitmap(fs)
-        entry = self.fs.get_ufd(parent_dir, MAP_DR)
-        if not entry:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), MAP_DR)
+        entry = parent_dir.get_child(MAP_DR)
         self.num_of_words = entry.get_size() // 2
         self.blocks = list(entry.blocks())
         self.bitmaps = []
@@ -476,11 +474,9 @@ class DGDOSBitmap:
 
 class DGDOSFile(AbstractFile):
     entry: "UserFileDescriptor"
-    closed: bool
 
     def __init__(self, entry: "UserFileDescriptor", file_mode: t.Optional[str] = None):
         self.entry = entry
-        self.closed = False
         self.file_mode = file_mode or IMAGE
 
     def read_16bit_words_block(
@@ -583,17 +579,172 @@ class DGDOSFile(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class UserFileDescriptor(AbstractDirectoryEntry):
+class AbstractDGDOSPath(XFERXPath):
+    fs: "DGDOSFilesystem"
+    stem: str = ""
+    extension: str = ""
+    attributes: int = 0
+    link_access_attributes: int = 0
+    number_of_last_block: int = 0
+    bytes_in_last_block: int = 0
+    address: int = 0  # first block address for a sequential/contiguous file, index address for a random file
+    last_access_date: int = 0  # days since 1967-12-31
+    last_modification_date: int = 0  # days since 1967-12-31
+    last_modification_time: int = 0  # hour (high byte) and minute (low byte)
+    var1: int = 0
+    var2: int = 0
+    use_count: int = 0
+    device_code: int = 0
+    target: str = ""  # link target
+
+    def is_random(self) -> bool:
+        """
+        Check if the file is random organized
+        """
+        return self.attributes & ATRAN != 0
+
+    def is_contiguous(self) -> bool:
+        """
+        Check if the file is contiguous organized
+        """
+        return self.attributes & ATCON != 0
+
+    def is_sequential(self) -> bool:
+        """
+        Check if the file is sequential organized
+        """
+        return not self.is_random() and not self.is_contiguous() and not self.is_symlink()
+
+    def is_symlink(self) -> bool:
+        """
+        Check if the file is a link
+        """
+        return self.attributes & ATLNK != 0
+
+    def is_dir(self) -> bool:
+        """
+        Check if the file is a directory or a partition
+        """
+        return self.is_directory() or self.is_partition()
+
+    def is_directory(self) -> bool:
+        """
+        Check if the file is a directory
+        """
+        return self.attributes & ATDIR != 0
+
+    def is_partition(self) -> bool:
+        """
+        Check if the file is a partition
+        """
+        return self.attributes & ATPAR != 0
+
+    def is_empty(self) -> bool:
+        return self.stem == "" and self.extension == ""
+
+    @property
+    def last_access(self) -> t.Optional[date]:
+        """
+        Last access date
+        """
+        return rdos_to_date(self.last_access_date)
+
+    @property
+    def creation_date(self) -> t.Optional[date]:
+        """
+        Last modification date
+        """
+        return rdos_to_date(self.last_modification_date, self.last_modification_time)
+
+    def blocks(self, include_indexes: bool = False) -> t.Iterator[int]:
+        if self.is_random():
+            # Random file
+            # Pag 22
+            # https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
+            index_block_number = self.address
+            while index_block_number:
+                if include_indexes:
+                    yield index_block_number
+                words = self.fs.read_16bit_words_block(index_block_number)
+                index_block_number = words.pop()  # Link to the next file index block
+                for block_address in words:
+                    if block_address != 0:
+                        yield block_address
+        elif self.is_contiguous():
+            # Contiguous file
+            # Pag 23
+            # https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
+            length = self.get_length()
+            for block_address in range(self.address, self.address + length):
+                yield block_address
+        else:
+            # Sequential file
+            # Pag 21
+            # https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
+            block_number = self.address
+            while block_number:
+                yield block_number
+                words = self.fs.read_16bit_words_block(block_number)
+                block_number = words[-1]
+                if self.fs.double_addressing:
+                    block_number += words[-2] << 16
+                    # print(">>>", words[-2], words[-1], block_number, block_number)
+                if block_number == 0:
+                    break
+
+    def iterdir(self) -> t.Iterator["UserFileDescriptor"]:
+        """
+        Iterate over directory entries
+        """
+        if not self.is_dir():
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), self.fullname)
+        for dir_block in self.dir_read_blocks():
+            yield from dir_block.iterdir()
+
+    def get_child(self, name: str) -> "UserFileDescriptor":
+        """
+        Get a child entry by name
+        """
+        if not self.is_dir():
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), self.fullname)
+        name = rdos_canonical_filename(name).rstrip(".")
+        for entry in self.iterdir():
+            if filename_match(entry.name.rstrip("."), name, wildcard=False):
+                return entry
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+
+    def dir_read_blocks(self) -> t.Iterator["DirectoryBlock"]:
+        """
+        Read directory blocks
+        """
+        if not self.is_dir():
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), self.fullname)
+        for block_number in self.blocks():
+            yield DirectoryBlock.read(self, block_number)
+
+    def dir_get_free_entry(self, hash: int) -> t.Optional["UserFileDescriptor"]:
+        """
+        Get a free directory entry
+        """
+        if not self.is_dir():
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), self.fullname)
+        blocks = list(self.blocks())
+        # TODO check
+        for d in (0, -1):
+            block_number = blocks[(hash + d) % len(blocks)]
+            dir_block = DirectoryBlock.read(self, block_number)
+            for entry in dir_block.entries_list:
+                if entry.is_empty():
+                    return entry
+        # TODO overlay
+        return None
+
+
+class UserFileDescriptor(AbstractDGDOSPath):
     """
     User File Descriptor
 
@@ -636,42 +787,26 @@ class UserFileDescriptor(AbstractDirectoryEntry):
     https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
     """
 
-    fs: "DGDOSFilesystem"
-    sys_dir_block: "SystemDirectoryBlock"
-    parent: t.Optional["UserFileDescriptor"]  # Parent directory/partition
-    filename: str = ""
-    extension: str = ""
-    attributes: int = 0
-    link_access_attributes: int = 0
-    number_of_last_block: int = 0
-    bytes_in_last_block: int = 0
-    address: int = 0  # first block address for a sequential/contiguous file, index address for a random file
-    last_access_date: int = 0  # days since 1967-12-31
-    last_modification_date: int = 0  # days since 1967-12-31
-    last_modification_time: int = 0  # hour (high byte) and minute (low byte)
-    var1: int = 0
-    var2: int = 0
-    use_count: int = 0
-    device_code: int = 0
-    target: str = ""  # link target
+    dir_block: "DirectoryBlock"
+    parent_dir: "AbstractDGDOSPath"  # Parent directory/partition
 
-    def __init__(self, sys_dir_block: "SystemDirectoryBlock", parent: t.Optional["UserFileDescriptor"] = None):
-        self.fs = sys_dir_block.fs
-        self.sys_dir_block = sys_dir_block
-        self.parent = parent
+    def __init__(self, dir_block: "DirectoryBlock", parent: "AbstractDGDOSPath"):
+        self.fs = dir_block.fs
+        self.dir_block = dir_block
+        self.parent_dir = parent
 
     @classmethod
     def read(
         cls,
-        sys_dir_block: "SystemDirectoryBlock",
-        parent: t.Optional["UserFileDescriptor"],
+        dir_block: "DirectoryBlock",
+        parent: "AbstractDGDOSPath",
         buffer: bytes,
         position: int,
     ) -> "UserFileDescriptor":  # DOS Course Handouts, Pag 14
         # https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
-        self = UserFileDescriptor(sys_dir_block, parent)
+        self = UserFileDescriptor(dir_block, parent)
         (
-            filename,
+            stem,
             extension,
             self.attributes,  #              1 word  Attributes and characteristics
             self.link_access_attributes,  #  1 word  Link access attributes
@@ -686,13 +821,13 @@ class UserFileDescriptor(AbstractDirectoryEntry):
             self.use_count,  #               1 word  Use count
             self.device_code,  #             1 word  Device code DCT link
         ) = struct.unpack_from(UFD_ENTRY_FORMAT, buffer, position)
-        if filename[0:2] == b'\0\0':  # deleted file/empty entry
-            self.filename = ""
+        if stem[0:2] == b'\0\0':  # deleted file/empty entry
+            self.stem = ""
             self.extension = ""
         else:
-            self.filename = bytes_to_ascii(filename)
+            self.stem = bytes_to_ascii(stem)
             self.extension = bytes_to_ascii(extension)
-        if self.is_link:
+        if self.is_symlink():
             (
                 _,  # filename
                 _,  # extension
@@ -724,8 +859,8 @@ class UserFileDescriptor(AbstractDirectoryEntry):
     def create(
         cls,
         fs: "DGDOSFilesystem",
-        parent: t.Optional["UserFileDescriptor"],
-        filename: str,
+        parent: t.Optional["AbstractDGDOSPath"],
+        stem: str,
         length: int,  # Length in blocks
         bitmap: "DGDOSBitmap",
         creation_date: t.Optional[t.Union[date, datetime]] = None,  # optional creation date
@@ -747,11 +882,11 @@ class UserFileDescriptor(AbstractDirectoryEntry):
             attributes = 0
             blocks_used = length
         # Check the filename
-        filename = rdos_canonical_filename(filename)
-        if filename in [SYS_DR, MAP_DR]:
-            raise OSError(errno.EEXIST, os.strerror(errno.EEXIST), filename)
+        stem = rdos_canonical_filename(stem)
+        if stem in [SYS_DR, MAP_DR]:
+            raise OSError(errno.EEXIST, os.strerror(errno.EEXIST), stem)
         try:
-            filename, extension = filename.split(".", 1)
+            stem, extension = stem.split(".", 1)
         except Exception:
             extension = ""
         # Check free space and allocate blocks
@@ -762,12 +897,13 @@ class UserFileDescriptor(AbstractDirectoryEntry):
                 raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
             allocated_blocks = bitmap.allocate(blocks_used)
         # Get a free System Directory entry
-        system_directory = SystemDirectory(fs, parent)
-        entry = system_directory.get_free_entry(hash=filename_hash(filename, extension, fs.frame_size))
+        if parent is None:
+            parent = fs.get_root()
+        entry = parent.dir_get_free_entry(hash=filename_hash(stem, extension, fs.frame_size))
         if entry is None:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), "No free entries in SYS.DR")
         # Create the entry
-        entry.filename = filename
+        entry.stem = stem
         entry.extension = extension
         entry.attributes = attributes
         entry.address = allocated_blocks[0]
@@ -785,7 +921,7 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         # TODO
         entry.device_code = 27  # TODO
         # Block allocation
-        if entry.is_random:  # Random file
+        if entry.is_random():  # Random file
             index_blocks = (length - 1) // INDEX_ENTRIES + 1  # Number of index blocks
             for i in range(index_blocks):
                 words = allocated_blocks[index_blocks + i * INDEX_ENTRIES : index_blocks + (i + 1) * INDEX_ENTRIES]
@@ -796,7 +932,7 @@ class UserFileDescriptor(AbstractDirectoryEntry):
                     words.append(0)  # Last block
                 index_block_number = allocated_blocks[i]
                 fs.write_16bit_words(words, index_block_number)
-        elif entry.is_sequential:  # Sequential file
+        elif entry.is_sequential():  # Sequential file
             for i, block_number in enumerate(allocated_blocks):
                 words = [0] * (BLOCK_SIZE // 2 - 1)
                 if i < len(allocated_blocks) - 1:
@@ -805,17 +941,17 @@ class UserFileDescriptor(AbstractDirectoryEntry):
                     words.append(0)  # Last block
                 fs.write_16bit_words(words, block_number)
         # Write the entry
-        entry.sys_dir_block.number_of_files += 1
-        entry.sys_dir_block.write()
+        entry.dir_block.number_of_files += 1
+        entry.dir_block.write()
         return entry
 
     def write_buffer(self, buffer: bytearray, position: int) -> None:
         """
         Write the UFD entry to the buffer
         """
-        filename = ascii_to_bytes(self.filename, FILE_NAME_LENGTH)
+        stem = ascii_to_bytes(self.stem, FILE_NAME_LENGTH)
         extension = ascii_to_bytes(self.extension, FILE_EXTENSION_LENGTH)
-        if self.is_link:
+        if self.is_symlink():
             try:
                 link_dir, link_name = self.target.split(":", 1)
             except Exception:
@@ -827,7 +963,7 @@ class UserFileDescriptor(AbstractDirectoryEntry):
                 link_ext = ""
             buffer[position : position + UFD_LINK_ENTRY_LEN] = struct.pack(
                 UFD_LINK_ENTRY_FORMAT,
-                filename,
+                stem,
                 extension,
                 self.attributes,
                 ascii_to_bytes(link_dir, FILE_NAME_LENGTH),
@@ -837,7 +973,7 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         else:
             buffer[position : position + UFD_ENTRY_LEN] = struct.pack(
                 UFD_ENTRY_FORMAT,
-                filename,
+                stem,
                 extension,
                 self.attributes,
                 self.link_access_attributes,
@@ -854,75 +990,17 @@ class UserFileDescriptor(AbstractDirectoryEntry):
             )
 
     @property
-    def is_random(self) -> bool:
-        """
-        Check if the file is random organized
-        """
-        return self.attributes & ATRAN != 0
-
-    @property
-    def is_contiguous(self) -> bool:
-        """
-        Check if the file is contiguous organized
-        """
-        return self.attributes & ATCON != 0
-
-    @property
-    def is_sequential(self) -> bool:
-        """
-        Check if the file is sequential organized
-        """
-        return not self.is_random and not self.is_contiguous and not self.is_link
-
-    @property
-    def is_link(self) -> bool:
-        """
-        Check if the file is a link
-        """
-        return self.attributes & ATLNK != 0
-
-    @property
-    def is_directory(self) -> bool:
-        """
-        Check if the file is a directory
-        """
-        return self.attributes & ATDIR != 0
-
-    @property
-    def is_partition(self) -> bool:
-        """
-        Check if the file is a partition
-        """
-        return self.attributes & ATPAR != 0
-
-    @property
-    def is_empty(self) -> bool:
-        return self.filename == "" and self.extension == ""
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self.parent_dir
 
     @property
     def fullname(self) -> str:
-        if self.parent:
-            return rdos_join(self.parent.fullname, self.basename)
-        else:
-            return self.basename
+        return rdos_join(self.parent_dir.fullname, self.name)
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
-
-    @property
-    def last_access(self) -> t.Optional[date]:
-        """
-        Last access date
-        """
-        return rdos_to_date(self.last_access_date)
-
-    @property
-    def creation_date(self) -> t.Optional[date]:
-        """
-        Last modification date
-        """
-        return rdos_to_date(self.last_modification_date, self.last_modification_time)
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -943,7 +1021,7 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         """
         Get file block size in bytes
         """
-        if self.is_sequential:  # Sequential file block size
+        if self.is_sequential():  # Sequential file block size
             if self.fs.double_addressing:
                 return SEQENTIAL_BLOCK_SIZE_LARGE_DISK
             else:
@@ -952,26 +1030,26 @@ class UserFileDescriptor(AbstractDirectoryEntry):
             return BLOCK_SIZE
 
     def filename_hash(self) -> int:
-        if self.is_empty:
+        if self.is_empty():
             return 0
-        return filename_hash(self.filename, self.extension, self.fs.frame_size)
+        return filename_hash(self.stem, self.extension, self.fs.frame_size)
 
     def delete(self) -> bool:
         """
         Delete the file
         """
         # If this is a directory, delete the directory entries
-        if self.is_directory:
-            for subentry in self.fs.read_dir_entries(self):
-                if subentry.basename != MAP_DR and self.address != subentry.address:
+        if self.is_directory():
+            for subentry in self.iterdir():
+                if subentry.name != MAP_DR and self.address != subentry.address:
                     subentry.delete()
         # Deallocate the blocks
-        bitmap = self.fs.read_bitmap(self.parent)
+        bitmap = self.fs.read_bitmap(self.parent_dir)
         for block_number in self.blocks(include_indexes=True):
             bitmap.set_free(block_number)
         bitmap.write()
         # Deallocate the entry
-        self.filename = ""
+        self.stem = ""
         self.extension = ""
         self.attributes = 0
         self.link_access_attributes = 0
@@ -985,33 +1063,33 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         self.use_count = 0
         self.device_code = 0
         # Decrement the number of files in the System Directory Block
-        if self.sys_dir_block.number_of_files > 0:
-            self.sys_dir_block.number_of_files -= 1
+        if self.dir_block.number_of_files > 0:
+            self.dir_block.number_of_files -= 1
         # Write the System Directory Block
-        self.sys_dir_block.write()
+        self.dir_block.write()
         return True
 
     def write(self) -> bool:
         """
         Write the directory entry
         """
-        self.sys_dir_block.write()
+        self.dir_block.write()
         return True
 
     def examine(self) -> str:
-        if self.is_directory:  # Directory
+        if self.is_directory():  # Directory
             file_type = "Directory"
-        elif self.is_partition:  # Partition
+        elif self.is_partition():  # Partition
             file_type = "Partition"
-        elif self.is_link:  # Link entry
+        elif self.is_symlink():  # Link entry
             file_type = "Link"
-        elif self.is_random:  # Random organized file
+        elif self.is_random():  # Random organized file
             file_type = "Random file"
-        elif self.is_contiguous:  # Contiguous organized file
+        elif self.is_contiguous():  # Contiguous organized file
             file_type = "Contiguous file"
         else:  # Sequential organized file
             file_type = "Sequential file"
-        if self.is_link:
+        if self.is_symlink():
             data: t.Dict[str, t.Any] = {
                 "Filename": self.fullname,
                 "File type": file_type,
@@ -1043,53 +1121,17 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         """
         return DGDOSFile(self, file_mode)
 
-    def blocks(self, include_indexes: bool = False) -> t.Iterator[int]:
-        if self.is_random:
-            # Random file
-            # Pag 22
-            # https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
-            index_block_number = self.address
-            while index_block_number:
-                if include_indexes:
-                    yield index_block_number
-                words = self.fs.read_16bit_words_block(index_block_number)
-                index_block_number = words.pop()  # Link to the next file index block
-                for block_address in words:
-                    if block_address != 0:
-                        yield block_address
-        elif self.is_contiguous:
-            # Contiguous file
-            # Pag 23
-            # https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
-            length = self.get_length()
-            for block_address in range(self.address, self.address + length):
-                yield block_address
-        else:
-            # Sequential file
-            # Pag 21
-            # https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
-            block_number = self.address
-            while block_number:
-                yield block_number
-                words = self.fs.read_16bit_words_block(block_number)
-                block_number = words[-1]
-                if self.fs.double_addressing:
-                    block_number += words[-2] << 16
-                    # print(">>>", words[-2], words[-1], block_number, block_number)
-                if block_number == 0:
-                    break
-
     def __str__(self) -> str:
         attr = format_attr(self.attributes, long=True)
-        if self.is_link:
-            return f"{self.filename:>10s}.{self.extension:<2s} {attr:<12}  -> {self.target}"
+        if self.is_symlink():
+            return f"{self.stem:>10s}.{self.extension:<2s} {attr:<12}  -> {self.target}"
         else:
             uftlkl = format_attr(self.link_access_attributes)
             if uftlkl:
                 attr = f"{attr}/{uftlkl}"
             creation_date = self.creation_date.strftime("%m/%d/%y") if self.creation_date else ""
             return (
-                f"{self.filename:>10s}.{self.extension:<2s} "
+                f"{self.stem:>10s}.{self.extension:<2s} "
                 f"{attr:<12} "
                 f"{self.get_size():>10d}  "
                 f"{creation_date:<8}  "
@@ -1100,7 +1142,37 @@ class UserFileDescriptor(AbstractDirectoryEntry):
         return str(self)
 
 
-class SystemDirectoryBlock:
+class SystemDirectory(AbstractDGDOSPath):
+    """
+    Data General DOS/RDOS System Directory (SYS.DR)
+    """
+
+    def __init__(self, fs: "DGDOSFilesystem"):
+        super().__init__(fs)
+        self.attributes = ATCHA | ATDIR | ATRAN | ATPER | ATWP
+        self.address = SYS_DR_BLOCK
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "SystemDirectory":
+        """The logical parent"""
+        return self
+
+
+class DirectoryBlock:
     """
     System Directory Block
 
@@ -1124,37 +1196,37 @@ class SystemDirectoryBlock:
     https://bitsavers.trailing-edge.com/pdf/dg/software/rdos/093-400027-00_RDOS_SystemReference_Oct83.pdf
     """
 
-    sys_dir: "SystemDirectory"  # System Directory
+    parent_dir: "AbstractDGDOSPath"  # Parent directory/partition
     block_number: int = 0  # Block number
     number_of_files: int = 0  # Number of files in this block directory
     max_ufd: int = 0  # Max number of UFD in this block
     entries_list: t.List["UserFileDescriptor"] = []  # List of UFD entries
 
-    def __init__(self, sys_dir: "SystemDirectory"):
-        self.sys_dir = sys_dir
+    def __init__(self, parent_dir: "AbstractDGDOSPath"):
+        self.parent_dir = parent_dir
 
     @classmethod
-    def read(cls, sys_dir: "SystemDirectory", block_number: int) -> "SystemDirectoryBlock":
-        self = cls(sys_dir)
+    def read(cls, parent_dir: "AbstractDGDOSPath", block_number: int) -> "DirectoryBlock":
+        self = cls(parent_dir)
         self.block_number = block_number
         buffer = self.fs.read_block(block_number)
         self.number_of_files = bytes_to_word(buffer, 0)  # first word
         self.max_ufd = bytes_to_word(buffer[-2:], 0)  # last word
         self.entries_list = []
         for position in range(2, BLOCK_SIZE - 4 - UFD_ENTRY_LEN, UFD_ENTRY_LEN):
-            ufd = UserFileDescriptor.read(self, sys_dir.dir_ufd, buffer, position)
+            ufd = UserFileDescriptor.read(self, parent_dir, buffer, position)
             self.entries_list.append(ufd)
         return self
 
     def to_bytes(self) -> bytes:
         """
-        Write the UFD entries to a buffer
+        Write the User File Descriptor entries to a buffer
         """
         buffer = bytearray(BLOCK_SIZE)
         # Update the number of files
-        self.number_of_files = len([x for x in self.entries_list if not x.is_empty])
+        self.number_of_files = len([x for x in self.entries_list if not x.is_empty()])
         buffer[0:2] = word_to_bytes(self.number_of_files)
-        # Write the UFD entries
+        # Write the User File Descriptor entries
         for i, entry in enumerate(self.entries_list):
             entry.write_buffer(buffer, 2 + i * UFD_ENTRY_LEN)
         # Write the last word
@@ -1163,7 +1235,7 @@ class SystemDirectoryBlock:
 
     def write(self) -> None:
         """
-        Write the System Directory Block to the disk
+        Write the Directory Block to the disk
         """
         self.fs.write_block(self.to_bytes(), self.block_number)
 
@@ -1172,7 +1244,7 @@ class SystemDirectoryBlock:
         Iterate over directory entries
         """
         for entry in self.entries_list:
-            if not entry.is_empty:
+            if not entry.is_empty():
                 yield entry
 
     @property
@@ -1180,62 +1252,10 @@ class SystemDirectoryBlock:
         """
         Get the filesystem
         """
-        return self.sys_dir.fs
+        return self.parent_dir.fs
 
     def __str__(self) -> str:
         return f"Block {self.block_number} ({self.number_of_files} entries, {self.max_ufd})"
-
-
-class SystemDirectory:
-    """
-    System Directory (SYS.DR)
-    """
-
-    fs: "DGDOSFilesystem"
-    dir_ufd: t.Optional["UserFileDescriptor"] = None  # Directory entry
-
-    def __init__(self, fs: "DGDOSFilesystem", dir_ufd: t.Optional["UserFileDescriptor"] = None):
-        self.fs = fs
-        self.dir_ufd = dir_ufd
-
-    def blocks(self) -> t.Iterator[int]:
-        """
-        Get the blocks of the System Directory
-        (SYS.DR is a random file)
-        """
-        index_block_number = self.dir_ufd.address if self.dir_ufd else SYS_DR_BLOCK
-        while index_block_number:
-            words = self.fs.read_16bit_words_block(index_block_number)
-            index_block_number = words.pop()
-            for block_number in words:
-                if block_number != 0:
-                    yield block_number
-
-    def read_system_directory(self) -> t.Iterator[SystemDirectoryBlock]:
-        """
-        Read System Directory blocks
-        """
-        for block_number in self.blocks():
-            yield SystemDirectoryBlock.read(self, block_number)
-
-    def get_free_entry(self, hash: int) -> t.Optional["UserFileDescriptor"]:
-        """
-        Get a free System Directory entry
-        """
-        blocks = list(self.blocks())
-        # TODO check
-        for d in (0, -1):
-            block_number = blocks[(hash + d) % len(blocks)]
-            sys_dir_block = SystemDirectoryBlock.read(self, block_number)
-            for entry in sys_dir_block.entries_list:
-                if entry.is_empty:
-                    return entry
-        # for sys_dir_block in self.read_system_directory():
-        #     for entry in sys_dir_block.entries_list:
-        #         if entry.is_empty:
-        #             return entry
-        # TODO overlay
-        return None
 
 
 class DiskInformationBlock:
@@ -1425,8 +1445,8 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         Check if the MAP.DR file is present
         """
         try:
-            for tmp in self.read_dir_entries():
-                if tmp.basename == MAP_DR:
+            for tmp in self.get_root().iterdir():
+                if tmp.name == MAP_DR:
                     return True
         except Exception:
             pass
@@ -1456,18 +1476,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
                 raise OSError(errno.EIO, "MAP.DR not found")
         return self
 
-    def read_dir_entries(
-        self,
-        dir_ufd: t.Optional["UserFileDescriptor"] = None,
-    ) -> t.Iterator["UserFileDescriptor"]:
-        """
-        Read System Directory entries
-        """
-        system_directory = SystemDirectory(self, dir_ufd)
-        for sys_dir_block in system_directory.read_system_directory():
-            yield from sys_dir_block.iterdir()
-
-    def read_bitmap(self, parent: t.Optional[UserFileDescriptor] = None) -> DGDOSBitmap:
+    def read_bitmap(self, parent: t.Optional[AbstractDGDOSPath] = None) -> DGDOSBitmap:
         """
         Read the bitmap
         """
@@ -1481,7 +1490,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["UserFileDescriptor"]:
+    ) -> t.Iterator[AbstractDGDOSPath]:
         if pattern:
             pattern = pattern.upper()
         if not pattern and expand:
@@ -1490,7 +1499,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
             absolute_path = pattern
         else:
             absolute_path = unix_join(self.pwd, pattern or "")
-        if self.isdir(absolute_path):
+        if self.is_dir(absolute_path):
             if not expand:
                 yield self.get_file_entry(absolute_path)
                 return
@@ -1499,28 +1508,18 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         else:
             dirname, pattern = unix_split(absolute_path)
         if dirname == "/":  # Root directory
-            dir_ufd: t.Optional[UserFileDescriptor] = None
+            dir_entry: AbstractDGDOSPath = self.get_root()
         else:
-            dir_ufd = self.get_file_entry(dirname)  # type: ignore
-        for entry in self.read_dir_entries(dir_ufd):
-            if filename_match(entry.basename, pattern, wildcard):
+            dir_entry = self.get_file_entry(dirname)  # type: ignore
+        for entry in dir_entry.iterdir():
+            if filename_match(entry.name, pattern, wildcard):
                 yield entry
 
-    def get_ufd(self, dir_ufd: t.Optional[UserFileDescriptor], basename: str) -> UserFileDescriptor:
-        """
-        Get User File Descriptor for a file in a directory
-        """
-        basename = rdos_canonical_filename(basename).rstrip(".")
-        for entry in self.read_dir_entries(dir_ufd):
-            if filename_match(entry.basename.rstrip("."), basename, wildcard=False):
-                return entry
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), basename)
-
     @property
-    def entries_list(self) -> t.Iterator["UserFileDescriptor"]:
-        yield from self.read_dir_entries()
+    def entries_list(self) -> t.Iterator[AbstractDGDOSPath]:
+        yield from self.get_root().iterdir()
 
-    def get_file_entry(self, fullname: str) -> UserFileDescriptor:
+    def get_file_entry(self, fullname: str) -> AbstractDGDOSPath:
         """
         Get the directory entry for a file
         """
@@ -1528,14 +1527,20 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         parts = [x for x in fullname.split("/") if x]
         if not parts:
             parts = [SYS_DR]  # Default to SYS.DR
-        entry: t.Optional[UserFileDescriptor] = None
+        entry: AbstractDGDOSPath = self.get_root()
         for i, part in enumerate(parts):
-            if entry is not None and not (entry.is_directory or entry.is_partition):  # is a directory?
+            if entry is not None and not entry.is_dir():  # is a directory/partition?
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-            entry = self.get_ufd(entry, part)
+            entry = entry.get_child(part)
         if entry is None:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
         return entry
+
+    def get_root(self) -> SystemDirectory:
+        """
+        Get the root directory
+        """
+        return SystemDirectory(self)
 
     def write_bytes(
         self,
@@ -1572,7 +1577,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         creation_date: t.Optional[date] = metadata.get("creation_date")  # type: ignore
         raw_file_type = rdos_get_file_type_id(file_type)
         fullname = rdos_normpath(fullname, self.pwd)
-        dirname, filename = unix_split(fullname)
+        dirname, stem = unix_split(fullname)
         # Delete the file if it already exists
         try:
             self.get_file_entry(fullname).delete()
@@ -1580,7 +1585,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
             pass
         # Get parent directory
         try:
-            parent: UserFileDescriptor = self.get_file_entry(dirname)
+            parent: AbstractDGDOSPath = self.get_file_entry(dirname)
         except FileNotFoundError:
             raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), dirname)
         # Determine the number of blocks
@@ -1594,7 +1599,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         entry = UserFileDescriptor.create(
             fs=self,
             parent=parent,
-            filename=filename,
+            stem=stem,
             length=number_of_blocks,
             bitmap=bitmap,
             creation_date=creation_date,
@@ -1606,22 +1611,15 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         bitmap.write()
         return entry
 
-    def isdir(self, fullname: str) -> bool:
-        try:
-            entry = self.get_file_entry(fullname)
-            return entry.is_directory or entry.is_partition
-        except FileNotFoundError:
-            return False
-
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         """
         List directory entries
         """
         for x in self.filter_entries_list(pattern, include_all=True, wildcard=True):
-            if x.is_link:
+            if x.is_symlink():
                 # Print link information
                 # filename, target
-                sys.stdout.write(f"{x.basename:<13s}             {x.target}\n")
+                sys.stdout.write(f"{x.name:<13s}             {x.target}\n")
             else:
                 # Print file information
                 # filename, byte length, attributes, last modification date, last access date, address, use count
@@ -1632,7 +1630,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
                 creation_date = x.creation_date.strftime("%m/%d/%y %H:%M") if x.creation_date else ""
                 access_date = x.last_access.strftime("%m/%d/%y") if x.last_access else ""
                 sys.stdout.write(
-                    f"{x.basename:<13s}{x.get_size():>10d}  {attr:<7} {creation_date:<14} {access_date:<8}  [{x.address:06o}] {x.use_count:>5}\n"
+                    f"{x.name:<13s}{x.get_size():>10d}  {attr:<7} {creation_date:<14} {access_date:<8}  [{x.address:06o}] {x.use_count:>5}\n"
                 )
         sys.stdout.write("\n")
 
@@ -1643,7 +1641,7 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
             sys.stdout.write(str(disk_id))
         elif options.get("free"):
             # Display the free space
-            bitmap = self.read_bitmap()
+            bitmap = self.read_bitmap(self.get_root())
             sys.stdout.write(f"{bitmap}\n")
         elif options.get("bitmap"):
             # Display the bitmap
@@ -1655,12 +1653,11 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
         elif not arg:
             # Display the system directory
             sys.stdout.write("\n*System Directory\n")
-            system_directory = SystemDirectory(self)
-            for i, sys_dir_block in enumerate(system_directory.read_system_directory()):
+            for i, dir_block in enumerate(self.get_root().dir_read_blocks()):
                 if options.get("full"):
-                    sys.stdout.write(f"** #{i} {sys_dir_block}\n")
-                for entry in sys_dir_block.entries_list:
-                    if options.get("full") or not entry.is_empty:
+                    sys.stdout.write(f"** #{i} {dir_block}\n")
+                for entry in dir_block.entries_list:
+                    if options.get("full") or not entry.is_empty():
                         sys.stdout.write(f"{entry} -- {entry.filename_hash()}\n")
                         # sys.stdout.write(f"{entry}\n")
         else:
@@ -1700,24 +1697,14 @@ class DGDOSFilesystem(AbstractBlockFilesystem):
                 sys.stdout.write(f"\nBLOCK NUMBER   {block_number:08}\n")
                 words_dump(data)
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current directory
         """
-        fullname = rdos_normpath(fullname, self.pwd)
-        if not self.isdir(fullname):
-            return False
-        # Check if the directory is valid
-        if any(x == SYS_DR for x in fullname.split("/")):
-            return False
-        self.pwd = fullname
-        return True
+        if entry is None:
+            self.pwd = "/"
+        else:
+            self.pwd = entry.fullname
 
     def get_pwd(self) -> str:
         """

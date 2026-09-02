@@ -28,8 +28,8 @@ import typing as t
 from datetime import date, datetime
 from pathlib import Path, PureWindowsPath
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
-from .commons import BLOCK_SIZE, READ_FILE_FULL
+from .abstract import XFERXPath, AbstractFile, AbstractFilesystem
+from .commons import BLOCK_SIZE, READ_FILE_FULL, format_size
 from .device.abstract import AbstractDevice
 
 __all__ = [
@@ -37,14 +37,6 @@ __all__ = [
     "NativeDirectoryEntry",
     "NativeFilesystem",
 ]
-
-
-def format_size(size: float) -> str:
-    for unit in ("", "K", "M", "G", "T"):
-        if abs(size) < 1000 or unit == "T":
-            break
-        size = size / 1000
-    return f"{size:3.1f}{unit}" if unit else str(int(size))
 
 
 def path_to_str(path: Path) -> str:
@@ -164,8 +156,14 @@ class NativeFile(AbstractFile):
         return self.filename
 
 
-class NativeDirectoryEntry(AbstractDirectoryEntry):
+class NativeDirectoryEntry(XFERXPath):
     fs: "NativeFilesystem"
+    native_path: Path
+    native_fullname: str
+    filename: str
+    extension: str
+    stat: os.stat_result
+    length: int
 
     def __init__(self, fs: "NativeFilesystem", native_path: Path) -> None:
         self.fs = fs
@@ -179,7 +177,15 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
         self.length = self.stat.st_size  # length in bytes
 
     @property
-    def creation_date(self) -> date:
+    def creation_date(self) -> datetime:
+        return datetime.fromtimestamp(self.stat.st_ctime)
+
+    @property
+    def access_date(self) -> datetime:
+        return datetime.fromtimestamp(self.stat.st_atime)
+
+    @property
+    def last_mod_date(self) -> datetime:
         return datetime.fromtimestamp(self.stat.st_mtime)
 
     @property
@@ -187,25 +193,22 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
         return self.native_fullname
 
     @property
-    def basename(self) -> str:
+    def name(self) -> str:
         return self.native_path.name
 
-    @property
-    def is_regular_file(self) -> bool:
+    def is_file(self) -> bool:
         """
         Check if the entry is a regular file
         """
         return self.native_path.is_file()
 
-    @property
-    def is_directory(self) -> bool:
+    def is_dir(self) -> bool:
         """
         Check if the entry is a directory
         """
         return self.native_path.is_dir()
 
-    @property
-    def is_link(self) -> bool:
+    def is_symlink(self) -> bool:
         """
         Check if the entry is a symbolic link
         """
@@ -251,12 +254,20 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
         """
         return BLOCK_SIZE
 
+    @property
+    def parent(self) -> "NativeDirectoryEntry":
+        """
+        Get the parent directory entry
+        """
+        parent_path = self.native_path.parent
+        return NativeDirectoryEntry(self.fs, parent_path)
+
     def delete(self) -> bool:
         """
         Delete the directory entry
         """
         try:
-            if self.is_directory:
+            if self.is_dir():
                 self.native_path.rmdir()
             else:
                 self.native_path.unlink()
@@ -276,13 +287,40 @@ class NativeDirectoryEntry(AbstractDirectoryEntry):
         """
         return NativeFile(self.fullname)
 
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        wildcard: bool = True,
+    ) -> t.Iterator["NativeDirectoryEntry"]:
+        """
+        Iterate over all entries in the User File Directory
+        """
+        if not self.is_dir():
+            raise NotADirectoryError(self.fullname)
+        for path in self.native_path.glob(pattern or "*"):
+            if not include_all and path.name in (".", ".."):
+                continue
+            try:
+                yield NativeDirectoryEntry(self.fs, path)
+            except:
+                pass
+
     def __str__(self) -> str:
-        return f"{self.fullname:<11} {self.creation_date or '':<6} length: {self.length:>6}"
+        return f"{self.fullname:<11} {self.last_mod_date or '':<6} length: {self.length:>6}"
 
 
 class NativeFilesystem(AbstractFilesystem):
-    fs_name = "native"  # Filesystem name
-    fs_description = "Native Filesystem"  # Filesystem description
+    fs_name = "native"
+    fs_description = "Native Filesystem"
+    fs_entry_metadata = [
+        "creation_date",
+        "last_access",
+        "last_mod_date",
+    ]
+
+    base_path: Path
+    pwd: str
 
     @classmethod
     def mount(
@@ -350,6 +388,9 @@ class NativeFilesystem(AbstractFilesystem):
         path = self.base_path / self.pwd / fullname
         return NativeDirectoryEntry(self, path)
 
+    def get_root(self) -> "NativeDirectoryEntry":
+        return NativeDirectoryEntry(self, self.base_path)
+
     def write_bytes(
         self,
         fullname: str,
@@ -365,7 +406,7 @@ class NativeFilesystem(AbstractFilesystem):
         path = self.base_path / self.pwd / fullname
         path.write_bytes(content)
 
-        creation_date: t.Optional[date] = metadata.get("creation_date")
+        creation_date: t.Union[date, datetime, None] = metadata.get("creation_date")
         if creation_date:
             # Set the creation and modification date of the file
             ts = datetime.combine(creation_date, datetime.min.time()).timestamp()
@@ -405,32 +446,29 @@ class NativeFilesystem(AbstractFilesystem):
         path.mkdir(parents=True, exist_ok=False)  # May raise OSError in case of errors
         return NativeDirectoryEntry(self, path)
 
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current working directory
         """
-        path = (self.base_path / self.pwd / fullname).resolve()
-        if not path.is_dir():
-            return False
-        self.pwd = path_to_str(path)
-        os.chdir(str(path))
-        return True
-
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the path is a directory
-        """
-        path = self.base_path / self.pwd / fullname
-        return path.is_dir()
+        if not entry:
+            self.pwd = path_to_str(self.base_path)
+            os.chdir(self.base_path)
+        else:
+            assert isinstance(entry, NativeDirectoryEntry)
+            path = (self.base_path / self.pwd / entry.native_path).resolve()
+            if not path.is_dir():
+                raise NotADirectoryError(path)
+            self.pwd = path_to_str(path)
+            os.chdir(path)
 
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         """
         List directory entries
         """
         for x in self.filter_entries_list(pattern):
-            et = f"{format_size(x.get_size()):>15s}" if x.is_regular_file else x.entry_type
-            dt = x.creation_date.strftime("%d-%b-%Y %H:%M ") if x.creation_date else ""
-            sys.stdout.write(f"{et:>15s} {dt:>19s} {x.basename}\n")
+            et = f"{format_size(x.get_size()):>15s}" if x.is_file() else x.entry_type
+            dt = x.last_mod_date.strftime("%d-%b-%Y %H:%M ") if x.last_mod_date else ""
+            sys.stdout.write(f"{et:>15s} {dt:>19s} {x.name}\n")
 
     def examine(self, arg: t.Optional[str], options: t.Dict[str, t.Union[bool, str]]) -> None:
         pass

@@ -5,6 +5,10 @@ from xferx.shell import Shell
 def test_native():
     shell = Shell(verbose=True)
     fs = shell.volumes.get_volume("DK")
+    # assert fs.get_root() is not None
+    # assert fs.get_root().is_dir()
+    # assert fs.get_root().is_mount()
+
     assert isinstance(fs, NativeFilesystem)
 
     shell.onecmd("dir dk:", batch=True)

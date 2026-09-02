@@ -24,7 +24,7 @@ import typing as t
 from datetime import date
 from pathlib import Path
 
-from .abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from .abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from .apple.appledosfs import AppleDOSFilesystem
 from .apple.mfs import MacintoshFilesystem
 from .apple.pascalfs import PascalFilesystem
@@ -191,21 +191,24 @@ class Volumes(object):
         except KeyError:
             raise Exception(f"?{cmd}-F-Illegal volume {volume_id}:")
 
-    def chdir(self, path: str) -> bool:
+    def chdir(self, path: str) -> None:
         """
         Change current directory
         """
         volume_id, fullname = splitdrive(path)
         volume_id = self.canonical_volume(volume_id)
-        try:
-            fs = self.get_volume(volume_id)
-        except Exception:
-            return False
-        if fullname and not fs.chdir(fullname):
-            return False
+        fs = self.get_volume(volume_id)
+        # Change the current directory on the volume
+        if fullname == "/":
+            fs.chdir(None)
+        elif fullname:
+            entry = fs.get_file_entry(fullname)
+            if not entry.is_dir():
+                raise NotADirectoryError(fullname)
+            fs.chdir(entry)
+        # Change the default volume
         if volume_id != DEFAULT_VOLUME:
             self.set_default_volume(volume_id)
-        return True
 
     def get_pwd(self) -> str:
         """
@@ -225,6 +228,15 @@ class Volumes(object):
         if volume_id != DEFAULT_VOLUME:
             self.get_volume(volume_id, cmd=cmd)
             self.defdev = volume_id
+
+    def get_volumes(self, include_logical: bool = False) -> list[str]:
+        """
+        Get the list of available volumes
+        """
+        result = list(self.volumes.keys())
+        if include_logical:
+            result.extend(self.logical.keys())
+        return sorted(result)
 
     def get_default_volume(self) -> str:
         """
@@ -298,8 +310,9 @@ class Volumes(object):
         Disassociates a logical disk assignment from a file
         """
         volume_id = self.canonical_volume(volume_id)
-        if volume_id == DEFAULT_VOLUME:
-            raise Exception(f"?{cmd}-F-Illegal volume {volume_id}:")
+        # Check if the volume is the default volume
+        if volume_id in (DEFAULT_VOLUME, self.defdev):
+            raise Exception(f"?{cmd}-F-Cannot dismount the default volume {volume_id}:")
         try:
             fs = self.get_volume(volume_id, cmd=cmd)
         except Exception:
@@ -308,7 +321,7 @@ class Volumes(object):
 
     def guess_device_type(self, path: str) -> t.Optional[str]:
         """
-        Guess the filesystem type based on the file extension
+        Guess the device type based on the file extension
         """
         path = path.lower()
         try:
@@ -339,7 +352,7 @@ class Volumes(object):
         include_all: bool = False,
         expand: bool = True,
         cmd: str = "KMON",
-    ) -> t.Iterator["AbstractDirectoryEntry"]:
+    ) -> t.Iterator["XFERXPath"]:
         """
         Filter directory entries based on a pattern
         """
@@ -347,7 +360,7 @@ class Volumes(object):
         fs = self.get_volume(volume_id, cmd=cmd)
         yield from fs.filter_entries_list(pattern=pattern, include_all=include_all, expand=expand)
 
-    def get_file_entry(self, fullname: str, cmd: str = "KMON") -> "AbstractDirectoryEntry":
+    def get_file_entry(self, fullname: str, cmd: str = "KMON") -> "XFERXPath":
         """
         Get the directory entry for a file
         """
@@ -376,7 +389,7 @@ class Volumes(object):
         size: int,
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
         cmd: str = "CREATE",
-    ) -> t.Optional["AbstractDirectoryEntry"]:
+    ) -> t.Optional["XFERXPath"]:
         """
         Create a new file with a given length in number of blocks
         """
@@ -389,7 +402,7 @@ class Volumes(object):
         fullname: str,
         options: t.Dict[str, t.Union[str, bool]],
         cmd: str = "CREATE",
-    ) -> t.Optional["AbstractDirectoryEntry"]:
+    ) -> t.Optional["XFERXPath"]:
         """
         Create a new directory
         """
@@ -397,13 +410,13 @@ class Volumes(object):
         fs = self.get_volume(volume_id, cmd=cmd)
         return fs.create_directory(fullname=fullname, options=options)
 
-    def isdir(self, fullname: str, cmd: str) -> bool:
+    def is_dir(self, fullname: str, cmd: str) -> bool:
         """
         Check if the given path is a directory
         """
         volume_id, fullname = splitdrive(fullname)
         fs = self.get_volume(volume_id, cmd=cmd)
-        return fs.isdir(fullname)
+        return fs.is_dir(fullname)
 
     def show_accounts(self, volume_id: str, options: t.Dict[str, bool], cmd: str = "SHOW ACCOUNTS") -> None:
         """

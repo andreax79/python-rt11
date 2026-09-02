@@ -1,5 +1,6 @@
 from xferx.pdp10.tops10fs import (
     TOPS10Filesystem,
+    MasterFileDirectory,
     decode_byte_pointer,
     left_half,
     right_half,
@@ -23,7 +24,7 @@ def test_tops10_byte_pointer():
 
 
 def test_tops10_mfd_entries():
-    entries = list(TOPS10Filesystem.parse_mfd_entries([0o1000001, (0o654644 << 18) | 0o12345, 0, 0]))
+    entries = list(MasterFileDirectory.parse_mfd_entries([0o1000001, (0o654644 << 18) | 0o12345, 0, 0]))
     assert len(entries) == 1
     assert str(entries[0].ppn) == "[1,1]"
     assert entries[0].extension == "UFD"
@@ -34,7 +35,10 @@ def test_tops10_filesystem_mfd_reader():
     shell = Shell(verbose=True)
     shell.onecmd(f"mount t: /tops10 {DSK}", batch=True)
     fs = shell.volumes.get_volume("T")
-    entries = list(fs.read_mfd_entries())
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
+    entries = list(fs.get_root().iterdir())
     assert entries
     assert str(entries[0].ppn) == "[1,1]"
 

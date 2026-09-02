@@ -31,6 +31,9 @@ def test_mfs_read():
     shell = Shell(verbose=True)
     shell.onecmd(f"mount t: /mfs {DSK}", batch=True)
     fs = shell.volumes.get_volume("T")
+    assert fs.get_root() is not None
+    assert fs.get_root().is_dir()
+    assert fs.get_root().is_mount()
 
     shell.onecmd("dir t:", batch=True)
     shell.onecmd("dir/brief t:", batch=True)

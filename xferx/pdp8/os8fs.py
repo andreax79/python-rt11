@@ -26,7 +26,7 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import ASCII, BLOCK_SIZE, DECTAPE, IMAGE, READ_FILE_FULL, filename_match
 from ..device.abstract import AbstractDevice
 from ..device.block_12bit import BlockDevice12Bit, DECtape12Bit, RXBlockDevice12Bit
@@ -34,7 +34,7 @@ from ..device.rx import RX_SECTOR_TRACK
 
 __all__ = [
     "OS8File",
-    "OS8DirectoryEntry",
+    "OS8Path",
     "OS8Filesystem",
 ]
 
@@ -98,28 +98,28 @@ def date_to_os8(d: t.Optional[date]) -> int:
     return val
 
 
-def os8_canonical_filename(fullname: t.Optional[str], wildcard: bool = False) -> str:
+def os8_canonical_filename(name: t.Optional[str], wildcard: bool = False) -> str:
     """
     Generate the canonical OS8 name
     """
-    fullname = (fullname or "").upper()
+    name = (name or "").upper()
     try:
-        filename, extension = fullname.split(".", 1)
+        stem, extension = name.split(".", 1)
     except Exception:
-        filename = fullname
+        stem = name
         extension = "*" if wildcard else ""
-    filename = (
-        rad50_word12_to_asc(asc_to_rad50_word12(filename[0:2]))
-        + rad50_word12_to_asc(asc_to_rad50_word12(filename[2:4]))
-        + rad50_word12_to_asc(asc_to_rad50_word12(filename[4:6]))
+    stem = (
+        rad50_word12_to_asc(asc_to_rad50_word12(stem[0:2]))
+        + rad50_word12_to_asc(asc_to_rad50_word12(stem[2:4]))
+        + rad50_word12_to_asc(asc_to_rad50_word12(stem[4:6]))
     )
     extension = rad50_word12_to_asc(asc_to_rad50_word12(extension))
-    return f"{filename}.{extension}"
+    return f"{stem}.{extension}"
 
 
 def os8_split_fullname(
-    partition: int, fullname: t.Optional[str], wildcard: bool = True
-) -> t.Tuple[int, t.Optional[str]]:
+    partition: t.Optional[int], fullname: t.Optional[str], wildcard: bool = True
+) -> t.Tuple[t.Optional[int], t.Optional[str]]:
     """
     Split the partition number from the fullname
 
@@ -214,18 +214,16 @@ def oct_dump(words: t.List[int], words_per_line: int = 8) -> None:
 
 
 class OS8File(AbstractFile):
-    entry: "OS8DirectoryEntry"
+    entry: "OS8Path"
     file_mode: str
-    closed: bool
     size: int
 
-    def __init__(self, entry: "OS8DirectoryEntry", file_mode: t.Optional[str] = None):
+    def __init__(self, entry: "OS8Path", file_mode: t.Optional[str] = None):
         self.entry = entry
         if file_mode is not None:
             self.file_mode = file_mode
         else:
             self.file_mode = ASCII if entry.extension.upper() in ASCII_EXTENSIONS else IMAGE
-        self.closed = False
         self.size = entry.length * OS8_BLOCK_SIZE_BYTES
 
     def read_block(
@@ -247,7 +245,7 @@ class OS8File(AbstractFile):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         data = bytearray()
         for i in range(number_of_blocks):
-            block_position = block_number + self.entry.file_position + i
+            block_position = block_number + self.entry.first_block_number + i
             words = self.entry.segment.partition.read_words_block(block_position)
             t = from_12bit_words_to_bytes(words, self.file_mode)
             data.extend(t)
@@ -270,7 +268,7 @@ class OS8File(AbstractFile):
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
         for i in range(number_of_blocks):
-            block_position = block_number + self.entry.file_position + i
+            block_position = block_number + self.entry.first_block_number + i
             data = buffer[i * OS8_BLOCK_SIZE_BYTES : (i + 1) * OS8_BLOCK_SIZE_BYTES]
             words = from_bytes_to_12bit_words(data, self.file_mode)
             self.entry.segment.partition.write_words_block(block_position, words)
@@ -287,17 +285,11 @@ class OS8File(AbstractFile):
         """
         return self.entry.get_block_size()
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class OS8DirectoryEntry(AbstractDirectoryEntry):
+class OS8Path(XFERXPath):
     """
     There are three types of file directory entries.
     - Permanent
@@ -334,13 +326,13 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
 
     fs: "OS8Filesystem"
     segment: "OS8Segment"
-    filename: str = ""
+    stem: str = ""
     extension: str = ""
     length: int = 0
     raw_creation_date: int = 0
     words: t.List[int] = []
     extra_words: t.List[int] = []
-    file_position: int = 0
+    first_block_number: int = 0
     empty_entry: bool = False
 
     def __init__(self, segment: "OS8Segment"):
@@ -348,7 +340,7 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
         self.segment = segment
 
     @classmethod
-    def read(cls, segment: "OS8Segment", words: t.List[int], position: int, file_position: int) -> "OS8DirectoryEntry":
+    def read(cls, segment: "OS8Segment", words: t.List[int], position: int, first_block_number: int) -> "OS8Path":
         self = cls(segment)
         if words[0 + position] != 0:
             self.words = words[position : position + DIR_ENTRY_SIZE + segment.extra_words]
@@ -357,7 +349,7 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
             n3 = words[2 + position]  # Filename char 5-6
             e1 = words[3 + position]  # Extension char 1-2
             self.empty_entry = False
-            self.filename = rad50_word12_to_asc(n1) + rad50_word12_to_asc(n2) + rad50_word12_to_asc(n3)
+            self.stem = rad50_word12_to_asc(n1) + rad50_word12_to_asc(n2) + rad50_word12_to_asc(n3)
             self.extension = rad50_word12_to_asc(e1)
             self.extra_words = words[4 + position : 4 + self.segment.extra_words + position]
             if self.segment.extra_words:
@@ -371,11 +363,11 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
             length = 0o10000 - words[1 + position]
             self.words = words[position : position + EMPTY_DIR_ENTRY_SIZE]
             self.empty_entry = True
-            self.filename = ""
+            self.stem = ""
             self.extension = ""
             self.extra_words = []
             self.length = length
-        self.file_position = file_position
+        self.first_block_number = first_block_number
         return self
 
     def to_words(self) -> t.List[int]:
@@ -387,9 +379,9 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
             words.append(0)
             words.append(0o10000 - self.length)
         else:
-            words.append(asc_to_rad50_word12(self.filename[0:2]))
-            words.append(asc_to_rad50_word12(self.filename[2:4]))
-            words.append(asc_to_rad50_word12(self.filename[4:6]))
+            words.append(asc_to_rad50_word12(self.stem[0:2]))
+            words.append(asc_to_rad50_word12(self.stem[2:4]))
+            words.append(asc_to_rad50_word12(self.stem[4:6]))
             words.append(asc_to_rad50_word12(self.extension))
             if self.segment.extra_words:
                 self.extra_words[0] = self.raw_creation_date
@@ -397,6 +389,10 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
             words.append(0o10000 - self.length)
         self.words = words
         return words
+
+    @property
+    def partition_number(self) -> int:
+        return self.segment.partition.partition_number
 
     @property
     def is_empty(self) -> bool:
@@ -422,11 +418,16 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
 
     @property
     def fullname(self) -> str:
-        return f"{self.filename}.{self.extension}"
+        return f"[{self.partition_number}]{self.name}"
 
     @property
-    def basename(self) -> str:
-        return self.fullname
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
+
+    @property
+    def parent(self) -> "OS8Partition":
+        """The logical parent"""
+        return self.segment.partition
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -455,7 +456,7 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
         Delete the file
         """
         self.empty_entry = True
-        self.filename = ""
+        self.stem = ""
         self.extension = ""
         self.extra_words = []
         self.segment.compact()
@@ -478,7 +479,7 @@ class OS8DirectoryEntry(AbstractDirectoryEntry):
 
     def __str__(self) -> str:
         attr = "TEMP" if self.is_tentative else "PERM" if self.is_permanent else "EMPTY"
-        return f"{self.fullname:<11} {attr:<5} {self.creation_date or '          '} {self.length:>6} {self.file_position:6d}"
+        return f"{self.name:<11} {attr:<5} {self.creation_date or '          '} {self.length:>6} {self.first_block_number:6d}"
 
     def __repr__(self) -> str:
         return str(self)
@@ -519,7 +520,7 @@ class OS8Segment:
     # Number of extra words per directory entry
     extra_words = 0
     # Directory entries
-    entries_list: t.List["OS8DirectoryEntry"] = []
+    entries_list: t.List[OS8Path] = []
 
     def __init__(self, partition: "OS8Partition"):
         self.partition = partition
@@ -540,11 +541,11 @@ class OS8Segment:
         self.extra_words = 0o10000 - data[4]  # Minus the number of extra words
         self.entries_list = []
 
-        file_position = self.data_block_number
+        first_block_number = self.data_block_number
         position = DIRECTORY_SEGMENT_HEADER_SIZE
         for _ in range(0, number_of_entries):
-            dir_entry = self.partition.fs.directory_entry_class.read(self, data, position, file_position)
-            file_position = file_position + dir_entry.length
+            dir_entry = self.partition.fs.directory_entry_class.read(self, data, position, first_block_number)
+            first_block_number = first_block_number + dir_entry.length
             position = position + dir_entry.directory_entry_len
             self.entries_list.append(dir_entry)
         return self
@@ -601,14 +602,14 @@ class OS8Segment:
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["OS8DirectoryEntry"]:
+    ) -> t.Iterator[OS8Path]:
         for entry in self.entries_list:
-            if filename_match(entry.basename, pattern, wildcard):
+            if filename_match(entry.name, pattern, wildcard):
                 if not include_all and (entry.is_empty or entry.is_tentative):
                     continue
                 yield entry
 
-    def insert_empty_entry_after(self, entry: "OS8DirectoryEntry", entry_number: int, length: int) -> None:
+    def insert_empty_entry_after(self, entry: OS8Path, entry_number: int, length: int) -> None:
         """
         Insert an empty entry after the given entry
         If the entry length is equal to the requested length, don't create the new empty entity
@@ -619,7 +620,7 @@ class OS8Segment:
         new_entry = self.partition.fs.directory_entry_class(self)
         new_entry.empty_entry = True
         new_entry.length = entry.length - length
-        new_entry.file_position = entry.file_position + length
+        new_entry.first_block_number = entry.first_block_number + length
         entry.length = length
         self.entries_list.insert(entry_number + 1, new_entry)
         entry.segment.write()
@@ -651,7 +652,7 @@ class OS8Segment:
         return buf.getvalue()
 
 
-class OS8Partition:
+class OS8Partition(XFERXPath):
     """
     OS/8 partition
 
@@ -660,7 +661,7 @@ class OS8Partition:
         +-----------------------------------+
       1 | Directory segments                |
         |.                                  |
-      7 |.                                  |
+      6 |.                                  |
         +-----------------------------------+
         | OS/8 System (Optional)            |
         |.                                  |
@@ -677,19 +678,19 @@ class OS8Partition:
     # partition size
     partition_size: int
     # Block number of the first block of this partition
-    base_block_number: int
+    first_block_number: int
 
     def __init__(self, fs: "OS8Filesystem", partition_number: int):
         self.fs = fs
         self.partition_number = partition_number
-        self.partition_size = fs.partition_size
-        self.base_block_number = partition_number * fs.partition_size
+        self.partition_size = min(fs.partition_size, fs.number_of_blocks - partition_number * fs.partition_size)
+        self.first_block_number = partition_number * fs.partition_size
 
     def read_words_block(self, block_number: int) -> t.List[int]:
         """
         Read a 512 bytes block as 256 12bit words
         """
-        return self.fs.read_words_block(block_number + self.base_block_number)
+        return self.fs.read_words_block(block_number + self.first_block_number)
 
     def write_words_block(
         self,
@@ -699,7 +700,7 @@ class OS8Partition:
         """
         Write 256 12bit words as 512 bytes block
         """
-        return self.fs.write_words_block(block_number + self.base_block_number, words)
+        return self.fs.write_words_block(block_number + self.first_block_number, words)
 
     def read_dir_segments(self) -> t.Iterator["OS8Segment"]:
         """
@@ -711,17 +712,17 @@ class OS8Partition:
             next_block_number = segment.next_block_number
             yield segment
 
-    def get_file_entry(self, fullname: str) -> OS8DirectoryEntry:  # fullname=filename+ext
+    def get_file_entry(self, name: str) -> OS8Path:
         """
         Get the directory entry for a file in this partition
         """
         for segment in self.read_dir_segments():
             for entry in segment.entries_list:
-                if entry.fullname == fullname and entry.is_permanent:
+                if entry.name == name and entry.is_permanent:
                     return entry
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
 
-    def split_segment(self, entry: OS8DirectoryEntry) -> bool:
+    def split_segment(self, entry: OS8Path) -> bool:
         # entry is the last entry of the old_segment, new new segment will contain all the entries after that
         old_segment = entry.segment
         # find the new segment number
@@ -729,7 +730,7 @@ class OS8Partition:
         sn = [x.block_number for x in segments]
         block_number = None
         for i in range(0, NUM_OF_SEGMENTS):
-            block_number_t = self.base_block_number + DIRECTORY_SEGMENT_START + i
+            block_number_t = self.first_block_number + DIRECTORY_SEGMENT_START + i
             if block_number_t not in sn:
                 block_number = block_number_t
                 break
@@ -738,7 +739,7 @@ class OS8Partition:
         # create the new segment
         segment = OS8Segment(self)
         segment.block_number = block_number
-        segment.data_block_number = entry.file_position + entry.length
+        segment.data_block_number = entry.first_block_number + entry.length
         segment.next_block_number = old_segment.next_block_number
         segment.tentative_last_word = 0
         segment.extra_words = segments[0].extra_words
@@ -754,13 +755,13 @@ class OS8Partition:
         segment.entries_list = old_segment.entries_list[entry_position + 1 :]
         old_segment.entries_list = old_segment.entries_list[: entry_position + 1]
         old_segment.write()
-        segment.data_block_number = entry.file_position + entry.length
+        segment.data_block_number = entry.first_block_number + entry.length
         segment.write()
         return True
 
-    def search_empty_entry(self, length: int) -> t.Tuple[t.Optional[OS8DirectoryEntry], int]:
+    def search_empty_entry(self, length: int) -> t.Tuple[t.Optional[OS8Path], int]:
         # Search for an empty entry to be split
-        entry: t.Optional[OS8DirectoryEntry] = None
+        entry: t.Optional[OS8Path] = None
         entry_number: int = -1
         for segment in self.read_dir_segments():
             for i, e in enumerate(segment.entries_list):
@@ -777,7 +778,7 @@ class OS8Partition:
         fullname: str,  # fullname=filename+ext, length in blocks
         length: int,  # length in blocks
         creation_date: t.Optional[date] = None,  # optional creation date
-    ) -> OS8DirectoryEntry:
+    ) -> OS8Path:
         """
         Allocate space for a new file
         """
@@ -795,7 +796,7 @@ class OS8Partition:
         split = os.path.splitext(fullname.upper())
         entry.empty_entry = False
         entry.extra_words = [0] * entry.segment.extra_words
-        entry.filename = split[0]
+        entry.stem = split[0]
         entry.extension = split[1] and split[1][1:] or ""
         entry.raw_creation_date = date_to_os8(creation_date)
         entry.length = length
@@ -808,7 +809,7 @@ class OS8Partition:
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> OS8DirectoryEntry:
+    ) -> OS8Path:
         metadata = metadata or {}
         try:
             self.get_file_entry(fullname).delete()
@@ -835,7 +836,7 @@ class OS8Partition:
             length = length - RX_SECTOR_TRACK * self.fs.dev.sector_size // BLOCK_SIZE
         dir_entry = self.fs.directory_entry_class(segment)
         dir_entry.empty_entry = True
-        dir_entry.filename = ""
+        dir_entry.stem = ""
         dir_entry.extension = ""
         dir_entry.length = length
         segment.entries_list.append(dir_entry)
@@ -850,13 +851,100 @@ class OS8Partition:
             free_blocks += segment.free()
         return free_blocks
 
+    @property
+    def fullname(self) -> str:
+        return self.name
+
+    @property
+    def name(self) -> str:
+        return f"[{self.partition_number}]"
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    @property
+    def parent(self) -> "OS8RootDirectory":
+        """The logical parent"""
+        return self.fs.get_root()
+
+    def get_length(self, fork: t.Optional[str] = None) -> int:
+        """
+        Get the length in blocks
+        """
+        return self.partition_size
+
+    def get_size(self, fork: t.Optional[str] = None) -> int:
+        """
+        Get file size in bytes
+        """
+        return self.partition_size * self.get_block_size()
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return OS8_BLOCK_SIZE_BYTES
+
+    def open(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> OS8File:
+        raise OSError(errno.EINVAL, "Invalid operation on partition")
+
+    def delete(self) -> bool:
+        raise OSError(errno.EINVAL, "Invalid operation on partition")
+
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        expand: bool = True,
+        wildcard: bool = False,
+    ) -> t.Iterator[OS8Path]:
+        for segment in self.read_dir_segments():
+            yield from segment.filter_entries_list(
+                pattern,
+                include_all=include_all,
+                expand=expand,
+                wildcard=wildcard,
+            )
+
     def __str__(self) -> str:
         buf = io.StringIO()
         buf.write("\n*Partition\n")
         buf.write(f"Partition number:         {self.partition_number:>5}\n")
         buf.write(f"Partition size:           {self.partition_size:>5}\n")
-        buf.write(f"Partition starting block: {self.base_block_number:>5}\n")
+        buf.write(f"Partition starting block: {self.first_block_number:>5}\n")
         return buf.getvalue()
+
+
+class OS8RootDirectory(XFERXPath):
+    fs: "OS8Filesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> "XFERXPath":
+        """The logical parent"""
+        return self
+
+    def iterdir(self) -> t.Iterator[OS8Partition]:
+        for partition_number in range(0, self.fs.num_of_partitions):
+            yield self.fs.get_partition(partition_number)
 
 
 class OS8Filesystem(AbstractFilesystem):
@@ -876,9 +964,9 @@ class OS8Filesystem(AbstractFilesystem):
 
     dev: BlockDevice12Bit
 
-    current_partition: int  # Current partition
+    current_partition: t.Optional[int]  # Current partition
     number_of_blocks: int  # Number of blocks
-    directory_entry_class: t.Type[OS8DirectoryEntry] = OS8DirectoryEntry
+    directory_entry_class: t.Type[OS8Path] = OS8Path
 
     def __init__(self, file_or_device: t.Union["AbstractFile", "AbstractDevice"], device_type: t.Union[bool, str] = ""):
         if isinstance(file_or_device, AbstractFile):
@@ -901,13 +989,13 @@ class OS8Filesystem(AbstractFilesystem):
         """Get the size of each partition"""
         return self.number_of_blocks // self.num_of_partitions
 
-    def get_partition(self, partition_number: int) -> OS8Partition:
+    def get_partition(self, partition_number: t.Optional[int]) -> OS8Partition:
         """
         Get a partition by number
         """
+        if partition_number is None:
+            raise FileNotFoundError(errno.ENOENT, "No partition specified")
         try:
-            if partition_number is None:
-                partition_number = self.current_partition
             if partition_number < 0 or partition_number >= self.num_of_partitions:
                 raise ValueError
             return OS8Partition(self, partition_number)
@@ -926,8 +1014,9 @@ class OS8Filesystem(AbstractFilesystem):
         Mount the OS/8 filesystem from a file
         """
         self = cls(file_or_dev, device_type)
-        self.current_partition = 0
         self.number_of_blocks = self.dev.get_size() // BLOCK_SIZE
+        # If the filesystem has only one partition, set it as the current partition
+        self.current_partition = 0 if self.num_of_partitions == 1 else None
         if strict:
             try:
                 # Check if the filesystem is valid by reading the directory entries
@@ -971,12 +1060,12 @@ class OS8Filesystem(AbstractFilesystem):
         include_all: bool = False,
         expand: bool = True,
         wildcard: bool = True,
-    ) -> t.Iterator["OS8DirectoryEntry"]:
-        partition = self.current_partition
-        if pattern:
-            partition, pattern = os8_split_fullname(partition, pattern, wildcard)
-        for segment in self.get_partition(partition).read_dir_segments():
-            yield from segment.filter_entries_list(
+    ) -> t.Iterator[t.Union[OS8Path, OS8Partition]]:
+        partition, pattern = os8_split_fullname(self.current_partition, pattern, wildcard)
+        if partition is None:
+            yield from self.get_root().iterdir()
+        else:
+            yield from self.get_partition(partition).iterdir(
                 pattern,
                 include_all=include_all,
                 expand=expand,
@@ -984,67 +1073,86 @@ class OS8Filesystem(AbstractFilesystem):
             )
 
     @property
-    def entries_list(self) -> t.Iterator["OS8DirectoryEntry"]:
-        for segment in self.get_partition(self.current_partition).read_dir_segments():
-            for entry in segment.entries_list:
-                yield entry
+    def entries_list(self) -> t.Iterator[t.Union[OS8Path, OS8Partition]]:
+        yield from self.filter_entries_list("*.*")
 
-    def get_file_entry(self, fullname: str) -> OS8DirectoryEntry:  # fullname=filename+ext
-        partition = self.current_partition
-        if fullname:
-            partition, fullname = os8_split_fullname(partition, fullname)  # type: ignore
-        for segment in self.get_partition(partition).read_dir_segments():
-            for entry in segment.entries_list:
-                if entry.fullname == fullname and entry.is_permanent:
-                    return entry
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+    def get_file_entry(self, fullname: str) -> t.Union[OS8Path, OS8Partition]:
+        partition, name = os8_split_fullname(self.current_partition, fullname)
+        if name:
+            # Get the file from the partition
+            return self.get_partition(partition).get_file_entry(name)
+        else:
+            # Get the partition if no filename is specified
+            return self.get_partition(partition)
+
+    def get_root(self) -> OS8RootDirectory:
+        """
+        Get the root directory
+        """
+        return OS8RootDirectory(self)
 
     def create_file(
         self,
         fullname: str,
         size: int,  # Size in bytes
         metadata: t.Optional[t.Dict[str, t.Any]] = None,
-    ) -> OS8DirectoryEntry:
-        partition, fullname = os8_split_fullname(self.current_partition, fullname, wildcard=False)  # type: ignore
-        return self.get_partition(partition).create_file(fullname, size, metadata)
+    ) -> OS8Path:
+        partition, name = os8_split_fullname(self.current_partition, fullname, wildcard=False)  # type: ignore
+        if partition is None:
+            raise FileNotFoundError(errno.ENOENT, "No partition specified")
+        if name is None:
+            raise FileNotFoundError(errno.ENOENT, "No filename specified")
+        return self.get_partition(partition).create_file(name, size, metadata)
 
-    def chdir(self, fullname: str) -> bool:
-        try:
-            partition = int(fullname)
-        except:
-            return False
-        if partition < 0 or partition >= self.num_of_partitions:
-            return False
-        self.current_partition = int(fullname)
-        return True
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
+        """
+        Change the current partition
+        """
+        if entry is None:
+            self.current_partition = None
+        else:
+            assert isinstance(entry, OS8Partition)
+            partition = entry.partition_number
+            if partition < 0 or partition >= self.num_of_partitions:
+                raise NotADirectoryError
+            self.current_partition = partition
+
+    def show_partitions(self) -> None:
+        """
+        Show the list of partitions
+        """
+        for partition_number in range(0, self.num_of_partitions):
+            p = self.get_partition(partition_number)
+            sys.stdout.write(f"{p.name:<4} {p.get_length():>5}\n")
+        return
 
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         i = 0
         files = 0
         blocks = 0
-        partition = self.current_partition
-        if pattern:
-            partition, pattern = os8_split_fullname(partition, pattern, wildcard=True)
+        partition, pattern = os8_split_fullname(self.current_partition, pattern, wildcard=True)
+        if partition is None:
+            self.show_partitions()
+            return
         part = self.get_partition(partition)
-        for segment in part.read_dir_segments():
-            for x in segment.filter_entries_list(pattern, include_all=True):
-                if x.is_empty or x.is_tentative:
-                    if not options.get("full"):
-                        continue
-                    i = i + 1
-                    fullname = "<EMPTY>  "
-                    file_date = ""
-                else:
-                    i = i + 1
-                    fullname = f"{x.filename:<6}.{x.extension:<2}"
-                    files = files + 1
-                    blocks = blocks + x.length
-                    file_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
-                sys.stdout.write(f"{fullname} {x.file_position:04o} {x.length:>3} {file_date:<9}")
-                if i % 3 == 0:
-                    sys.stdout.write("\n")
-                else:
-                    sys.stdout.write("  ")
+        for x in part.iterdir(pattern, wildcard=True, include_all=True):
+            if x.is_empty or x.is_tentative:
+                if not options.get("full"):
+                    continue
+                i = i + 1
+                fullname = "<EMPTY>  "
+                file_date = ""
+            else:
+                i = i + 1
+                fullname = f"{x.stem:<6}.{x.extension:<2}"
+                files = files + 1
+                blocks = blocks + x.length
+                file_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
+            sys.stdout.write(f"{fullname} {x.first_block_number:04o} {x.length:>3} {file_date:<9}")
+            if i % 3 == 0:
+                sys.stdout.write("\n")
+            else:
+                sys.stdout.write("  ")
         if i % 3 != 0:
             sys.stdout.write("\n")
         unused = part.free()
@@ -1055,7 +1163,7 @@ class OS8Filesystem(AbstractFilesystem):
             sys.stdout.write("Filename    Type  Date       Length  Block\n")
             sys.stdout.write("--------    ----  ----       ------  -----\n")
             for entry in self.filter_entries_list(arg, include_all=True):
-                if options.get("full"):
+                if isinstance(entry, OS8Path) and options.get("full"):
                     words = [f"{x:04o}" for x in entry.words]
                     sys.stdout.write(f"{entry}  {words}\n")
                 else:
@@ -1086,7 +1194,7 @@ class OS8Filesystem(AbstractFilesystem):
             if end is None or end > entry.get_length() - 1:
                 end = entry.get_length() - 1
             for block_number in range(start, end + 1):
-                words = self.read_words_block(entry.file_position + block_number)
+                words = self.read_words_block(entry.first_block_number + block_number)
                 sys.stdout.write(f"\nBLOCK NUMBER   {block_number:08}\n")
                 oct_dump(words)
         else:
@@ -1109,23 +1217,23 @@ class OS8Filesystem(AbstractFilesystem):
         Create an empty OS/8 filesystem
         """
         self = cls(file_or_dev)
-        self.current_partition = 0
         assert isinstance(self.dev, BlockDevice12Bit), "OS/8 filesystem requires a 12-bit block device"
         self.number_of_blocks = self.dev.get_size() // BLOCK_SIZE
+        # If the filesystem has only one partition, set it as the current partition
+        self.current_partition = 0 if self.num_of_partitions == 1 else None
         # Initialize the partitions
         for partition_number in range(0, self.num_of_partitions):
             partition = OS8Partition(self, partition_number)
             partition.initialize(**kwargs)
         return self
 
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
-
     def get_pwd(self) -> str:
-        if self.current_partition == 0:
+        if self.num_of_partitions == 1 or self.current_partition is None:
             return ""
         else:
             return f"[{self.current_partition}]"
+
+    def path_join(self, path: str, *paths: str) -> str:
+        """Join directory path and filename"""
+        p = [x for x in [path] + list(paths) if x and x != "/"]
+        return "".join(p)

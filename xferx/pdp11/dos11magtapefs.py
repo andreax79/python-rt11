@@ -26,7 +26,7 @@ import sys
 import typing as t
 from datetime import date
 
-from ..abstract import AbstractDirectoryEntry, AbstractFile, AbstractFilesystem
+from ..abstract import XFERXPath, AbstractFile, AbstractFilesystem
 from ..commons import BLOCK_SIZE, READ_FILE_FULL, filename_match
 from ..device.abstract import AbstractDevice
 from ..device.tape import Tape
@@ -53,13 +53,11 @@ RECORD_SIZE = 512
 
 class DOS11MagTapeFile(AbstractFile):
     entry: "DOS11MagTapeDirectoryEntry"
-    closed: bool
     size: int  # size in bytes
     content: bytes  # file content
 
     def __init__(self, entry: "DOS11MagTapeDirectoryEntry"):
         self.entry = entry
-        self.closed = False
         self.size = entry.size
         entry.fs.dev.tape_seek(entry.tape_pos)
         self.content = entry.fs.dev.tape_read_file()[HEADER_RECORD_SIZE:]
@@ -106,17 +104,11 @@ class DOS11MagTapeFile(AbstractFile):
         """
         return BLOCK_SIZE
 
-    def close(self) -> None:
-        """
-        Close the file
-        """
-        self.closed = True
-
     def __str__(self) -> str:
         return self.entry.fullname
 
 
-class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
+class DOS11MagTapeDirectoryEntry(XFERXPath):
     """
     DOS-11 MagTape File Header
 
@@ -138,7 +130,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
 
     fs: "DOS11MagTapeFilesystem"
     uic: UIC = DEFAULT_UIC
-    filename: str = ""
+    stem: str = ""
     extension: str = ""
     raw_creation_date: int = 0
     protection_code: int = 0  # System Programmers Manual, Pag 140
@@ -154,7 +146,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         fs: "DOS11MagTapeFilesystem",
         tape_pos: int,
         uic: UIC,
-        filename: str,
+        stem: str,
         extension: str,
         creation_date: t.Optional[date] = None,  # optional creation date
         protection_code: int = DEFAULT_PROTECTION_CODE,
@@ -163,7 +155,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         self = DOS11MagTapeDirectoryEntry(fs)
         self.tape_pos = tape_pos
         self.uic = uic
-        self.filename = filename
+        self.stem = stem
         self.extension = extension
         self.raw_creation_date = date_to_dos11(creation_date) if creation_date is not None else 0
         self.protection_code = protection_code
@@ -189,7 +181,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
             self.raw_creation_date,
             fnam3,
         ) = struct.unpack_from(HEADER_RECORD, buffer, 0)
-        self.filename = rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2) + rad50_word_to_asc(fnam3)  # RAD50 chars
+        self.stem = rad50_word_to_asc(fnam1) + rad50_word_to_asc(fnam2) + rad50_word_to_asc(fnam3)  # RAD50 chars
         self.extension = rad50_word_to_asc(ftyp)  # RAD50 chars
         self.uic = UIC.from_word(fuic)
         self.size = size - HEADER_RECORD_SIZE
@@ -201,9 +193,9 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         """
         buffer = bytearray(HEADER_RECORD_SIZE)
         # Convert filename to RAD50 words
-        fnam1 = asc_to_rad50_word(self.filename[:3])
-        fnam2 = asc_to_rad50_word(self.filename[3:6])
-        fnam3 = asc_to_rad50_word(self.filename[6:9])
+        fnam1 = asc_to_rad50_word(self.stem[:3])
+        fnam2 = asc_to_rad50_word(self.stem[3:6])
+        fnam3 = asc_to_rad50_word(self.stem[6:9])
         ftyp = asc_to_rad50_word(self.extension)
         fuic = self.uic.to_word()
         # Pack the data into the buffer
@@ -221,17 +213,24 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         """Length in blocks"""
         return int(math.ceil(self.size / BLOCK_SIZE))
 
+    def is_dir(self) -> bool:
+        return False
+
     @property
+    def parent(self) -> "UserFileDirectory":
+        """The logical parent"""
+        return UserFileDirectory(self.fs, self.uic)
+
     def is_empty(self) -> bool:
-        return self.filename == "" and self.extension == ""
+        return self.stem == "" and self.extension == ""
 
     @property
     def fullname(self) -> str:
-        return f"{self.uic or ''}{self.filename}.{self.extension}"
+        return f"{self.uic or ''}{self.stem}.{self.extension}"
 
     @property
-    def basename(self) -> str:
-        return f"{self.filename}.{self.extension}"
+    def name(self) -> str:
+        return f"{self.stem}.{self.extension}"
 
     def get_length(self, fork: t.Optional[str] = None) -> int:
         """
@@ -260,7 +259,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
         Delete the file
         """
         self.uic = DEFAULT_UIC
-        self.filename = ""
+        self.stem = ""
         self.extension = ""
         self.raw_creation_date = 0
         self.protection_code = 0
@@ -275,7 +274,7 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
 
     def __str__(self) -> str:
         return (
-            f"{self.filename:>9}."
+            f"{self.stem:>9}."
             f"{self.extension:<3} "
             f"{self.uic.to_wide_str() if self.uic else '':<9}  "
             f"<{self.protection_code:o}> "
@@ -285,6 +284,102 @@ class DOS11MagTapeDirectoryEntry(AbstractDirectoryEntry):
 
     def __repr__(self) -> str:
         return str(self)
+
+
+class UserFileDirectory(XFERXPath):
+    fs: "DOS11MagTapeFilesystem"
+    uic: UIC
+
+    def __init__(self, fs: "DOS11MagTapeFilesystem", uic: UIC):
+        self.fs = fs
+        self.uic = uic
+
+    @property
+    def length(self) -> int:
+        """Length in blocks"""
+        return 0
+
+    def is_dir(self) -> bool:
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self.fs.get_root()
+
+    def is_empty(self) -> bool:
+        return False
+
+    @property
+    def fullname(self) -> str:
+        return f"{self.name}"
+
+    @property
+    def name(self) -> str:
+        return f"{self.uic}"
+
+    def get_block_size(self) -> int:
+        """
+        Get file block size in bytes
+        """
+        return BLOCK_SIZE
+
+    def open(self, file_mode: t.Optional[str] = None, fork: t.Optional[str] = None) -> DOS11MagTapeFile:
+        """
+        Open a file
+        """
+        raise OSError(errno.EISDIR, os.strerror(errno.EISDIR))
+
+    def iterdir(
+        self,
+        pattern: t.Optional[str] = None,
+        include_all: bool = False,
+        wildcard: bool = True,
+    ) -> t.Iterator["DOS11MagTapeDirectoryEntry"]:
+        for entry in self.fs.read_file_headers(uic=self.uic):
+            if filename_match(entry.name, pattern, wildcard):
+                if include_all or not entry.is_empty():
+                    yield entry
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+class DOS11MagTapeRootDirectory(XFERXPath):
+    fs: "DOS11MagTapeFilesystem"
+
+    @property
+    def fullname(self) -> str:
+        """Name with path"""
+        return ""
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return ""
+
+    def is_dir(self) -> bool:
+        """Is a directory"""
+        return True
+
+    def is_mount(self) -> bool:
+        """Is root directory"""
+        return True
+
+    @property
+    def parent(self) -> XFERXPath:
+        """The logical parent"""
+        return self
+
+    def iterdir(self) -> t.Iterator["UserFileDirectory"]:
+        """
+        Get the Master File Directory entries
+        """
+        for uic in sorted(set([x.uic for x in self.fs.read_file_headers()])):
+            yield UserFileDirectory(self.fs, uic)
 
 
 class DOS11MagTapeFilesystem(AbstractFilesystem):
@@ -322,7 +417,7 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
 
     dev: Tape
 
-    uic: UIC = DEFAULT_UIC  # current User Identification Code
+    uic: t.Optional[UIC] = None  # current User Identification Code
 
     def __init__(self, file_or_device: t.Union["AbstractFile", "AbstractDevice"]):
         if isinstance(file_or_device, AbstractFile):
@@ -373,30 +468,52 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         expand: bool = True,
         wildcard: bool = True,
         uic: t.Optional[UIC] = None,
-    ) -> t.Iterator["DOS11MagTapeDirectoryEntry"]:
+    ) -> t.Iterator[t.Union["DOS11MagTapeDirectoryEntry", "UserFileDirectory"]]:
         if uic is None:
             uic = self.uic
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=wildcard, uic=uic)
-        for entry in self.read_file_headers(uic=uic):
-            if filename_match(entry.basename, pattern, wildcard):
-                if include_all or not entry.is_empty:
-                    yield entry
+        if uic is None:
+            yield from self.get_root().iterdir()
+        else:
+            for entry in self.read_file_headers(uic=uic):
+                if filename_match(entry.name, pattern, wildcard):
+                    if include_all or not entry.is_empty():
+                        yield entry
 
     @property
-    def entries_list(self) -> t.Iterator["DOS11MagTapeDirectoryEntry"]:
-        for entry in self.read_file_headers(uic=self.uic):
-            if not entry.is_empty:
-                yield entry
+    def entries_list(self) -> t.Iterator[t.Union["DOS11MagTapeDirectoryEntry", "UserFileDirectory"]]:
+        if self.uic is None:
+            yield from self.get_root().iterdir()
+        else:
+            for entry in self.read_file_headers(uic=self.uic):
+                if not entry.is_empty():
+                    yield entry
 
-    def get_file_entry(self, fullname: str) -> DOS11MagTapeDirectoryEntry:
+    def get_file_entry(
+        self, fullname: str
+    ) -> t.Union["DOS11MagTapeRootDirectory", "DOS11MagTapeDirectoryEntry", "UserFileDirectory"]:
         fullname = dos11_canonical_filename(fullname)
         if not fullname:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
-        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
-        try:
-            return next(self.filter_entries_list(basename, uic=uic, wildcard=False))
-        except StopIteration:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+        uic, name = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        if not uic:
+            raise FileNotFoundError(errno.ENOENT, "No UIC specified")
+        if not name:
+            try:
+                return UserFileDirectory(self, UIC.from_str(fullname, strict=True))
+            except Exception:
+                raise FileNotFoundError(errno.ENOENT, "Invalid UIC specified")
+        else:
+            try:
+                return next(self.filter_entries_list(name, uic=uic, wildcard=False))
+            except StopIteration:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), fullname)
+
+    def get_root(self) -> "DOS11MagTapeRootDirectory":
+        """
+        Get the root directory
+        """
+        return DOS11MagTapeRootDirectory(self)
 
     def write_bytes(
         self,
@@ -425,21 +542,23 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         protection_code: int = metadata.get("protection_code", DEFAULT_PROTECTION_CODE)  # type: ignore
         creation_date: t.Optional[date] = metadata.get("creation_date")  # type: ignore
         # Delete the existing file
-        uic, basename = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        uic, name = dos11_split_fullname(fullname=fullname, wildcard=False, uic=self.uic)
+        if not uic:
+            raise FileNotFoundError(errno.ENOENT, "No UIC specified")
         try:
-            self.get_file_entry(basename).delete()  # type: ignore
+            self.get_file_entry(name).delete()  # type: ignore
         except FileNotFoundError:
             pass
         # Find the position for the new file
         tape_pos = self.dev.tape_pos - 4  # tape mark size
         self.dev.tape_truncate()
         # Create the new directory entry
-        filename, extension = basename.split(".", 1)  # type: ignore
+        stem, extension = name.split(".", 1)  # type: ignore
         entry = DOS11MagTapeDirectoryEntry.new(
             fs=self,
             tape_pos=tape_pos,
             uic=uic,
-            filename=filename,
+            stem=stem,
             extension=extension,
             creation_date=creation_date,
             protection_code=protection_code,
@@ -467,8 +586,8 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         Listing of all UIC
         """
         sys.stdout.write(f"{volume_id}:\n\n")
-        for uic in sorted(set([x.uic for x in self.read_file_headers(uic=ANY_UIC)])):
-            sys.stdout.write(f"{uic.to_wide_str()}\n")
+        for entry in self.get_root().iterdir():
+            sys.stdout.write(f"{entry.uic.to_wide_str()}\n")
 
     def dir(self, volume_id: str, pattern: t.Optional[str], options: t.Dict[str, bool]) -> None:
         """
@@ -478,23 +597,23 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         files = 0
         blocks = 0
         uic, pattern = dos11_split_fullname(fullname=pattern, wildcard=True, uic=self.uic)
+        if uic is None:
+            self.show_accounts(volume_id, options)
+            return
         dt = date.today().strftime('%y-%b-%d').upper()
         sys.stdout.write(f"DIRECTORY {volume_id}: {uic}\n\n{dt}\n\n")
         for x in self.filter_entries_list(pattern, uic=uic, include_all=True):
-            if x.is_empty:
-                continue
-            i = i + 1
-            if x.is_empty:
-                continue
-            fullname = x.is_empty and x.filename or "%-6s.%-3s" % (x.filename, x.extension)
-            creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
-            attr = ""
-            uic_str = x.uic.to_wide_str() if uic.has_wildcard else ""
-            sys.stdout.write(
-                f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}> {uic_str}\n"
-            )
-            blocks += x.length
-            files += 1
+            if isinstance(x, DOS11MagTapeDirectoryEntry) and not x.is_empty():
+                i = i + 1
+                fullname = x.is_empty() and x.stem or "%-6s.%-3s" % (x.stem, x.extension)
+                creation_date = x.creation_date and x.creation_date.strftime("%d-%b-%y").upper() or ""
+                attr = ""
+                uic_str = x.uic.to_wide_str() if uic.has_wildcard else ""
+                sys.stdout.write(
+                    f"{fullname:>10s} {x.length:>5d}{attr:1} {creation_date:>9s} <{x.protection_code:03o}> {uic_str}\n"
+                )
+                blocks += x.length
+                files += 1
         sys.stdout.write("\n")
         sys.stdout.write(f"TOTL BLKS: {blocks:5}\n")
         sys.stdout.write(f"TOTL FILES: {files:4}\n")
@@ -507,12 +626,6 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
             sys.stdout.write("     --------    ---    ------ ----         -----\n")
             for entry in self.read_file_headers(uic=ANY_UIC):
                 sys.stdout.write(f"{entry}\n")
-
-    def get_size(self) -> int:
-        """
-        Get filesystem size in bytes
-        """
-        return self.dev.get_size()
 
     @classmethod
     def initialize(
@@ -527,25 +640,15 @@ class DOS11MagTapeFilesystem(AbstractFilesystem):
         self.dev.tape_truncate()
         return self
 
-    def chdir(self, fullname: str) -> bool:
+    def chdir(self, entry: t.Optional[XFERXPath]) -> None:
         """
         Change the current User Identification Code
         """
-        try:
-            self.uic = UIC.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
-
-    def isdir(self, fullname: str) -> bool:
-        """
-        Check if the given path is an UIC
-        """
-        try:
-            UIC.from_str(fullname, strict=True)
-            return True
-        except Exception:
-            return False
+        if entry is None:
+            self.uic = None
+        else:
+            assert isinstance(entry, UserFileDirectory)
+            self.uic = entry.uic
 
     def path_join(self, path: str, *paths: str) -> str:
         """
