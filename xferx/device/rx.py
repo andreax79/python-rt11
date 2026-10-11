@@ -185,7 +185,12 @@ class RXBlockDevice(BlockDevice):
 
     def __init__(self, file: "AbstractFile"):
         super().__init__(file)
-        self.sector_size = get_sector_size(self.size)
+        if file.name.lower().endswith(".rx01"):
+            self.sector_size = RX01_SECTOR_SIZE
+        elif file.name.lower().endswith(".rx02"):
+            self.sector_size = RX02_SECTOR_SIZE
+        else:
+            self.sector_size = get_sector_size(self.size)
         self.is_rx = self.sector_size in (RX01_SECTOR_SIZE, RX02_SECTOR_SIZE)
 
     def read_block(

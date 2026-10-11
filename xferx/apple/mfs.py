@@ -130,6 +130,11 @@ class File(AbstractFile):
         self.file_mode = file_mode or IMAGE
         self.fork = check_fork(fork)
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

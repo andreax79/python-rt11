@@ -154,6 +154,11 @@ class AppleDOSFile(AbstractFile):
         else:
             self.file_mode = IMAGE
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

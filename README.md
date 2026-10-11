@@ -11,7 +11,8 @@ XFERX is an utility for transferring files between various file systems.
 | DOS-11 MagTape    | Yes               | Yes               | Yes               | Yes               | No                |
 | XXDP              | Yes               | Yes               | Yes               | No                | N/A               |
 | CAPS-11           | Yes               | Yes               | Yes               | Yes               | N/A               |
-| Files-11          | Yes               | No                | No                | No                | No                |
+| Files-11 (ODS-1)  | Yes               | No                | No                | No                | No                |
+| Files-11 (ODS-2)  | Yes               | No                | No                | No                | No                |
 | SOLO              | Yes               | Yes               | Yes               | Yes               | N/A               |
 | PDP-7 UNIX v0     | Yes               | Yes               | Yes               | No                | Yes               |
 | PDP-7 DECsys      | Yes               | Yes               | Yes               | Yes               | N/A               |

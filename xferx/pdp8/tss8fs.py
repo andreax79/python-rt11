@@ -315,6 +315,11 @@ class TSS8File(AbstractFile):
             self.file_mode = IMAGE if entry.extension.upper() in BINARY_EXTENSIONS else ASCII
         self.size = entry.length * TSS8_BLOCK_SIZE_BYTES
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

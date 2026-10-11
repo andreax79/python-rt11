@@ -73,6 +73,11 @@ class DGDOSMagTapeFile(AbstractFile):
         self._content: t.Optional[bytes] = None
 
     @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
+    @property
     def content(self) -> bytes:
         if self._content is None:
             self.entry.fs.dev.tape_seek(self.entry.tape_pos)

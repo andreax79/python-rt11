@@ -313,6 +313,11 @@ class DMSFile(AbstractFile):
         else:
             self.file_mode = ASCII if entry.extension.upper() == EXT_ASCII else IMAGE
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

@@ -246,6 +246,11 @@ class DGDOSDumpFile(AbstractFile):
         self.entry = entry
         self.file_mode = file_mode or IMAGE
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

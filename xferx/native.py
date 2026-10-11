@@ -76,6 +76,11 @@ class NativeFile(AbstractFile):
         self.size = native_path.stat().st_size
         self._lock = threading.Lock()
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return os.path.basename(self.filename)
+
     def read_block(
         self,
         block_number: int,

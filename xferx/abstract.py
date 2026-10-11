@@ -54,6 +54,11 @@ class AbstractFile(ABC):
     ) -> None:
         self.close()
 
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Final path component"""
+
     @abstractmethod
     def read_block(
         self,

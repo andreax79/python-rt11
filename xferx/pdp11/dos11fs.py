@@ -353,6 +353,11 @@ class DOS11File(AbstractFile):
         self.contiguous = entry.contiguous
         self.length = entry.length
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

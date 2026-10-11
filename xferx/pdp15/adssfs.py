@@ -167,6 +167,11 @@ class ADSSFile(AbstractFile):
         self.entry = entry
         self.file_mode = file_mode or get_file_mode(entry.name)
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

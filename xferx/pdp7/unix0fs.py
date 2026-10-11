@@ -152,8 +152,8 @@ def logical_to_physical_block_number(block_number: int) -> int:
 class UNIX0File(UNIXFile):
     inode: "UNIX0Inode"
 
-    def __init__(self, inode: "UNIX0Inode", file_mode: t.Optional[str] = None):
-        super().__init__(inode)
+    def __init__(self, inode: "UNIX0Inode", name: str, file_mode: t.Optional[str] = None):
+        super().__init__(inode, name)
         self.file_mode = file_mode or IMAGE
 
     def read_words_block(
@@ -640,7 +640,7 @@ class UNIX0DirectoryEntry(UNIXDirectoryEntry):
         """
         Open the file
         """
-        return UNIX0File(self.inode, file_mode)
+        return UNIX0File(self.inode, self.name, file_mode)
 
 
 class Dirent0(Dirent):
@@ -701,7 +701,7 @@ class UNIX0Directory(UNIXDirectory):
         """
         if not inode.is_dir():
             raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR))
-        with UNIX0File(inode) as f:  # type: ignore
+        with UNIX0File(inode, str(inode.inode_num)) as f:  # type: ignore
             words = f.read_words_block(0, READ_FILE_FULL)
         self = UNIX0Directory(fs, inode)
         self.entries = []
@@ -746,7 +746,7 @@ class UNIX0Directory(UNIXDirectory):
         num_of_blocks = math.ceil(len(words) / V0_WORDS_PER_BLOCK)
         words = words + [0] * (V0_WORDS_PER_BLOCK * num_of_blocks - len(words))
         # Write the directory entries
-        with UNIX0File(self.inode) as f:  # type: ignore
+        with UNIX0File(self.inode, str(self.inode.inode_num)) as f:  # type: ignore
             f.write_words_block(words, 0, num_of_blocks)
 
 

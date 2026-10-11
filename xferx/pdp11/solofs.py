@@ -158,6 +158,11 @@ class SOLOFile(AbstractFile):
         else:
             self.file_mode = ASCII if self.entry.file_type_id == FILE_TYPE_ASCII else IMAGE
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,
@@ -238,6 +243,11 @@ class SOLOSegment(AbstractFile):
 
     def __init__(self, entry: "SOLOSegmentDirectoryEntry"):
         self.entry = entry
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
 
     def read_block(
         self,

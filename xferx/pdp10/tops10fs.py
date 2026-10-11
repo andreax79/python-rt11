@@ -311,6 +311,11 @@ class TOPS10File(AbstractFile):
             self.file_mode = file_mode
         self.entry = entry
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

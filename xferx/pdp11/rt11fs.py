@@ -151,6 +151,11 @@ class RT11File(AbstractFile):
         self.entry = entry
         self.size = entry.length * BLOCK_SIZE
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

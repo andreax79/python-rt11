@@ -62,6 +62,11 @@ class DOS11MagTapeFile(AbstractFile):
         entry.fs.dev.tape_seek(entry.tape_pos)
         self.content = entry.fs.dev.tape_read_file()[HEADER_RECORD_SIZE:]
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

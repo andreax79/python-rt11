@@ -166,6 +166,11 @@ class PascalFile(AbstractFile):
     def __init__(self, entry: "PascalPath"):
         self.entry = entry
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

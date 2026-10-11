@@ -118,6 +118,11 @@ class OS32TapeFile(AbstractFile):
         self.size = len(self.content)
         self.number_of_blocks = math.ceil(self.size / OS32_BLOCK_SIZE)
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

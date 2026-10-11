@@ -184,10 +184,15 @@ class RTFSBlockCache(BlockCache):
 
 
 class RSTSFile(AbstractFile):
-    ufd_name_entry: "UFDNameEntry"
+    entry: "UFDNameEntry"
 
-    def __init__(self, ufd_name_entry: "UFDNameEntry"):
-        self.ufd_name_entry = ufd_name_entry
+    def __init__(self, entry: "UFDNameEntry"):
+        self.entry = entry
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
 
     def read_block(
         self,
@@ -198,20 +203,20 @@ class RSTSFile(AbstractFile):
         Read block(s) of data from the file
         """
         if number_of_blocks == READ_FILE_FULL:
-            number_of_blocks = self.ufd_name_entry.account_entry.usiz
+            number_of_blocks = self.entry.account_entry.usiz
         if (
             self.closed
             or block_number < 0
             or number_of_blocks < 0
-            or block_number + number_of_blocks > self.ufd_name_entry.account_entry.usiz
+            or block_number + number_of_blocks > self.entry.account_entry.usiz
         ):
             raise OSError(errno.EIO, os.strerror(errno.EIO))
-        cache = self.ufd_name_entry.fs.new_cache()
+        cache = self.entry.fs.new_cache()
         # Get the blocks to be read
-        blocks = self.ufd_name_entry.get_blocks(cache=cache)[block_number : block_number + number_of_blocks]
+        blocks = self.entry.get_blocks(cache=cache)[block_number : block_number + number_of_blocks]
         data = bytearray()
         for dcn in blocks:
-            data.extend(cache.read_block(self.ufd_name_entry.fs.dcn_to_lbn(dcn)))
+            data.extend(cache.read_block(self.entry.fs.dcn_to_lbn(dcn)))
         return bytes(data)
 
     def write_block(
@@ -229,16 +234,16 @@ class RSTSFile(AbstractFile):
         """
         Get file size in bytes
         """
-        return self.ufd_name_entry.get_size()
+        return self.entry.get_size()
 
     def get_block_size(self) -> int:
         """
         Get file block size in bytes
         """
-        return self.ufd_name_entry.get_block_size()
+        return self.entry.get_block_size()
 
     def __str__(self) -> str:
-        return str(self.ufd_name_entry)
+        return str(self.entry)
 
 
 class Link:

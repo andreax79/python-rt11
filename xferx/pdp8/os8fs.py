@@ -226,6 +226,11 @@ class OS8File(AbstractFile):
             self.file_mode = ASCII if entry.extension.upper() in ASCII_EXTENSIONS else IMAGE
         self.size = entry.length * OS8_BLOCK_SIZE_BYTES
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

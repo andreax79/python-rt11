@@ -167,6 +167,11 @@ class DECSysFile(AbstractFile):
         else:
             self.file_mode = entry.raw_file_type.file_mode
 
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.entry.name
+
     def read_block(
         self,
         block_number: int,

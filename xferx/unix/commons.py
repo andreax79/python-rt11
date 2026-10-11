@@ -134,9 +134,16 @@ def format_time(t: int) -> str:
 
 class UNIXFile(AbstractFile):
     inode: "UNIXInode"
+    file_name: str
 
-    def __init__(self, inode: "UNIXInode"):
+    def __init__(self, inode: "UNIXInode", name: str):
         self.inode = inode
+        self.file_name = name
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.file_name
 
     def read_block(
         self,
@@ -451,7 +458,7 @@ class UNIXDirectoryEntry(XFERXPath):
         """
         Open a file
         """
-        return UNIXFile(self.inode)
+        return UNIXFile(self.inode, self.name)
 
     def __lt__(self, other: "UNIXDirectoryEntry") -> bool:
         return self.filename < other.filename
@@ -505,7 +512,7 @@ class UNIXDirectory:
         self = UNIXDirectory(fs, inode)
         if self.inode.is_dir():
             self.entries = []
-            with UNIXFile(self.inode) as f:
+            with UNIXFile(self.inode, str(self.inode.inode_num)) as f:
                 try:
                     while True:
                         data = f.read(struct.calcsize(self.fs.dir_format))

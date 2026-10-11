@@ -35,10 +35,17 @@ __all__ = ["GzipFile"]
 
 class GzipFile(AbstractFile):
     sector_size = BLOCK_SIZE
+    file_name: str
 
     def __init__(self, gzip_file: AbstractFile):
+        self.file_name = gzip_file.name
         self._buffered_reader = io.BufferedReader(_GzipReader(gzip_file))
         self._lock = threading.Lock()
+
+    @property
+    def name(self) -> str:
+        """Final path component"""
+        return self.file_name
 
     def read(self, size: t.Optional[int] = None) -> bytes:
         """Read bytes from the file, starting at the current position"""
