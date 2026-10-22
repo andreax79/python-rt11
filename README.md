@@ -38,6 +38,8 @@ XFERX is an utility for transferring files between various file systems.
 | Data General DOS/RDOS Dump    | Yes               | No                | No                | No                | No                |
 | Interdata OS/32               | Yes               | Yes               | Yes               | Yes               | N/A               |
 | Interdata OS/32 Backup Tape   | Yes               | Yes               | Yes               | Yes               | N/A               |
+| Microsoft Disk BASIC FAT8     | Yes               | Yes               | Yes               | No                | N/A               |
+| FAT12                         | Yes               | Yes               | Yes               | Yes               | Yes               |
 
 Installation
 ------------
@@ -288,7 +290,6 @@ Apple II Pascal
 
 * [Apple II Pascal 1.3](https://archive.org/details/apple-ii-pascal-1.3/page/n803/mode/2up)
 
-
 Apple II AppleDOS
 -----------------
 
@@ -306,3 +307,8 @@ Interdata OS/32
 
 * [OS/32 R8.02 Application Level Programmer](https://bitsavers.org/pdf/interdata/32bit/os32/1988_8.2/48-039F00R03_OS32_R08.2_Application_Level_Programmer_Reference_Manual_1988.pdf)
 * [OS/32 8.1 kit for the SimH Interdata 32 simulator](https://github.com/davygoat/simh-os32)
+
+Microsoft BASIC-80
+------------------
+
+* [Microsoft BASIC-80 5.0 Reference Manual](https://bitsavers.org/pdf/microsoft/cpm/Microsoft_BASIC-80_5.0_Reference_1979.pdf)

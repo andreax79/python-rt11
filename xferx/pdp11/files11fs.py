@@ -375,6 +375,32 @@ class Files11FileHeader:
     def __repr__(self) -> str:
         return str(self.__dict__)
 
+    def examine(self) -> str:
+        """
+        Examine the directory entry
+        """
+        return f"""\
+{self.name:<20}          File ID:  ({self.fnum},{self.fseq})
+Size:            {self.hibk}/{self.map_length}          Owner:    {self.uic}
+Created:     {files11_to_date(self.crdt, self.crti)}
+Revised:     {files11_to_date(self.rvdt, self.rvti)}
+Expires:     {files11_to_date(self.exdt) if self.exdt[0] != 0 else '<None specified>'}
+Linkcount:   {len(self.retrieval_pointers)}
+File organization:  {"Sequential" if self.rtyp == 0 else "Indexed"}
+Shelved state:      Online
+Caching attribute:  Writethrough
+File attributes:    Allocation: 9, Extend: 0, Global buffer count: 0, No version limit
+Record format:      Variable length, maximum 255 bytes, longest 10 bytes See note #1
+Record attributes:  Carriage return carriage control See note #2
+RMS attributes:     None
+Journaling enabled: None
+File protection:    System:RWED, Owner:RWED, Group:RWED, World:RWE
+Access Cntrl List:  None
+Client attributes:  None
+
+Total of 1 file, 1/9 blocks.
+"""
+
 
 class ODS1FileHeader(Files11FileHeader):
     """
@@ -1384,7 +1410,8 @@ class Files11Filesystem(AbstractRXBlockFilesystem):
         uic = None
         if arg:
             entry = self.get_file_entry(arg)
-            sys.stdout.write(dump_struct(entry.__dict__))
+            # sys.stdout.write(dump_struct(entry.__dict__))
+            sys.stdout.write(entry.header.examine())
             sys.stdout.write("\n\n")
             if entry.is_dir():
                 for x in entry.iterdir():

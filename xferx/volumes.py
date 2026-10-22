@@ -58,6 +58,8 @@ from .unix.unix7fs import UNIX7Filesystem
 from .interdata.os32fs import OS32Filesystem
 from .interdata.os32tapefs import OS32TapeFilesystem
 from .gzip_file import GzipFile
+from .fat.fat12 import FAT12Filesystem
+from .fat.fat8fs import FAT8Filesystem
 
 __all__ = [
     "Volumes",
@@ -100,6 +102,8 @@ FILESYSTEMS: t.Dict[str, t.Type[AbstractFilesystem]] = {
     "os32": OS32Filesystem,
     "os32mt": OS32TapeFilesystem,
     "tops10": TOPS10Filesystem,
+    "fat8": FAT8Filesystem,
+    "fat12": FAT12Filesystem,
 }
 
 
